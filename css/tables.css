@@ -1,0 +1,195 @@
+/* Styles for the class manager (left panel) and the annotations table (right
+   panel). Both live inside a `.panel` and reuse the theme variables and the
+   shared form-control styles from style.css. */
+
+/* ---------- Class manager ---------- */
+
+.registry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.registry-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.registry-row:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.registry-row .name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.registry-row .swatch {
+  flex: 0 0 auto;
+}
+
+/* The active-class selector: a hollow dot that fills when chosen. */
+.active-selector {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.active-selector:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.active-selector.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--surface-raised);
+}
+
+.no-class-label {
+  flex: 1 1 auto;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.event-type-row .kind-select {
+  flex: 0 0 auto;
+  padding: 4px 4px;
+}
+
+.hotkey-input {
+  flex: 0 0 auto;
+  width: 26px;
+  text-align: center;
+  padding: 4px 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Compact delete affordance shared by the class manager and the table. */
+.delete-button {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.delete-button:hover:not(:disabled) {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.add-registry-entry {
+  margin-top: 6px;
+  width: 100%;
+  color: var(--text-dim);
+}
+
+.add-registry-entry:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.event-types-heading {
+  margin-top: 12px;
+}
+
+/* ---------- Annotations table ---------- */
+
+.annotations-scroll {
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.annotations-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.annotations-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.annotations-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.annotations-table th.sortable:hover {
+  color: var(--text);
+}
+
+/* Sort-direction affordance on the active column. */
+.annotations-table th.sortable::after {
+  content: "";
+  display: inline-block;
+  width: 0.7em;
+  color: var(--accent);
+}
+
+.annotations-table th.sorted[data-direction="ascending"]::after { content: " ▲"; }
+.annotations-table th.sorted[data-direction="descending"]::after { content: " ▼"; }
+
+.annotations-table tbody td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.annotations-table tbody tr {
+  cursor: pointer;
+}
+
+.annotations-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.annotations-table tbody tr.at-current-frame {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.annotations-table tbody tr.selected {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.annotations-table .frame-cell {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.annotations-table .delete-cell {
+  width: 1%;
+  text-align: right;
+}
+
+.annotations-table .empty-message {
+  padding: 12px 8px;
+  color: var(--text-dim);
+  text-align: center;
+  white-space: normal;
+}

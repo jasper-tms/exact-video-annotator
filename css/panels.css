@@ -1,0 +1,51 @@
+/* Toast notifications and shared per-layer-type badge colors.
+   (Layer tab and detail styles live in style.css.) */
+
+.layer-type-video  { color: var(--accent);  border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.layer-type-points { color: #6fcf97;        border-color: color-mix(in srgb, #6fcf97 55%, var(--border)); }
+.layer-type-shapes { color: #c58af9;        border-color: color-mix(in srgb, #c58af9 55%, var(--border)); }
+.layer-type-events { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
+
+/* ---------- Toasts ---------- */
+
+.toast {
+  pointer-events: auto;   /* the container is pointer-events: none */
+  max-width: 420px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-leaving {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.toast-info {
+  border-left-color: var(--accent);
+}
+
+.toast-warning {
+  border-left-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface-raised));
+}
+
+.toast-error {
+  border-left-color: var(--error);
+  background: color-mix(in srgb, var(--error) 16%, var(--surface-raised));
+}

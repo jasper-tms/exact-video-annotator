@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>exact-video-annotator</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="css/panels.css">
+  <link rel="stylesheet" href="css/tables.css">
+  <!-- mp4box.js must be loaded before the engine (provides MP4Box and DataStream). -->
+  <script src="https://unpkg.com/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+  <!-- Pinned release tag, never a branch (see the engine README's consuming notes). -->
+  <script src="https://cdn.jsdelivr.net/gh/jasper-tms/exact-video-engine.js@v1.7.0/exact-video-engine.js"></script>
+</head>
+<body>
+  <header id="toolbar">
+    <span id="application-title">exact-video-annotator</span>
+    <span class="toolbar-group">
+      <button id="open-video-button" title="Open a video file">Open video</button>
+      <button id="import-annotations-button" title="Import an annotations JSON file">Import</button>
+      <button id="export-annotations-button" title="Export annotations as JSON">Export</button>
+    </span>
+    <span id="engine-tier-label" title="Which playback engine this clip got"></span>
+  </header>
+
+  <!-- First screenful: the canvas owns the screen. A slim icon rail on the
+       left holds the tools that are needed mid-interaction; transport and a
+       single-row layer tab bar sit below the canvas. Everything else lives
+       further down the page: scrolling the wheel over the canvas zooms,
+       scrolling it anywhere else scrolls the page down to the details. -->
+  <main id="viewport-section">
+    <nav id="tool-rail">
+      <button data-tool="select" class="rail-button" title="Select and move annotations (v)">➤</button>
+      <button data-tool="point" class="rail-button" title="Add points (p)">●</button>
+      <button data-tool="polygon" class="rail-button" title="Draw polygons (g)">⬠</button>
+      <button data-tool="line" class="rail-button" title="Draw lines (l)">╱</button>
+      <span class="rail-divider"></span>
+      <button id="undo-button" class="rail-button" title="Undo (Cmd/Ctrl+Z)" disabled>↩</button>
+      <button id="redo-button" class="rail-button" title="Redo (Shift+Cmd/Ctrl+Z)" disabled>↪</button>
+      <span class="rail-divider"></span>
+      <button id="fit-view-button" class="rail-button" title="Fit the view to the content (f)">⛶</button>
+    </nav>
+    <div id="canvas-column">
+      <div id="stage-container">
+        <canvas id="stage-canvas"></canvas>
+        <div id="drop-hint">
+          <p>Drop a video here, or use <strong>Open video</strong>.</p>
+          <p class="drop-hint-details">Videos are read lazily from disk — arbitrarily large
+             files are fine, and nothing is uploaded anywhere.</p>
+        </div>
+      </div>
+      <div id="transport-container"></div>
+      <div id="layer-tabs-container"></div>
+    </div>
+  </main>
+
+  <!-- Below the fold: details for the selected layer, then the shared
+       registries and the annotations table, with all the space they want. -->
+  <section id="details-section">
+    <div id="layer-detail-container" class="panel"></div>
+    <div id="class-manager-container" class="panel"></div>
+    <div id="annotations-table-container" class="panel"></div>
+  </section>
+
+  <!-- The engine paints into these; they are kept offscreen and composited
+       onto the stage canvas by the video layer. The container must have a
+       real size (the engine sizes its canvas backing store from its parent),
+       so it is positioned far offscreen rather than display: none. -->
+  <div id="video-host" aria-hidden="true">
+    <canvas id="video-engine-canvas"></canvas>
+    <video id="video-engine-element" muted playsinline></video>
+  </div>
+
+  <div id="toast-container" role="status" aria-live="polite"></div>
+
+  <input type="file" id="video-file-input" accept="video/*,.mp4,.mov,.webm,.m4v" hidden>
+  <input type="file" id="annotations-file-input" accept="application/json,.json" hidden>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
