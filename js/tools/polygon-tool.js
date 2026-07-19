@@ -88,6 +88,20 @@ export function createDrawingTool({
         // storing the vertex in that layer's local space.
         const layer = app.targetLayerForType('shapes');
         const localPoint = app.localFromWorld(layer, worldPoint);
+        // Clicking an existing shape of this same kind selects it rather than
+        // starting a new one on top of it.
+        const hit = layer.hitTest(localPoint, {
+          frame: app.currentFrame,
+          pixelsPerLocalUnit: app.viewer.stageTransformForLayer(layer).scale,
+        });
+        if (hit && layer.getItem(hit.itemId)?.kind === kind) {
+          app.setSelection({
+            layerId: layer.id, itemId: hit.itemId,
+            vertexIndex: hit.part === 'vertex' ? hit.vertexIndex : null,
+          });
+          app.viewer.requestRender();
+          return;
+        }
         inProgress = {
           app,
           layer,

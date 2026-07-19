@@ -34,11 +34,20 @@ export const pointTool = {
 
   onPointerDown(app, worldPoint, event) {
     const layer = app.targetLayerForType('points');
-    pendingPress = {
-      app,
-      layer,
-      localPoint: app.localFromWorld(layer, worldPoint),
-    };
+    const localPoint = app.localFromWorld(layer, worldPoint);
+    // Clicking an existing point selects it rather than stacking a new one on
+    // top; only empty space places a new point.
+    const hit = layer.hitTest(localPoint, {
+      frame: app.currentFrame,
+      pixelsPerLocalUnit: app.viewer.stageTransformForLayer(layer).scale,
+    });
+    if (hit) {
+      pendingPress = null;
+      app.setSelection({ layerId: layer.id, itemId: hit.itemId, vertexIndex: null });
+      app.viewer.requestRender();
+      return;
+    }
+    pendingPress = { app, layer, localPoint };
     app.viewer.requestRender();
   },
 

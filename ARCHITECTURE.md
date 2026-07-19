@@ -75,8 +75,14 @@ viewer.setOverlayPainter(fn|null);   // fn(context, renderState) drawn above all
 Zoom/pan interaction lives in the viewer (wheel or pinch to zoom about the
 cursor, middle-drag to pan) so it works in every tool; the select tool
 additionally pans on left-drags that start on empty space, via
-`viewer.beginPanFromPointerEvent(event)`. Space is exclusively play/pause. All
-other pointer events are forwarded to the active tool by `main.js`.
+`viewer.beginPanFromPointerEvent(event)`. When **no tool is selected** (clicking
+the active tool button again toggles it off), a left-drag pans as well. Space is
+exclusively play/pause. All other pointer events are forwarded to the active
+tool by `main.js`.
+
+The point/line/polygon tools hit-test their target layer on pointer-down, so
+clicking an existing annotation of the tool's own kind **selects** it instead of
+stacking a new one; only empty space creates.
 
 ### `js/layers/layer.js` — exports `class Layer extends EventTarget`
 
@@ -241,7 +247,9 @@ app.activeLayer;                     // the annotation layer new items go into
 app.activeClassId;                   // class assigned to newly created items
 app.selection;                       // { layerId, itemId, vertexIndex } | null
 app.setSelection(selectionOrNull);
-app.setActiveTool(toolId); app.activeTool;
+app.setActiveTool(toolId);           // toolId null clears the tool (drag pans)
+app.activeTool;
+app.deleteSelection();               // delete selected vertex/item; Delete key
 app.localFromWorld(layer, worldPoint); app.worldFromLocal(layer, localPoint);
 app.seekToFrame(frameIndex);         // clamps, delegates to engine
 app.currentFrame;                    // engine.currentFrame or 0
@@ -298,7 +306,7 @@ app events; they never poll.
 | `p` | point tool |
 | `g` | polygon tool |
 | `l` | line tool |
-| `Delete`/`Backspace` | delete selected item (or selected vertex) |
+| `Delete`/`Backspace` | delete selected item (or selected vertex) — works in any tool |
 | `Escape` | cancel in-progress shape / clear selection |
 | `Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z` | undo, redo |
 | event-type hotkeys | user-defined, case-sensitive |

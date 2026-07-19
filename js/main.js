@@ -71,6 +71,23 @@ class Application extends EventTarget {
     this.viewer.requestRender();
   }
 
+  /** Delete the current selection — a single vertex when one is selected,
+      otherwise the whole item. Returns true if something was deleted. Bound to
+      Delete / Backspace globally, so it works no matter which tool is active. */
+  deleteSelection() {
+    const selection = this.selection;
+    if (!selection) return false;
+    const layer = this.viewer.layers.find((candidate) => candidate.id === selection.layerId);
+    if (!layer?.isEditable) return false;
+    const command = (selection.vertexIndex !== null && layer.commandDeleteVertex)
+      ? layer.commandDeleteVertex(selection.itemId, selection.vertexIndex)
+      : layer.commandDeleteItem(selection.itemId);
+    if (!command) return false;
+    this.setSelection(null);
+    this.undoHistory.execute(command);
+    return true;
+  }
+
   /* ---------- Playback ---------- */
 
   get currentFrame() { return this.engine?.currentFrame ?? 0; }
@@ -224,12 +241,14 @@ class Application extends EventTarget {
     [selectTool, pointTool, polygonTool, lineTool].map((tool) => [tool.id, tool]));
 
   setActiveTool(toolId) {
-    const tool = this.toolRegistry[toolId];
-    if (!tool || tool === this.activeTool) return;
+    // A null toolId means "no tool selected" — a canvas drag then pans the view.
+    const tool = toolId === null ? null : this.toolRegistry[toolId];
+    if (toolId !== null && !tool) return;   // unknown tool id
+    if (tool === this.activeTool) return;   // already in this state
     this.activeTool?.deactivate?.(this);
     this.activeTool = tool;
-    tool.activate?.(this);
-    this.viewer.stageCanvas.style.cursor = tool.cursor ?? 'default';
+    tool?.activate?.(this);
+    this.viewer.stageCanvas.style.cursor = tool ? (tool.cursor ?? 'default') : 'grab';
     this.dispatchEvent(new CustomEvent('tool-changed'));
     this.viewer.requestRender();
   }
@@ -290,7 +309,12 @@ const engineTierLabel = document.getElementById('engine-tier-label');
 
 app.viewer = new Viewer(stageCanvas);
 app.viewer.toolDelegate = {
-  onPointerDown: (worldPoint, event) => app.activeTool?.onPointerDown?.(app, worldPoint, event),
+  onPointerDown: (worldPoint, event) => {
+    // No tool selected: a canvas drag pans the view (the viewer takes over the
+    // move/up of this pointer once panning has begun).
+    if (!app.activeTool) { app.viewer.beginPanFromPointerEvent(event); return; }
+    app.activeTool.onPointerDown?.(app, worldPoint, event);
+  },
   onPointerMove: (worldPoint, event) => app.activeTool?.onPointerMove?.(app, worldPoint, event),
   onPointerUp: (worldPoint, event) => app.activeTool?.onPointerUp?.(app, worldPoint, event),
   onDoubleClick: (worldPoint, event) => app.activeTool?.onDoubleClick?.(app, worldPoint, event),
@@ -438,7 +462,11 @@ redoButton.addEventListener('click', () => app.undoHistory.redo());
 
 const toolButtons = [...document.querySelectorAll('#tool-rail button[data-tool]')];
 for (const button of toolButtons) {
-  button.addEventListener('click', () => app.setActiveTool(button.dataset.tool));
+  button.addEventListener('click', () => {
+    const toolId = button.dataset.tool;
+    // Clicking the already-active tool clears it (no tool → a drag pans).
+    app.setActiveTool(app.activeTool?.id === toolId ? null : toolId);
+  });
 }
 function reflectActiveTool() {
   for (const button of toolButtons) {
@@ -589,6 +617,13 @@ window.addEventListener('keydown', (event) => {
   }
 
   if (app.activeTool?.onKeyDown?.(app, event)) { event.preventDefault(); return; }
+
+  // Delete/Backspace removes the selection regardless of the active tool (the
+  // active tool got first refusal above, e.g. Backspace while drawing a shape).
+  if ((event.key === 'Delete' || event.key === 'Backspace') && app.deleteSelection()) {
+    event.preventDefault();
+    return;
+  }
 
   if (app.runKeyHandlers(event)) event.preventDefault();
 });

@@ -120,22 +120,13 @@ export const selectTool = {
   },
 
   onKeyDown(app, event) {
-    if (event.key === 'Escape') {
-      if (app.selection) { app.setSelection(null); return true; }
-      return false;
+    // Delete/Backspace is handled globally (app.deleteSelection); this tool only
+    // owns Escape, which clears the current selection.
+    if (event.key === 'Escape' && app.selection) {
+      app.setSelection(null);
+      return true;
     }
-    if (event.key !== 'Delete' && event.key !== 'Backspace') return false;
-    const selection = app.selection;
-    if (!selection) return false;
-    const layer = app.viewer.layers.find((candidate) => candidate.id === selection.layerId);
-    if (!layer?.isEditable) return false;
-    const command = (selection.vertexIndex !== null && layer.commandDeleteVertex)
-      ? layer.commandDeleteVertex(selection.itemId, selection.vertexIndex)
-      : layer.commandDeleteItem(selection.itemId);
-    if (!command) return false;
-    app.setSelection(null);
-    app.undoHistory.execute(command);
-    return true;
+    return false;
   },
 
   drawOverlay(context, renderState) {},
