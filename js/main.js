@@ -12,7 +12,6 @@ import {
   createEmptyDocument, documentToJson, documentFromJson, newId,
   autosaveKey, saveAutosave, loadAutosave,
 } from './document.js';
-import { selectTool } from './tools/select-tool.js';
 import { pointTool } from './tools/point-tool.js';
 import { polygonTool } from './tools/polygon-tool.js';
 import { lineTool } from './tools/line-tool.js';
@@ -153,12 +152,29 @@ class Application extends EventTarget {
     this.dispatchEvent(new CustomEvent('layers-changed'));
   }
 
-  targetLayerForType(type) {
+  /** The layer new items of this type would go into — the active layer if it
+      matches, else the first layer of that type — or null when none exists.
+      Never creates a layer, so it is safe to call on every pointer move. */
+  findAnnotationLayerForType(type) {
     const active = this.activeLayer;
     if (active?.type === type) return active;
-    const existing = this.annotationLayers.find((layer) => layer.type === type);
-    if (existing) return existing;
-    return this.addAnnotationLayer(type);
+    return this.annotationLayers.find((layer) => layer.type === type) ?? null;
+  }
+
+  targetLayerForType(type) {
+    return this.findAnnotationLayerForType(type) ?? this.addAnnotationLayer(type);
+  }
+
+  /** Reorder the document's layer list to match the viewer's stack order
+      (called after layer tabs are dragged into a new order). */
+  synchronizeDocumentLayerOrder() {
+    const annotationOrderIds = this.annotationLayers.map((layer) => layer.id);
+    const documentLayerById = new Map(
+      this.annotationDocument.layers.map((documentLayer) => [documentLayer.id, documentLayer]));
+    this.annotationDocument.layers = annotationOrderIds
+      .map((id) => documentLayerById.get(id))
+      .filter((documentLayer) => documentLayer !== undefined);
+    this.markDocumentChanged();
   }
 
   addAnnotationLayer(type) {
@@ -238,7 +254,7 @@ class Application extends EventTarget {
   /* ---------- Tools ---------- */
 
   toolRegistry = Object.fromEntries(
-    [selectTool, pointTool, polygonTool, lineTool].map((tool) => [tool.id, tool]));
+    [pointTool, polygonTool, lineTool].map((tool) => [tool.id, tool]));
 
   setActiveTool(toolId) {
     // A null toolId means "no tool selected" — a canvas drag then pans the view.
@@ -394,6 +410,11 @@ function attachEngine(engine, { name, sizeBytes }) {
     app.showToast('This clip could not be indexed — frame numbers are approximate.', { kind: 'warning' });
   }
 
+  // A freshly loaded video starts out as the selected layer, so its tab
+  // highlights and its facts appear in the detail panel. (Set after any
+  // autosave restore, which resets the selected layer.)
+  app.setActiveLayer(videoLayer.id);
+
   app.dispatchEvent(new CustomEvent('video-loaded'));
   app.dispatchEvent(new CustomEvent('frame-changed'));
 }
@@ -475,7 +496,7 @@ function reflectActiveTool() {
 }
 app.addEventListener('tool-changed', reflectActiveTool);
 // The initial tool is set during bootstrap, before this listener exists, so sync
-// the button highlight once now (otherwise 'select' stays unhighlighted at load).
+// the button highlight once now (otherwise 'point' stays unhighlighted at load).
 reflectActiveTool();
 
 document.getElementById('fit-view-button').addEventListener('click', () => app.viewer.fitToContent());
@@ -611,12 +632,28 @@ window.addEventListener('keydown', (event) => {
     app.setAnnotationMode(app.annotationMode === 'agnostic' ? 'anchored' : 'agnostic');
     return;
   }
+  if (event.key === 'v') {
+    const layer = app.selectedLayer;
+    if (layer) layer.setVisible(!layer.visible);
+    return;
+  }
 
   for (const tool of Object.values(app.toolRegistry)) {
-    if (tool.hotkey === event.key) { app.setActiveTool(tool.id); return; }
+    if (tool.hotkey === event.key) {
+      // Pressing the active tool's hotkey deselects it (no tool → a drag pans).
+      app.setActiveTool(app.activeTool?.id === tool.id ? null : tool.id);
+      return;
+    }
   }
 
   if (app.activeTool?.onKeyDown?.(app, event)) { event.preventDefault(); return; }
+
+  // Escape clears the selection when no tool claimed it (a tool claims it for
+  // canceling an in-progress placement or shape).
+  if (event.key === 'Escape' && app.selection) {
+    app.setSelection(null);
+    return;
+  }
 
   // Delete/Backspace removes the selection regardless of the active tool (the
   // active tool got first refusal above, e.g. Backspace while drawing a shape).

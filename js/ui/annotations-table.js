@@ -1,9 +1,11 @@
-// A single table of every annotation across all annotation layers — points,
-// shapes, and temporal events — with sortable columns, click-to-select /
-// jump-to-frame, and a per-row delete button. The table holds no text inputs,
-// so it is safe to rebuild wholesale on document/layer/selection changes; only
-// the per-frame highlight is updated cheaply (toggling a class) as playback
-// moves, never a full rebuild.
+// The annotations table — points, shapes, and temporal events — with sortable
+// columns, click-to-select / jump-to-frame, and a per-row delete button. By
+// default it lists only the layer selected in the tab bar; the "Show all
+// annotations" checkbox in the panel's top right corner widens it to every
+// annotation layer. The rebuilt region holds no text inputs (the checkbox
+// lives in the static header), so it is safe to rebuild wholesale on
+// document/layer/selection changes; only the per-frame highlight is updated
+// cheaply (toggling a class) as playback moves, never a full rebuild.
 
 const COLUMNS = [
   { key: 'layer', label: 'Layer' },
@@ -14,7 +16,12 @@ const COLUMNS = [
 
 export function initializeAnnotationsTable(app, containerElement) {
   containerElement.innerHTML = `
-    <h2 class="annotations-heading">0 annotations</h2>
+    <div class="annotations-header">
+      <h2 class="annotations-heading">0 annotations</h2>
+      <label class="show-all-annotations">
+        <input type="checkbox" class="show-all-annotations-checkbox"> Show all annotations
+      </label>
+    </div>
     <div class="annotations-scroll">
       <table class="annotations-table">
         <thead>
@@ -30,8 +37,11 @@ export function initializeAnnotationsTable(app, containerElement) {
   `;
 
   const heading = containerElement.querySelector('.annotations-heading');
+  const showAllCheckbox = containerElement.querySelector('.show-all-annotations-checkbox');
   const headerCells = [...containerElement.querySelectorAll('th[data-column]')];
   const tableBody = containerElement.querySelector('.annotations-table tbody');
+
+  showAllCheckbox.addEventListener('change', () => rebuild());
 
   // Multi-key sort with recency, in the spirit of the reference tool: the most
   // recently clicked column is primary, earlier clicks act as tiebreakers.
@@ -57,8 +67,12 @@ export function initializeAnnotationsTable(app, containerElement) {
   }
 
   function collectRows() {
+    const selectedLayerId = app.selectedLayer?.id ?? null;
     const rows = [];
     for (const layer of app.annotationLayers) {
+      // Unless "Show all annotations" is checked, list only the layer
+      // selected in the tab bar (nothing when the video layer is selected).
+      if (!showAllCheckbox.checked && layer.id !== selectedLayerId) continue;
       for (const item of layer.items) {
         rows.push(describeItem(app, layer, item));
       }
@@ -78,7 +92,11 @@ export function initializeAnnotationsTable(app, containerElement) {
     const rows = collectRows();
     rows.sort(compareRows);
 
-    heading.textContent = `${rows.length} annotation${rows.length === 1 ? '' : 's'}`;
+    const countText = `${rows.length} annotation${rows.length === 1 ? '' : 's'}`;
+    const selectedLayer = app.selectedLayer;
+    heading.textContent = showAllCheckbox.checked || !selectedLayer
+      ? countText
+      : `${countText} on ${selectedLayer.name}`;
 
     for (const headerCell of headerCells) {
       const column = headerCell.dataset.column;
@@ -97,7 +115,9 @@ export function initializeAnnotationsTable(app, containerElement) {
       const cell = document.createElement('td');
       cell.className = 'empty-message';
       cell.colSpan = COLUMNS.length + 1;
-      cell.textContent = 'No annotations yet.';
+      cell.textContent = showAllCheckbox.checked
+        ? 'No annotations yet.'
+        : 'No annotations on this layer.';
       emptyRow.appendChild(cell);
       tableBody.appendChild(emptyRow);
       return;

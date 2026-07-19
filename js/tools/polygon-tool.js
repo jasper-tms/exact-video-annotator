@@ -3,8 +3,15 @@
 // rubber-band, and finish/cancel behavior; only closing rules differ). See
 // ARCHITECTURE.md for the tool contract. Geometry is stored in the target
 // layer's local space; the finished shape is committed as one undo command.
+// Each tool also edits existing shapes of its own kind (select, drag-move,
+// double-click a segment to insert a vertex) via annotation-dragging.js —
+// there is no separate select tool.
 
 import { newId } from '../document.js';
+import {
+  hitTestLayer, beginDragOnExistingItem, updateDragOnExistingItem,
+  endDragOnExistingItem, cancelDragOnExistingItem, updateHover, clearHover,
+} from './annotation-dragging.js';
 
 // Screen-constant sizes (world units = screenPixels / pixelsPerLocalUnit).
 const CLOSE_DISTANCE_SCREEN_PIXELS = 10;
@@ -80,6 +87,8 @@ export function createDrawingTool({
 
     deactivate(app) {
       if (inProgress) cancel(app);
+      cancelDragOnExistingItem();
+      clearHover(app);
     },
 
     onPointerDown(app, worldPoint, event) { // eslint-disable-line no-unused-vars
@@ -87,21 +96,16 @@ export function createDrawingTool({
         // Start a new shape on the shapes target layer, at the current frame,
         // storing the vertex in that layer's local space.
         const layer = app.targetLayerForType('shapes');
-        const localPoint = app.localFromWorld(layer, worldPoint);
-        // Clicking an existing shape of this same kind selects it rather than
-        // starting a new one on top of it.
-        const hit = layer.hitTest(localPoint, {
-          frame: app.currentFrame,
-          pixelsPerLocalUnit: app.viewer.stageTransformForLayer(layer).scale,
-        });
+        // Pressing an existing shape of this same kind selects it, and
+        // dragging then moves the grabbed vertex or the whole shape; only
+        // empty space starts a new one.
+        const hit = layer.visible ? hitTestLayer(app, layer, worldPoint) : null;
         if (hit && layer.getItem(hit.itemId)?.kind === kind) {
-          app.setSelection({
-            layerId: layer.id, itemId: hit.itemId,
-            vertexIndex: hit.part === 'vertex' ? hit.vertexIndex : null,
-          });
+          beginDragOnExistingItem(app, layer, hit, worldPoint);
           app.viewer.requestRender();
           return;
         }
+        const localPoint = app.localFromWorld(layer, worldPoint);
         inProgress = {
           app,
           layer,
@@ -125,15 +129,39 @@ export function createDrawingTool({
     },
 
     onPointerMove(app, worldPoint, event) { // eslint-disable-line no-unused-vars
-      if (!inProgress) return;
-      inProgress.pointerWorld = worldPoint;
-      app.viewer.requestRender();
+      if (updateDragOnExistingItem(app, worldPoint)) return;
+      if (inProgress) {
+        inProgress.pointerWorld = worldPoint;
+        app.viewer.requestRender();
+        return;
+      }
+      const layer = app.findAnnotationLayerForType('shapes');
+      const hit = updateHover(app, layer, worldPoint, (item) => item?.kind === kind);
+      app.viewer.stageCanvas.style.cursor = hit ? 'move' : this.cursor;
     },
 
-    onPointerUp(app, worldPoint, event) {}, // eslint-disable-line no-unused-vars
+    onPointerUp(app, worldPoint, event) { // eslint-disable-line no-unused-vars
+      endDragOnExistingItem(app);
+    },
 
     onDoubleClick(app, worldPoint, event) { // eslint-disable-line no-unused-vars
-      if (!inProgress) return;
+      if (!inProgress) {
+        // Double-clicking a segment of an existing shape of this kind inserts
+        // a vertex there (the two preceding pointer-downs armed drags that
+        // ended without moving, so nothing was committed).
+        const layer = app.findAnnotationLayerForType('shapes');
+        if (!layer?.visible) return;
+        const hit = hitTestLayer(app, layer, worldPoint);
+        if (!hit || hit.part !== 'segment') return;
+        if (layer.getItem(hit.itemId)?.kind !== kind) return;
+        const command = layer.commandInsertVertex?.(
+          hit.itemId, hit.vertexIndex, app.localFromWorld(layer, worldPoint));
+        if (!command) return;
+        app.undoHistory.execute(command);
+        // The inserted vertex sits after the segment's first vertex.
+        app.setSelection({ layerId: layer.id, itemId: hit.itemId, vertexIndex: hit.vertexIndex + 1 });
+        return;
+      }
       // A double-click arrives after two pointer-downs, so the second press has
       // already appended a near-coincident duplicate vertex; drop it.
       const vertices = inProgress.vertices;

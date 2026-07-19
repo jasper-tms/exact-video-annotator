@@ -206,7 +206,9 @@ button:disabled { opacity: 0.45; cursor: default; }
   padding: 0 8px;
 }
 
-.layer-tabs-scroll-button:disabled { opacity: 0.25; }
+/* Shown only when there is something to scroll to in that direction (the
+   hidden attribute is managed by layer-tabs.js). */
+.layer-tabs-scroll-button[hidden] { display: none; }
 
 .layer-tabs-strip {
   flex: 1 1 auto;
@@ -227,6 +229,18 @@ button:disabled { opacity: 0.45; cursor: default; }
   white-space: nowrap;
   color: var(--text-dim);
   max-width: 200px;
+  touch-action: none;   /* tabs are dragged sideways to re-order layers */
+}
+
+/* While dragged, the tab glides with the pointer via a translateX transform
+   set by layer-tabs.js; raise it above its neighbors and lift it visually. */
+.layer-tab.dragging {
+  opacity: 0.85;
+  cursor: grabbing;
+  position: relative;
+  z-index: 5;
+  background: var(--surface-raised);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
 }
 
 .layer-tab.active {
@@ -244,12 +258,16 @@ button:disabled { opacity: 0.45; cursor: default; }
   border: none;
   background: none;
   padding: 0;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  color: inherit;
   cursor: pointer;
   opacity: 0.9;
 }
 
-.layer-tab .layer-tab-eye.layer-hidden { opacity: 0.3; }
+.layer-tab .layer-tab-eye svg { display: block; }
+
+.layer-tab .layer-tab-eye.layer-hidden { opacity: 0.35; }
 
 .layer-tab .layer-tab-type {
   font-size: 10px;
@@ -272,6 +290,21 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--text-dim);
   padding: 0 12px;
   position: relative;
+}
+
+/* Deletes the layer selected in the tab bar; sits just right of the ＋. */
+.layer-tab-delete-current {
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--text-dim);
+  padding: 0 12px;
+}
+
+.layer-tab-delete-current:hover:not(:disabled) {
+  color: var(--error);
+  border-color: transparent;
 }
 
 .layer-tab-add-menu {
@@ -323,8 +356,6 @@ button:disabled { opacity: 0.45; cursor: default; }
 .layer-detail-row label { display: flex; align-items: center; gap: 6px; }
 .layer-detail-transform-field input { width: 76px; }
 .layer-detail-opacity input[type="range"] { width: 120px; }
-
-.layer-detail-delete { border-color: var(--error); color: var(--error); }
 
 .layer-detail-facts {
   display: grid;

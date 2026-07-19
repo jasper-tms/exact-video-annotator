@@ -73,16 +73,18 @@ viewer.setOverlayPainter(fn|null);   // fn(context, renderState) drawn above all
 ```
 
 Zoom/pan interaction lives in the viewer (wheel or pinch to zoom about the
-cursor, middle-drag to pan) so it works in every tool; the select tool
-additionally pans on left-drags that start on empty space, via
-`viewer.beginPanFromPointerEvent(event)`. When **no tool is selected** (clicking
-the active tool button again toggles it off), a left-drag pans as well. Space is
-exclusively play/pause. All other pointer events are forwarded to the active
-tool by `main.js`.
+cursor, middle-drag to pan) so it works in every tool. When **no tool is
+selected** (clicking the active tool button — or pressing its hotkey — while it
+is already active toggles it off), a left-drag pans as well, via
+`viewer.beginPanFromPointerEvent(event)`. Space is exclusively play/pause. All
+other pointer events are forwarded to the active tool by `main.js`.
 
-The point/line/polygon tools hit-test their target layer on pointer-down, so
-clicking an existing annotation of the tool's own kind **selects** it instead of
-stacking a new one; only empty space creates.
+There is **no separate select tool**: the point/line/polygon tools hit-test
+their target layer on pointer-down, so pressing an existing annotation of the
+tool's own kind **selects** it, dragging **moves** it (the whole item, or the
+grabbed vertex), and — for shapes — double-clicking a segment inserts a vertex;
+only empty space creates. This shared behavior lives in
+`js/tools/annotation-dragging.js`.
 
 ### `js/layers/layer.js` — exports `class Layer extends EventTarget`
 
@@ -112,7 +114,8 @@ layer.hitTest(localPoint, renderState); // annotation layers only, see below
 ### Annotation-layer editing contract
 
 Annotation layers (points, shapes) implement `hitTest` plus generic editing
-methods so the select tool works without knowing shape internals:
+methods so the shared drag-editing helpers (`js/tools/annotation-dragging.js`)
+work without knowing shape internals:
 
 ```js
 layer.hitTest(localPoint, renderState)
@@ -125,7 +128,7 @@ layer.hitTest(localPoint, renderState)
 layer.getItem(itemId);               // live item object (read-only use)
 layer.items;                         // the backing array from the document
 
-// Direct-mutation methods, used by the select tool for live drag PREVIEW only
+// Direct-mutation methods, used by the drag helpers for live drag PREVIEW only
 // (they bypass undo on purpose; the drag is committed once, on pointer up,
 // via a snapshot command):
 layer.snapshotItemGeometry(itemId);            // → opaque deep copy
@@ -142,8 +145,8 @@ layer.commandDeleteVertex(itemId, vertexIndex);  // shapes only; deleting below
 layer.commandDeleteItem(itemId);
 ```
 
-The select tool commits a finished drag with a generic snapshot command:
-`apply()` restores the after-snapshot, `revert()` the before-snapshot.
+A finished drag is committed with a generic snapshot command: `apply()`
+restores the after-snapshot, `revert()` the before-snapshot.
 
 Annotation layers are **views over the document**: their `items` array IS the
 corresponding document layer's `items` array (same object identity). They hold
@@ -225,7 +228,7 @@ A tool is a plain object registered in `main.js`'s `toolRegistry`:
 
 ```js
 {
-  id: 'point', name: 'Add points', hotkey: 'p', cursor: 'crosshair',
+  id: 'point', name: 'Add points', hotkey: 'o', cursor: 'crosshair',
   activate(app) {}, deactivate(app) {},
   onPointerDown(app, worldPoint, event) {},   // worldPoint: {x, y} world coords
   onPointerMove(app, worldPoint, event) {},
@@ -247,7 +250,9 @@ app.activeLayer;                     // the annotation layer new items go into
 app.activeClassId;                   // class assigned to newly created items
 app.selection;                       // { layerId, itemId, vertexIndex } | null
 app.setSelection(selectionOrNull);
-app.setActiveTool(toolId);           // toolId null clears the tool (drag pans)
+app.setActiveTool(toolId);           // toolId null clears the tool (drag pans);
+                                     // pressing the active tool's hotkey (or
+                                     // clicking its button) clears it too
 app.activeTool;
 app.deleteSelection();               // delete selected vertex/item; Delete key
 app.localFromWorld(layer, worldPoint); app.worldFromLocal(layer, localPoint);
@@ -255,14 +260,19 @@ app.seekToFrame(frameIndex);         // clamps, delegates to engine
 app.currentFrame;                    // engine.currentFrame or 0
 app.showToast(message, { kind } = {});   // kind: 'info' | 'warning' | 'error'
 app.markDocumentChanged();           // dispatches 'document-changed' + autosave
-app.hover;                           // set by the select tool; same shape as selection
+app.hover;                           // set by tools while hovering an existing
+                                     // annotation; same shape as selection
 app.togglePlayback(); app.stepFrame(delta);
 app.annotationLayers;                // view layers of type points/shapes/events
 app.setActiveLayer(layerId);
 app.addAnnotationLayer(type);        // undoable; returns the new view layer
 app.removeAnnotationLayer(layerId);  // undoable
-app.targetLayerForType(type);        // active layer if it matches, else first
-                                     // of that type (creating one if none)
+app.findAnnotationLayerForType(type);// active layer if it matches, else first
+                                     // of that type, else null (never creates
+                                     // — safe on every pointer move)
+app.targetLayerForType(type);        // same, but creates a layer if none exists
+app.synchronizeDocumentLayerOrder(); // document layer order ← viewer stack
+                                     // order (after tabs are dragged)
 app.addKeyHandler(handler);          // handler(event) → true if handled; runs
                                      // after tool onKeyDown (event-hotkeys)
 app.isTypingTarget(event);           // true when focus is in a text input
@@ -281,11 +291,17 @@ app events; they never poll.
   numeric frame input, frame/time readout, exactness indicator
   (`engine.frameIndexIsExact === false` shows a visible warning chip).
   Keyboard: Space play/pause; `ArrowLeft`/`,` and `ArrowRight`/`.` step.
-- `js/ui/layer-panel.js` — layer list (bottom layer at the bottom), per-layer
-  visibility eye, opacity slider, rename, z-reorder, add/delete annotation
-  layers, active-layer highlight (click to activate).
-- `js/ui/annotations-table.js` — all items across annotation layers; sortable;
-  click a row to select + jump to its frame; per-row delete.
+- `js/ui/layer-tabs.js` — the layer tab bar under the canvas (leftmost tab =
+  bottom of the stack): click to select, double-click to rename, drag a tab
+  sideways to re-order the stack; each tab carries an eye icon (right of the
+  name and type badge) toggling visibility; ＋ adds an annotation layer and ✕
+  deletes the selected one (confirming when it holds annotations).
+- `js/ui/layer-detail.js` — settings for the selected layer (visibility,
+  opacity, scale/offset transform; playback facts for the video layer).
+- `js/ui/annotations-table.js` — items of the selected layer by default, or of
+  every annotation layer when "Show all annotations" (top right of the panel)
+  is checked; sortable; click a row to select + jump to its frame; per-row
+  delete.
 - `js/ui/class-manager.js` — edit `classes` and `eventTypes` (name, color,
   hotkeys); pick `app.activeClassId`.
 - `js/ui/toasts.js` — transient notifications; `initializeToasts` wires
@@ -302,14 +318,19 @@ app events; they never poll.
 | --- | --- |
 | `Space` | play/pause |
 | `ArrowLeft` / `,` , `ArrowRight` / `.` | step one frame |
-| `v` | select tool |
-| `p` | point tool |
+| `o` | point tool |
 | `g` | polygon tool |
 | `l` | line tool |
+| `v` | toggle the selected layer's visibility |
+| `a` | toggle frame-agnostic mode for new annotations |
+| `f` | fit the view to the content |
 | `Delete`/`Backspace` | delete selected item (or selected vertex) — works in any tool |
 | `Escape` | cancel in-progress shape / clear selection |
 | `Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z` | undo, redo |
 | event-type hotkeys | user-defined, case-sensitive |
+
+A tool hotkey pressed while that tool is already active **deselects** it
+(back to no tool, where a left-drag pans).
 
 ## Video pipeline
 

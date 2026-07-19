@@ -39,14 +39,13 @@ try {
     application.activeClassId = 'class-demonstration';
   });
   const stageBox = await page.locator('#stage-canvas').boundingBox();
-  await page.keyboard.press('p');
+  // The point tool is active at startup; this click places the point.
   await page.mouse.click(stageBox.x + stageBox.width * 0.55, stageBox.y + stageBox.height * 0.35);
   await page.keyboard.press('g');
   await page.mouse.click(stageBox.x + stageBox.width * 0.25, stageBox.y + stageBox.height * 0.55);
   await page.mouse.click(stageBox.x + stageBox.width * 0.4, stageBox.y + stageBox.height * 0.5);
   await page.mouse.click(stageBox.x + stageBox.width * 0.35, stageBox.y + stageBox.height * 0.75);
   await page.keyboard.press('Enter');
-  await page.keyboard.press('v');
   await page.waitForTimeout(400);
 
   await page.screenshot({ path: path.join(outputDirectory, 'screenshot-viewport.png') });

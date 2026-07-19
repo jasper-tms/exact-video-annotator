@@ -73,8 +73,15 @@ try {
   await page.waitForFunction(() => window.exactVideoAnnotator.currentFrame === 2);
   check(true, 'stepped to frame 2 with ArrowRight');
 
+  // ---- Tool hotkeys toggle: pressing the active tool's key deselects it ----
+  await page.keyboard.press('o');   // the point tool is active at startup
+  let activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
+  check(activeToolId === null, "pressing the active tool's hotkey deselects it");
+  await page.keyboard.press('o');
+  activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
+  check(activeToolId === 'point', 'pressing o again reselects the point tool');
+
   // ---- Place a point with the point tool ----
-  await page.keyboard.press('p');
   const stageBox = await page.locator('#stage-canvas').boundingBox();
   await page.mouse.click(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
   const pointFacts = await page.evaluate(() => {
@@ -86,6 +93,26 @@ try {
   check(pointFacts.item?.frame === 2, 'point is bound to the current frame (2)');
   check(Number.isFinite(pointFacts.item?.x) && Number.isFinite(pointFacts.item?.y),
         'point has finite source-pixel coordinates');
+
+  // ---- Drag the point with the same tool (there is no separate select tool) ----
+  const stageCenterX = stageBox.x + stageBox.width / 2;
+  const stageCenterY = stageBox.y + stageBox.height / 2;
+  await page.mouse.move(stageCenterX, stageCenterY);
+  await page.mouse.down();
+  await page.mouse.move(stageCenterX + 40, stageCenterY + 25, { steps: 5 });
+  await page.mouse.up();
+  const readFirstPoint = () => page.evaluate(() => {
+    const application = window.exactVideoAnnotator;
+    const pointsLayer = application.annotationDocument.layers.find((layer) => layer.type === 'points');
+    return { ...pointsLayer.items[0] };
+  });
+  const movedPoint = await readFirstPoint();
+  check(movedPoint.x !== pointFacts.item.x || movedPoint.y !== pointFacts.item.y,
+        'dragging an existing point with the point tool moves it');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+  const restoredPoint = await readFirstPoint();
+  check(restoredPoint.x === pointFacts.item.x && restoredPoint.y === pointFacts.item.y,
+        'undo restores the dragged point');
 
   // ---- Draw a triangle with the polygon tool ----
   await page.keyboard.press('g');
@@ -143,6 +170,16 @@ try {
       .map((layer) => layer.items.length)
       .reduce((total, count) => total + count, 0));
   check(afterRedo === 3, 'three redos restored all three annotations');
+
+  // ---- v toggles the selected layer's visibility ----
+  await page.keyboard.press('v');
+  let selectedLayerVisible = await page.evaluate(() =>
+    window.exactVideoAnnotator.selectedLayer.visible);
+  check(selectedLayerVisible === false, 'v hides the selected layer');
+  await page.keyboard.press('v');
+  selectedLayerVisible = await page.evaluate(() =>
+    window.exactVideoAnnotator.selectedLayer.visible);
+  check(selectedLayerVisible === true, 'v shows the selected layer again');
 
   // ---- Export round-trip through the document serializer ----
   const roundTrip = await page.evaluate(async () => {

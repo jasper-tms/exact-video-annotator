@@ -45,8 +45,9 @@ Cloudflare Pages: build command `bash build.sh`, output directory `dist/`.
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) — module contracts, coordinate spaces,
-the annotation document format, and the editing contract that lets the select
-tool work generically across every annotation layer type.
+the annotation document format, and the editing contract that lets every
+drawing tool select and move existing annotations generically across every
+annotation layer type.
 
 ## License
 

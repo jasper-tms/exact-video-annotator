@@ -1,7 +1,8 @@
 // The layer detail panel, below the canvas: settings for whichever layer is
-// selected in the tab bar — opacity, scale/offset transform, stack position,
-// and delete for annotation layers; playback facts for the video layer. This
-// is deliberately below the fold: the wheel zooms over the canvas, and
+// selected in the tab bar — visibility, opacity, and scale/offset transform;
+// playback facts for the video layer. (Stack order is changed by dragging
+// tabs in the tab bar, and layers are deleted with the tab bar's ✕ button.)
+// This is deliberately below the fold: the wheel zooms over the canvas, and
 // scrolls the page down to here everywhere else.
 
 const ANNOTATION_LAYER_TYPES = new Set(['points', 'shapes', 'events']);
@@ -100,49 +101,6 @@ export function initializeLayerDetail(app, containerElement) {
     }
     containerElement.appendChild(transformRow);
 
-    /* ---- Stack position and delete ---- */
-
-    const stackRow = document.createElement('div');
-    stackRow.className = 'layer-detail-row';
-
-    const viewerIndex = app.viewer.layers.indexOf(layer);
-    const raiseButton = document.createElement('button');
-    raiseButton.type = 'button';
-    raiseButton.textContent = 'Raise';
-    raiseButton.title = 'Draw this layer above one more layer';
-    raiseButton.disabled = viewerIndex >= app.viewer.layers.length - 1;
-    raiseButton.addEventListener('click', () => {
-      app.viewer.moveLayerToIndex(layer, viewerIndex + 1);
-      synchronizeDocumentLayerOrder();
-    });
-    const lowerButton = document.createElement('button');
-    lowerButton.type = 'button';
-    lowerButton.textContent = 'Lower';
-    lowerButton.title = 'Draw this layer below one more layer';
-    lowerButton.disabled = viewerIndex <= 0;
-    lowerButton.addEventListener('click', () => {
-      app.viewer.moveLayerToIndex(layer, viewerIndex - 1);
-      synchronizeDocumentLayerOrder();
-    });
-    stackRow.append(raiseButton, lowerButton);
-
-    if (ANNOTATION_LAYER_TYPES.has(layer.type)) {
-      const deleteButton = document.createElement('button');
-      deleteButton.type = 'button';
-      deleteButton.textContent = 'Delete layer';
-      deleteButton.className = 'layer-detail-delete';
-      deleteButton.addEventListener('click', () => {
-        const itemCount = Array.isArray(layer.items) ? layer.items.length : 0;
-        if (itemCount > 0
-            && !window.confirm(`Delete the layer "${layer.name}" and its ${itemCount} item(s)?`)) {
-          return;
-        }
-        app.removeAnnotationLayer(layer.id);
-      });
-      stackRow.appendChild(deleteButton);
-    }
-    containerElement.appendChild(stackRow);
-
     /* ---- Video layer: playback facts ---- */
 
     if (layer.type === 'video' && app.engine) {
@@ -178,18 +136,6 @@ export function initializeLayerDetail(app, containerElement) {
       count.textContent = `${layer.items.length} item(s) on this layer — see the annotations table for the full list.`;
       containerElement.appendChild(count);
     }
-  }
-
-  function synchronizeDocumentLayerOrder() {
-    const annotationOrderIds = app.viewer.layers
-      .filter((layer) => ANNOTATION_LAYER_TYPES.has(layer.type))
-      .map((layer) => layer.id);
-    const documentLayerById = new Map(
-      app.annotationDocument.layers.map((documentLayer) => [documentLayer.id, documentLayer]));
-    app.annotationDocument.layers = annotationOrderIds
-      .map((id) => documentLayerById.get(id))
-      .filter((documentLayer) => documentLayer !== undefined);
-    app.markDocumentChanged();
   }
 
   app.addEventListener('layers-changed', rebuildIfIdle);

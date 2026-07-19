@@ -1,10 +1,16 @@
-// The point tool: press to place a new point annotation on the current frame.
-// While the pointer is down it shows a live preview that follows the cursor;
-// releasing commits one undoable "Add point" command. Like the select tool it
-// keeps its transient state in a module-level variable (drawOverlay's signature
-// has no `app`, so the pressed state also captures the app for the overlay).
+// The point tool: press empty space to place a new point annotation (a live
+// preview follows the cursor while the pointer is down; releasing commits one
+// undoable "Add point" command). Pressing an existing point selects it, and
+// dragging it moves it — the shared behavior in annotation-dragging.js — so
+// there is no separate select tool. Like the drawing tools it keeps its
+// transient state in a module-level variable (drawOverlay's signature has no
+// `app`, so the pressed state also captures the app for the overlay).
 
 import { newId } from '../document.js';
+import {
+  hitTestLayer, beginDragOnExistingItem, updateDragOnExistingItem,
+  endDragOnExistingItem, cancelDragOnExistingItem, updateHover, clearHover,
+} from './annotation-dragging.js';
 
 const FALLBACK_COLOR = '#4f9cf9';
 const PREVIEW_RADIUS_SCREEN_PIXELS = 5;
@@ -26,38 +32,45 @@ function colorForActiveClass(app) {
 export const pointTool = {
   id: 'point',
   name: 'Add points',
-  hotkey: 'p',
+  hotkey: 'o',
   cursor: 'crosshair',
 
   activate(app) {},
-  deactivate(app) { pendingPress = null; },
+  deactivate(app) {
+    pendingPress = null;
+    cancelDragOnExistingItem();
+    clearHover(app);
+  },
 
   onPointerDown(app, worldPoint, event) {
     const layer = app.targetLayerForType('points');
-    const localPoint = app.localFromWorld(layer, worldPoint);
-    // Clicking an existing point selects it rather than stacking a new one on
-    // top; only empty space places a new point.
-    const hit = layer.hitTest(localPoint, {
-      frame: app.currentFrame,
-      pixelsPerLocalUnit: app.viewer.stageTransformForLayer(layer).scale,
-    });
+    // Pressing an existing point selects it, and dragging then moves it;
+    // only empty space places a new point.
+    const hit = layer.visible ? hitTestLayer(app, layer, worldPoint) : null;
     if (hit) {
       pendingPress = null;
-      app.setSelection({ layerId: layer.id, itemId: hit.itemId, vertexIndex: null });
+      beginDragOnExistingItem(app, layer, hit, worldPoint);
       app.viewer.requestRender();
       return;
     }
-    pendingPress = { app, layer, localPoint };
+    pendingPress = { app, layer, localPoint: app.localFromWorld(layer, worldPoint) };
     app.viewer.requestRender();
   },
 
   onPointerMove(app, worldPoint, event) {
-    if (!pendingPress) return;
-    pendingPress.localPoint = app.localFromWorld(pendingPress.layer, worldPoint);
-    app.viewer.requestRender();
+    if (updateDragOnExistingItem(app, worldPoint)) return;
+    if (pendingPress) {
+      pendingPress.localPoint = app.localFromWorld(pendingPress.layer, worldPoint);
+      app.viewer.requestRender();
+      return;
+    }
+    const layer = app.findAnnotationLayerForType('points');
+    const hit = updateHover(app, layer, worldPoint);
+    app.viewer.stageCanvas.style.cursor = hit ? 'move' : this.cursor;
   },
 
   onPointerUp(app, worldPoint, event) {
+    if (endDragOnExistingItem(app)) return;
     if (!pendingPress) return;
     const { layer, localPoint } = pendingPress;
     pendingPress = null;

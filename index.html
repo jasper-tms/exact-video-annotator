@@ -30,7 +30,10 @@
        scrolling it anywhere else scrolls the page down to the details. -->
   <main id="viewport-section">
     <nav id="tool-rail">
-      <button data-tool="point" class="rail-button" data-hotkey="p" title="Add points (p)">●</button>
+      <!-- Each tool also selects and moves existing annotations of its own
+           kind; pressing a tool's hotkey (or clicking its button) while it is
+           already active deselects it, and a drag then pans the view. -->
+      <button data-tool="point" class="rail-button" data-hotkey="o" title="Add points (o)">●</button>
       <button data-tool="line" class="rail-button" data-hotkey="l" title="Draw lines (l)">╱</button>
       <button data-tool="polygon" class="rail-button" data-hotkey="g" title="Draw polygons (g)">⬠</button>
       <!-- Frame-agnostic toggle: when on (∞ lit), newly drawn annotations apply
@@ -38,7 +41,6 @@
            Defaults to off; it never changes existing annotations. -->
       <button id="frame-agnostic-toggle" class="rail-button" data-hotkey="a"
               title="Frame-agnostic mode off: new annotations anchor to the current frame (a)">∞</button>
-      <button data-tool="select" class="rail-button" data-hotkey="v" title="Select and move annotations (v)">➤</button>
       <span class="rail-divider"></span>
       <button id="undo-button" class="rail-button" title="Undo (Cmd/Ctrl+Z)" disabled>↩</button>
       <button id="redo-button" class="rail-button" title="Redo (Shift+Cmd/Ctrl+Z)" disabled>↪</button>
