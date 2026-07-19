@@ -151,8 +151,12 @@ dispatches `'layer-changed'`.
 
 Frame binding for drawing: an item whose `frame` equals `renderState.frame`
 draws at full strength; other frames draw dimmed at reduced alpha (the
-movim-website "off-frame" convention) so nearby context stays visible. Events
-layers have no spatial drawing (their `draw` is a no-op).
+movim-website "off-frame" convention) so nearby context stays visible. A
+**frame-agnostic** item (`frame === null`) applies across every frame and so
+always draws (and hit-tests) at full strength. The tool rail's anchored/agnostic
+mode toggle (`app.annotationMode`, `app.newItemFrame`) decides which kind the
+point/line/polygon tools create; it never alters existing items. Events layers
+have no spatial drawing (their `draw` is a no-op).
 
 ### `js/document.js` — the annotation document
 
@@ -179,9 +183,12 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
   layers: [
     { id, type: 'points', name, visible, opacity, transform,
       items: [ { id, frame, x, y, classId, name } ] },
+      // frame: integer (anchored to that frame) or null (frame-agnostic —
+      //        applies across every frame; drawn full-strength on all frames)
     { id, type: 'shapes', name, visible, opacity, transform,
       items: [ { id, frame, kind: 'polygon' | 'line',
                  vertices: [[x, y], ...], classId, name } ] },
+      // frame: integer or null, same frame-agnostic meaning as points
     { id, type: 'events', name,
       items: [ { id, eventTypeId, startFrame, endFrame } ] },
       // point events: endFrame === startFrame

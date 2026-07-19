@@ -91,7 +91,7 @@ export function createDrawingTool({
         inProgress = {
           app,
           layer,
-          frame: app.currentFrame,
+          frame: app.newItemFrame,
           vertices: [[localPoint.x, localPoint.y]],
           pointerWorld: worldPoint,
         };

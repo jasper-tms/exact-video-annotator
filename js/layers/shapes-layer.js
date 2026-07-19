@@ -49,7 +49,9 @@ export class ShapesLayer extends Layer {
 
     for (const item of this.items) {
       if (item.vertices.length === 0) continue;
-      const isCurrentFrame = item.frame === renderState.frame;
+      // A frame-agnostic shape (frame === null) applies to every frame, so it
+      // always draws at full strength rather than the dimmed off-frame alpha.
+      const isCurrentFrame = item.frame === null || item.frame === renderState.frame;
       const frameAlpha = isCurrentFrame ? 1 : OFF_FRAME_ALPHA_MULTIPLIER;
       const color = colorForItem(item, renderState);
       const isSelected = matchesItem(renderState.selection, this.id, item.id);
@@ -134,7 +136,9 @@ export class ShapesLayer extends Layer {
     const currentFrameItems = [];
     const offFrameItems = [];
     for (const item of this.items) {
-      (item.frame === renderState.frame ? currentFrameItems : offFrameItems).push(item);
+      // Frame-agnostic shapes (frame === null) rank alongside current-frame ones.
+      const onCurrentFrame = item.frame === null || item.frame === renderState.frame;
+      (onCurrentFrame ? currentFrameItems : offFrameItems).push(item);
     }
     currentFrameItems.reverse();
     offFrameItems.reverse();

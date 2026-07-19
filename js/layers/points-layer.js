@@ -58,7 +58,9 @@ export class PointsLayer extends Layer {
     const hover = renderState.hover;
 
     for (const item of this.items) {
-      const onCurrentFrame = item.frame === renderState.frame;
+      // A frame-agnostic item (frame === null) applies to every frame, so it
+      // always draws at full strength rather than the dimmed off-frame alpha.
+      const onCurrentFrame = item.frame === null || item.frame === renderState.frame;
       const color = this.colorForItem(item, renderState);
 
       context.globalAlpha = onCurrentFrame ? baseAlpha : baseAlpha * OFF_FRAME_ALPHA_MULTIPLIER;
@@ -138,7 +140,8 @@ export class PointsLayer extends Layer {
       const deltaY = item.y - localPoint.y;
       const distanceSquared = deltaX * deltaX + deltaY * deltaY;
       if (distanceSquared > toleranceSquared) continue;
-      if (item.frame === renderState.frame) {
+      // Frame-agnostic items (frame === null) rank alongside current-frame ones.
+      if (item.frame === null || item.frame === renderState.frame) {
         if (distanceSquared < nearestOnFrameDistanceSquared) {
           nearestOnFrameDistanceSquared = distanceSquared;
           nearestOnFrame = item;

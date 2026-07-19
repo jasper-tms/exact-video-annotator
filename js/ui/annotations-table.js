@@ -142,6 +142,8 @@ function describeItem(app, layer, item) {
 function describeSpatialItem(app, layer, item) {
   const kind = layer.type === 'shapes' ? item.kind : 'point';
   const className = findName(app.annotationDocument.classes, item.classId);
+  // A frame-agnostic item (frame === null) applies to every frame.
+  const isFrameAgnostic = item.frame === null;
   return {
     layerId: layer.id,
     itemId: item.id,
@@ -150,8 +152,8 @@ function describeSpatialItem(app, layer, item) {
     layerName: layer.name,
     kindText: kind,
     labelText: className ?? item.name ?? '',
-    framesText: String(item.frame),
-    includesFrame: (frame) => frame === item.frame,
+    framesText: isFrameAgnostic ? 'all' : String(item.frame),
+    includesFrame: isFrameAgnostic ? () => true : (frame) => frame === item.frame,
     selectable: true,
   };
 }
@@ -222,7 +224,8 @@ function activateRow(app, rowData) {
   if (rowData.selectable) {
     app.setSelection({ layerId: rowData.layerId, itemId: rowData.itemId, vertexIndex: null });
   }
-  app.seekToFrame(rowData.frame);
+  // A frame-agnostic item (frame === null) has no frame to jump to.
+  if (rowData.frame !== null) app.seekToFrame(rowData.frame);
 }
 
 function deleteRow(app, rowData) {
@@ -242,7 +245,8 @@ function isRowSelected(app, rowData) {
 
 function compareByColumn(column, a, b) {
   switch (column) {
-    case 'frame': return a.frame - b.frame;
+    // Frame-agnostic items (frame === null) sort before frame 0.
+    case 'frame': return (a.frame ?? -Infinity) - (b.frame ?? -Infinity);
     case 'layer': return compareText(a.layerName, b.layerName);
     case 'kind': return compareText(a.kindText, b.kindText);
     case 'label': return compareText(a.labelText, b.labelText);

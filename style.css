@@ -104,9 +104,21 @@ button:disabled { opacity: 0.45; cursor: default; }
   background: var(--surface);
   border-right: 1px solid var(--border);
   user-select: none;
+  /* When the viewport is too short to show every button, the rail scrolls on
+     its own (buttons keep their size rather than squashing). When everything
+     fits, the rail is not scrollable and the wheel falls through to the page. */
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+#tool-rail::-webkit-scrollbar { width: 6px; }
+#tool-rail::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
 }
 
 .rail-button {
+  position: relative;   /* anchors the corner hotkey label */
+  flex-shrink: 0;       /* never squash to fit a short viewport — scroll instead */
   width: 32px;
   height: 32px;
   padding: 0;
@@ -117,13 +129,57 @@ button:disabled { opacity: 0.45; cursor: default; }
   justify-content: center;
 }
 
+/* These glyphs render small at the base size; enlarge them to fill the button. */
+#tool-rail button[data-tool="point"],
+#tool-rail button[data-tool="polygon"],
+#frame-agnostic-toggle {
+  font-size: 21px;
+}
+
+/* Single-key hotkey, tucked into the button's bottom-right corner. Inherits the
+   button color (white when active, dim otherwise) and stays out of pointer flow. */
+.rail-button[data-hotkey]::after {
+  content: attr(data-hotkey);
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .rail-button.active-tool {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
 
+/* The annotation-mode toggle sits above the tools; the active mode is filled
+   like an active tool but stays visually a mode, not the currently held tool. */
+.rail-button.mode-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* Pinned to the very bottom of the rail (the page-scroll toggle). */
+.rail-button-bottom {
+  margin-top: auto;
+}
+
+/* The scroll toggle's arrow: large, thick-stroked, and flipped to point up
+   once the page has scrolled away from the top. */
+#scroll-toggle-button .scroll-arrow {
+  display: block;
+  transition: transform 0.15s ease;
+}
+#scroll-toggle-button.pointing-up .scroll-arrow {
+  transform: rotate(180deg);
+}
+
 .rail-divider {
+  flex-shrink: 0;   /* keep its height when the rail scrolls */
   width: 24px;
   border-top: 1px solid var(--border);
   margin: 4px 0;

@@ -55,7 +55,7 @@ export const pointTool = {
 
     const newItem = {
       id: newId(),
-      frame: app.currentFrame,
+      frame: app.newItemFrame,
       x: localPoint.x,
       y: localPoint.y,
       classId: app.activeClassId,

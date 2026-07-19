@@ -44,6 +44,10 @@ class Application extends EventTarget {
   activeTool = null;
   activeLayerId = null;
   activeClassId = null;
+  // How newly drawn point/shape annotations are bound in time:
+  //   'anchored' — the item belongs to the current frame (frame = integer)
+  //   'agnostic' — the item applies across every frame (frame = null)
+  annotationMode = 'anchored';
   #keyHandlers = [];
   #autosaveTimer = null;
 
@@ -70,6 +74,19 @@ class Application extends EventTarget {
   /* ---------- Playback ---------- */
 
   get currentFrame() { return this.engine?.currentFrame ?? 0; }
+
+  /** The `frame` value a newly drawn annotation should get: the current frame
+      in anchored mode, or null (applies to every frame) in agnostic mode. */
+  get newItemFrame() {
+    return this.annotationMode === 'agnostic' ? null : this.currentFrame;
+  }
+
+  setAnnotationMode(mode) {
+    if (mode !== 'anchored' && mode !== 'agnostic') return;
+    if (mode === this.annotationMode) return;
+    this.annotationMode = mode;
+    this.dispatchEvent(new CustomEvent('annotation-mode-changed'));
+  }
 
   seekToFrame(frameIndex) {
     if (!this.engine) return;
@@ -291,7 +308,7 @@ initializeAnnotationsTable(app, document.getElementById('annotations-table-conta
 initializeEventHotkeys(app);
 
 app.rebuildAnnotationLayersFromDocument();
-app.setActiveTool('select');
+app.setActiveTool('point');
 
 /* ---------- Video loading ---------- */
 
@@ -423,13 +440,64 @@ const toolButtons = [...document.querySelectorAll('#tool-rail button[data-tool]'
 for (const button of toolButtons) {
   button.addEventListener('click', () => app.setActiveTool(button.dataset.tool));
 }
-app.addEventListener('tool-changed', () => {
+function reflectActiveTool() {
   for (const button of toolButtons) {
     button.classList.toggle('active-tool', button.dataset.tool === app.activeTool?.id);
   }
-});
+}
+app.addEventListener('tool-changed', reflectActiveTool);
+// The initial tool is set during bootstrap, before this listener exists, so sync
+// the button highlight once now (otherwise 'select' stays unhighlighted at load).
+reflectActiveTool();
 
 document.getElementById('fit-view-button').addEventListener('click', () => app.viewer.fitToContent());
+
+/* ---------- Annotation-mode toggle (frame-anchored vs frame-agnostic) ---------- */
+
+const frameAgnosticToggle = document.getElementById('frame-agnostic-toggle');
+frameAgnosticToggle.addEventListener('click', () => {
+  app.setAnnotationMode(app.annotationMode === 'agnostic' ? 'anchored' : 'agnostic');
+});
+function reflectAnnotationMode() {
+  const agnostic = app.annotationMode === 'agnostic';
+  frameAgnosticToggle.classList.toggle('mode-active', agnostic);
+  frameAgnosticToggle.title = agnostic
+    ? 'Frame-agnostic mode on: new annotations apply across all frames (a)'
+    : 'Frame-agnostic mode off: new annotations anchor to the current frame (a)';
+}
+app.addEventListener('annotation-mode-changed', reflectAnnotationMode);
+reflectAnnotationMode();
+
+/* ---------- Scroll-to-details toggle (bottom of the tool rail) ---------- */
+
+const scrollToggleButton = document.getElementById('scroll-toggle-button');
+// Treat anything within a few pixels of the top as "fully scrolled up".
+const SCROLL_TOP_THRESHOLD_PIXELS = 4;
+
+function isScrolledToTop() {
+  return window.scrollY <= SCROLL_TOP_THRESHOLD_PIXELS;
+}
+
+function reflectScrollToggle() {
+  const atTop = isScrolledToTop();
+  // The arrow SVG points down by default; rotate it 180° to point up.
+  scrollToggleButton.classList.toggle('pointing-up', !atTop);
+  scrollToggleButton.title = atTop ? 'Scroll down to the details' : 'Scroll back to the top';
+}
+
+scrollToggleButton.addEventListener('click', () => {
+  if (isScrolledToTop()) {
+    // Reveal the details section, leaving it just below the sticky toolbar.
+    const details = document.getElementById('details-section');
+    const toolbarHeight = document.getElementById('toolbar').offsetHeight;
+    const target = details.getBoundingClientRect().top + window.scrollY - toolbarHeight;
+    window.scrollTo({ top: target, behavior: 'smooth' });
+  } else {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+});
+window.addEventListener('scroll', reflectScrollToggle, { passive: true });
+reflectScrollToggle();
 
 const videoFileInput = document.getElementById('video-file-input');
 document.getElementById('open-video-button').addEventListener('click', () => videoFileInput.click());
@@ -511,6 +579,10 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'ArrowLeft' || event.key === ',') { event.preventDefault(); app.stepFrame(-1); return; }
   if (event.key === 'ArrowRight' || event.key === '.') { event.preventDefault(); app.stepFrame(1); return; }
   if (event.key === 'f') { app.viewer.fitToContent(); return; }
+  if (event.key === 'a' || event.key === 'A') {
+    app.setAnnotationMode(app.annotationMode === 'agnostic' ? 'anchored' : 'agnostic');
+    return;
+  }
 
   for (const tool of Object.values(app.toolRegistry)) {
     if (tool.hotkey === event.key) { app.setActiveTool(tool.id); return; }

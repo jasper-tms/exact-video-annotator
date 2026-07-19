@@ -132,7 +132,7 @@ function parseItem(layerType, item) {
   if (layerType === 'points') {
     return {
       id,
-      frame: integerNumber(item.frame, 'point frame'),
+      frame: integerOrNull(item.frame, 'point frame'),
       x: finiteNumber(item.x, 'point x'),
       y: finiteNumber(item.y, 'point y'),
       classId: item.classId ?? null,
@@ -155,7 +155,7 @@ function parseItem(layerType, item) {
     }
     return {
       id,
-      frame: integerNumber(item.frame, 'shape frame'),
+      frame: integerOrNull(item.frame, 'shape frame'),
       kind: item.kind,
       vertices,
       classId: item.classId ?? null,
@@ -191,6 +191,14 @@ function finiteNumber(value, description) {
 }
 function integerNumber(value, description) {
   if (!Number.isInteger(value)) throw new Error(`Expected ${description} to be an integer.`);
+  return value;
+}
+/** An integer frame index, or null for a frame-agnostic (all-frames) item. */
+function integerOrNull(value, description) {
+  if (value === null || value === undefined) return null;
+  if (!Number.isInteger(value)) {
+    throw new Error(`Expected ${description} to be an integer or null.`);
+  }
   return value;
 }
 function clampNumber(value, minimum, maximum) {

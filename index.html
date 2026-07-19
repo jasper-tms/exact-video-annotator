@@ -30,15 +30,32 @@
        scrolling it anywhere else scrolls the page down to the details. -->
   <main id="viewport-section">
     <nav id="tool-rail">
-      <button data-tool="select" class="rail-button" title="Select and move annotations (v)">➤</button>
-      <button data-tool="point" class="rail-button" title="Add points (p)">●</button>
-      <button data-tool="polygon" class="rail-button" title="Draw polygons (g)">⬠</button>
-      <button data-tool="line" class="rail-button" title="Draw lines (l)">╱</button>
+      <button data-tool="point" class="rail-button" data-hotkey="p" title="Add points (p)">●</button>
+      <button data-tool="line" class="rail-button" data-hotkey="l" title="Draw lines (l)">╱</button>
+      <button data-tool="polygon" class="rail-button" data-hotkey="g" title="Draw polygons (g)">⬠</button>
+      <!-- Frame-agnostic toggle: when on (∞ lit), newly drawn annotations apply
+           across every frame instead of being anchored to the current frame.
+           Defaults to off; it never changes existing annotations. -->
+      <button id="frame-agnostic-toggle" class="rail-button" data-hotkey="a"
+              title="Frame-agnostic mode off: new annotations anchor to the current frame (a)">∞</button>
+      <button data-tool="select" class="rail-button" data-hotkey="v" title="Select and move annotations (v)">➤</button>
       <span class="rail-divider"></span>
       <button id="undo-button" class="rail-button" title="Undo (Cmd/Ctrl+Z)" disabled>↩</button>
       <button id="redo-button" class="rail-button" title="Redo (Shift+Cmd/Ctrl+Z)" disabled>↪</button>
       <span class="rail-divider"></span>
-      <button id="fit-view-button" class="rail-button" title="Fit the view to the content (f)">⛶</button>
+      <button id="fit-view-button" class="rail-button" data-hotkey="f" title="Fit the view to the content (f)">⛶</button>
+      <!-- Pinned to the bottom of the rail: scroll the page down to the details
+           below the canvas, then back up. Its glyph reflects the direction it
+           will scroll (down when at the top, up otherwise). -->
+      <button id="scroll-toggle-button" class="rail-button rail-button-bottom"
+              title="Scroll down to the details">
+        <svg class="scroll-arrow" viewBox="0 0 24 24" width="22" height="22"
+             fill="none" stroke="currentColor" stroke-width="4"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="12" y1="2" x2="12" y2="19"></line>
+          <polyline points="4 12 12 20 20 12"></polyline>
+        </svg>
+      </button>
     </nav>
     <div id="canvas-column">
       <div id="stage-container">
