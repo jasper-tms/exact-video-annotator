@@ -42,6 +42,34 @@ needed on first load.)
 
 Cloudflare Pages: build command `bash build.sh`, output directory `dist/`.
 
+### What is live right now
+
+The deployed app answers at both `/version` and `/version.json` (same bytes;
+the extensionless one exists because it is easier to type):
+
+```json
+{
+  "tag": "da3b37d",
+  "commit": "da3b37dad570540fcb815466a7cf2c751cfea08b",
+  "commitUrl": "https://github.com/jasper-tms/exact-video-annotator/commit/da3b37dad570540fcb815466a7cf2c751cfea08b",
+  "branch": "main",
+  "buildTimestamp": "2026-07-25T21:11:27Z",
+  "videoEngineVersion": "v2.0.0"
+}
+```
+
+`build.sh` writes it, so the stamp describes the commit that produced the
+files being served rather than whatever the repository looks like now.
+`videoEngineVersion` is read back out of the pinned CDN URL in `index.html`,
+which makes this the quickest way to confirm which engine release production
+actually picked up. Both paths are served `Cache-Control: no-store` — a
+version stamp answered from cache would defeat its own purpose.
+
+On Cloudflare the commit and branch come from `CF_PAGES_COMMIT_SHA` and
+`CF_PAGES_BRANCH`, since its checkout is shallow and may carry no tags. Any
+field that cannot be determined reads `unknown`; a missing stamp never fails
+the build.
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) — module contracts, coordinate spaces,
