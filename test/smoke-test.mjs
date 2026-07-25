@@ -4,10 +4,14 @@
 // and export. Fails on any page error or console error.
 //
 // Run:  node test/smoke-test.mjs
-// Needs Playwright; resolved from the exact-video-engine.js sibling repo's
-// node_modules so this repo stays dependency-free.
+//       node test/smoke-test.mjs --url https://exact-video-annotator.pages.dev/
+//
+// With --url the same checks run against an already-deployed app instead of a
+// local server, plus the version-stamp checks below. Needs Playwright;
+// resolved from the exact-video-engine.js sibling repo's node_modules so this
+// repo stays dependency-free.
 
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -18,9 +22,23 @@ const { chromium } = await import(playwrightPath);
 const repositoryRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const port = 8797;
 
-const server = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'],
-  { cwd: repositoryRoot, stdio: 'ignore' });
-await new Promise((resolve) => setTimeout(resolve, 800));
+const urlFlagIndex = process.argv.indexOf('--url');
+const deployedUrl = urlFlagIndex === -1 ? null : process.argv[urlFlagIndex + 1];
+if (urlFlagIndex !== -1 && !deployedUrl) {
+  console.error('--url needs a URL, for example --url https://exact-video-annotator.pages.dev/');
+  process.exit(2);
+}
+const testingDeployedApp = deployedUrl !== null;
+const applicationUrl = deployedUrl ?? `http://127.0.0.1:${port}/index.html`;
+
+// Testing a deployed app means testing whatever is already served; a local run
+// needs its own static server first.
+let server = null;
+if (!testingDeployedApp) {
+  server = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'],
+    { cwd: repositoryRoot, stdio: 'ignore' });
+  await new Promise((resolve) => setTimeout(resolve, 800));
+}
 
 const failures = [];
 function check(condition, description) {
@@ -38,8 +56,39 @@ page.on('console', (message) => {
 });
 
 try {
-  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.goto(applicationUrl);
   await page.waitForFunction(() => window.exactVideoAnnotator !== undefined);
+
+  // ---- The version stamp describes the code actually being served ----
+  // Only a built deployment has one: build.sh writes it into dist/, so a local
+  // run serving the repository root has no /version to ask.
+  if (testingDeployedApp) {
+    const versionFacts = await page.evaluate(async () => {
+      const response = await fetch('/version');
+      const stamp = await response.json();
+      const engineScript = [...document.querySelectorAll('script')]
+        .map((element) => element.src)
+        .find((source) => source.includes('exact-video-engine.js@'));
+      return { stamp, engineScript };
+    });
+    console.log('version:', JSON.stringify(versionFacts.stamp));
+    check(versionFacts.engineScript?.includes(
+            `exact-video-engine.js@${versionFacts.stamp.videoEngineVersion}/`),
+          'the engine the page loads matches the version stamp');
+
+    // The trap this guards: run this straight after a push, while the host is
+    // still building, and every check below passes against the PREVIOUS deploy.
+    const localHead = execSync('git rev-parse HEAD',
+      { cwd: repositoryRoot, encoding: 'utf8' }).trim();
+    const deployedCommitIsLocalHead = versionFacts.stamp.commit === localHead;
+    check(deployedCommitIsLocalHead, 'the deployed commit is the local HEAD commit');
+    if (!deployedCommitIsLocalHead) {
+      console.error(`       deployed ${versionFacts.stamp.commit}`);
+      console.error(`       local    ${localHead}`);
+      console.error('       (still building, or HEAD is not what was pushed —'
+                  + ' everything below tested the older deploy)');
+    }
+  }
 
   // ---- Load the fixture through the real file input ----
   await page.setInputFiles('#video-file-input',
@@ -223,7 +272,7 @@ try {
 
 } finally {
   await browser.close();
-  server.kill();
+  server?.kill();
 }
 
 if (pageErrors.length > 0) {

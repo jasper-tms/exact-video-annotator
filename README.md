@@ -38,6 +38,19 @@ python3 -m http.server --directory .
 (The engine and mp4box load from pinned CDN URLs, so an internet connection is
 needed on first load.)
 
+## Testing
+
+```sh
+node test/smoke-test.mjs
+```
+
+Opens the app in headless Chromium, loads the frame-numbered variable-frame-rate
+fixture, and exercises playback, frame stepping, every drawing tool, event
+hotkeys, undo/redo, and the export round-trip. Fails on any page error.
+
+Pass `--url` to run those same checks against a deployed app rather than a local
+server — see below.
+
 ## Deploying
 
 Cloudflare Pages: build command `bash build.sh`, output directory `dist/`.
@@ -69,6 +82,18 @@ On Cloudflare the commit and branch come from `CF_PAGES_COMMIT_SHA` and
 `CF_PAGES_BRANCH`, since its checkout is shallow and may carry no tags. Any
 field that cannot be determined reads `unknown`; a missing stamp never fails
 the build.
+
+### Verifying a deploy
+
+```sh
+node test/smoke-test.mjs --url https://exact-video-annotator.pages.dev/
+```
+
+The full smoke suite against the deployed app, plus two checks the stamp makes
+possible: that the engine the page actually loads matches `videoEngineVersion`,
+and that the deployed commit is the local `HEAD`. The second one matters more
+than it looks — run this straight after a push, while Cloudflare is still
+building, and without it every check would pass against the *previous* deploy.
 
 ## Architecture
 
