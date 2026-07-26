@@ -2,11 +2,27 @@
 // a numeric frame input, and a readout. Everything is denominated in integer
 // frame indices; times shown are derived from the engine, never the reverse.
 
+// Transport-button glyphs, as inline SVG rather than Unicode text characters.
+// A font glyph is centered by its line box, not its ink, so a swapped-in
+// character (the play triangle versus the pause bars, in particular) can
+// visibly shift and can also change the button's rendered width, which is why
+// the play/pause button used to resize itself on every click. Each shape
+// here has its own bounding box centered in its 24x24 viewBox — equal empty
+// margin on the left and right — so centering holds regardless of which font
+// the page loads, and both play and pause sit in a same-sized fixed box (see
+// .transport-play in style.css) so toggling between them never resizes it.
+// The chevrons open to a 110-degree interior angle (rather than a right
+// angle) as a deliberate style choice.
+const CHEVRON_LEFT_ICON = '<svg class="transport-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.1 6L9.9 12L14.1 18"/></svg>';
+const CHEVRON_RIGHT_ICON = '<svg class="transport-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 6L14.1 12L9.9 18"/></svg>';
+const PLAY_ICON = '<svg class="transport-icon transport-icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M3.6 3.25L3.6 20.75L20.4 12Z"/></svg>';
+const PAUSE_ICON = '<svg class="transport-icon transport-icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>';
+
 export function initializeTransport(app, containerElement) {
   containerElement.innerHTML = `
-    <button class="transport-play" title="Play/pause (Space)" disabled>▶</button>
-    <button class="transport-step-backward" title="Back one frame (← or ,)" disabled>⏮︎</button>
-    <button class="transport-step-forward" title="Forward one frame (→ or .)" disabled>⏭︎</button>
+    <button class="transport-play" title="Play/pause (Space)" disabled>${PLAY_ICON}${PAUSE_ICON}</button>
+    <button class="transport-step-backward" title="Back one frame (← or ,)" disabled>${CHEVRON_LEFT_ICON}</button>
+    <button class="transport-step-forward" title="Forward one frame (→ or .)" disabled>${CHEVRON_RIGHT_ICON}</button>
     <input type="range" class="transport-scrubber" min="0" max="0" step="1" value="0" disabled>
     <span class="transport-readout"><span>Frame</span><input type="text" class="transport-frame-input"
       inputmode="numeric" title="Frame number (press Enter to jump)" disabled><span
@@ -217,7 +233,7 @@ export function initializeTransport(app, containerElement) {
       control.disabled = !hasVideo;
     }
     if (!hasVideo) return;
-    playButton.textContent = engine.paused ? '▶' : '⏸';
+    playButton.classList.toggle('is-playing', !engine.paused);
     updateIndexDisplays();
   }
 

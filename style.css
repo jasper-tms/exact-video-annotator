@@ -559,6 +559,41 @@ button:disabled { opacity: 0.45; cursor: default; }
   user-select: none;
 }
 
+/* Fixed square box, regardless of which icon it holds, so the play/pause
+   button never resizes when its icon changes (it used to, because ▶ and ⏸
+   are different widths as text glyphs). */
+#transport-container .transport-play,
+#transport-container .transport-step-backward,
+#transport-container .transport-step-forward {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+#transport-container .transport-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* Both icons are always in the DOM (see js/ui/transport.js); only one is
+   shown at a time, so swapping between them never changes the button's box. */
+#transport-container .transport-icon-pause {
+  display: none;
+}
+
+#transport-container .transport-play.is-playing .transport-icon-play {
+  display: none;
+}
+
+#transport-container .transport-play.is-playing .transport-icon-pause {
+  display: block;
+}
+
 /* The scrubber's track is painted in two greys, the way a video player shows
    buffering: solid for the range whose frames are indexed and therefore
    seekable, dim for the remainder of a clip still being indexed. The fraction
