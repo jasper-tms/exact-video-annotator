@@ -37,6 +37,12 @@ export class VideoLayer extends Layer {
     const backingPixelsPerSourcePixel = renderState.pixelsPerLocalUnit
       * (renderState.devicePixelRatio ?? 1);
     context.imageSmoothingEnabled = backingPixelsPerSourcePixel < 4;
+    // A seek that is taking a moment to land dims the picture, cueing that
+    // the pixels on screen are not the requested frame yet (see
+    // app.isSeekPendingDisplay in main.js for the timing). context.restore()
+    // in viewer.js's per-layer draw loop clears this back to 'none'
+    // afterward, so there is nothing to reset here.
+    if (renderState.isSeekPendingDisplay) context.filter = 'brightness(0.4)';
     // Integer (x, y) names a pixel's top-left corner by default (offset 0); an
     // offset of 0.5 instead names its center, which draws the image shifted up
     // and left by half a pixel so that convention holds without touching any

@@ -41,6 +41,10 @@ function layerTypeDisplayName(type) {
 
 const AUTOSAVE_DEBOUNCE_MILLISECONDS = 500;
 
+// How long a seek must sit unresolved before the stall is shown on screen
+// (the video picture dims) — see isSeekPendingDisplay.
+const SEEK_PENDING_DISPLAY_DELAY_MILLISECONDS = 80;
+
 // A growing index publishes frames faster than a panel rebuild is worth; this
 // is how often those publishes are allowed to reach the UI. A settled index
 // bypasses it — see attachEngine.
@@ -67,6 +71,11 @@ class Application extends EventTarget {
   // The frame last asked for via seekToFrame/stepFrame, kept to answer
   // isSeekPending: whether the engine has actually caught up to it yet.
   #requestedFrame = null;
+  // Backing state for isSeekPendingDisplay; see that getter and
+  // updateSeekPendingDisplay for the delay/suppression rules.
+  #scrubDragActive = false;
+  #seekPendingDisplayTimer = null;
+  #isSeekPendingDisplay = false;
 
   /* ---------- Coordinates ---------- */
 
@@ -126,6 +135,53 @@ class Application extends EventTarget {
       && this.engine.presentedFrame !== this.#requestedFrame;
   }
 
+  /** Whether a stalled seek has been unresolved long enough to show on
+      screen. Anything that indicates the stall (currently the video picture
+      dimming in video-layer.js) keys off this single flag rather than
+      running its own timer, so future indicators would change in step with
+      it. Only true once isSeekPending has held for
+      SEEK_PENDING_DISPLAY_DELAY_MILLISECONDS with no scrubber drag in
+      progress — a seek that resolves within a tick or two, or one still
+      being dragged through, should not flicker the indicator. */
+  get isSeekPendingDisplay() { return this.#isSeekPendingDisplay; }
+
+  #setSeekPendingDisplay(value) {
+    if (this.#isSeekPendingDisplay === value) return;
+    this.#isSeekPendingDisplay = value;
+    this.dispatchEvent(new CustomEvent('seek-pending-display-changed'));
+    // The flag can flip from a setTimeout, with no frame or index change to
+    // otherwise trigger a repaint — request one directly so the video's own
+    // dimming (see video-layer.js) shows up without waiting on something
+    // unrelated to nudge the animation loop.
+    this.viewer?.requestRender();
+  }
+
+  /** Re-evaluates isSeekPendingDisplay. Call whenever isSeekPending changes
+      and whenever a scrubber drag starts or ends. */
+  updateSeekPendingDisplay() {
+    if (this.#seekPendingDisplayTimer !== null) {
+      clearTimeout(this.#seekPendingDisplayTimer);
+      this.#seekPendingDisplayTimer = null;
+    }
+    if (!this.isSeekPending || this.#scrubDragActive) {
+      this.#setSeekPendingDisplay(false);
+      return;
+    }
+    this.#seekPendingDisplayTimer = setTimeout(() => {
+      this.#seekPendingDisplayTimer = null;
+      if (this.isSeekPending && !this.#scrubDragActive) this.#setSeekPendingDisplay(true);
+    }, SEEK_PENDING_DISPLAY_DELAY_MILLISECONDS);
+  }
+
+  /** Holding the scrubber suspends the seek-pending display: rapid-fire seeks
+      mid-drag are expected to lag a little, and flagging every intermediate
+      tick would be noise, not signal. Re-evaluated on release, so a drag's
+      final, possibly-slow frame still gets flagged. */
+  setScrubDragActive(active) {
+    this.#scrubDragActive = active;
+    this.updateSeekPendingDisplay();
+  }
+
   /** The `frame` value a newly drawn annotation should get: the current frame
       in anchored mode, or null (applies to every frame) in agnostic mode. */
   get newItemFrame() {
@@ -137,6 +193,15 @@ class Application extends EventTarget {
     if (mode === this.annotationMode) return;
     this.annotationMode = mode;
     this.dispatchEvent(new CustomEvent('annotation-mode-changed'));
+  }
+
+  /** Playback supersedes any discrete seek: once the engine is playing, the
+      last requested frame is no longer a target the picture is chasing, and
+      keeping it around would make isSeekPending read true forever after the
+      next pause (the playhead has moved past it, so presentedFrame can never
+      match it again). The animation loop calls this on every unpaused tick. */
+  invalidateSeekTarget() {
+    this.#requestedFrame = null;
   }
 
   seekToFrame(frameIndex) {
@@ -637,9 +702,10 @@ function animationTick(now) {
       lastReportedPresentedFrame = engine.presentedFrame;
       app.viewer.requestRender();
     }
+    if (!engine.paused) app.invalidateSeekTarget();
     if (app.isSeekPending !== lastReportedSeekPending) {
       lastReportedSeekPending = app.isSeekPending;
-      app.dispatchEvent(new CustomEvent('seek-pending-changed'));
+      app.updateSeekPendingDisplay();
     }
     // Playback pinned at the last indexed frame is the one state nothing else
     // announces: the frame stops changing, so 'frame-changed' goes quiet, and
@@ -656,6 +722,7 @@ function animationTick(now) {
     selection: app.selection,
     hover: app.hover,
     document: app.annotationDocument,
+    isSeekPendingDisplay: app.isSeekPendingDisplay,
   });
   requestAnimationFrame(animationTick);
 }
