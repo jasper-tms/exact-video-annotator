@@ -8,9 +8,9 @@ export function initializeTransport(app, containerElement) {
     <button class="transport-step-backward" title="Back one frame (← or ,)" disabled>⏮︎</button>
     <button class="transport-step-forward" title="Forward one frame (→ or .)" disabled>⏭︎</button>
     <input type="range" class="transport-scrubber" min="0" max="0" step="1" value="0" disabled>
-    <input type="text" class="transport-frame-input" inputmode="numeric"
-           title="Frame number (press Enter to jump)" disabled>
-    <span class="transport-readout"></span>
+    <span class="transport-readout"><span>Frame</span><input type="text" class="transport-frame-input"
+      inputmode="numeric" title="Frame number (press Enter to jump)" disabled><span
+      class="transport-frame-total"></span><span>·</span><span class="transport-time"></span></span>
     <span class="index-waiting" hidden
           title="Playback has reached the last frame indexed so far and is waiting for the index to catch up."
           >waiting for index…</span>
@@ -24,6 +24,8 @@ export function initializeTransport(app, containerElement) {
   const stepForwardButton = containerElement.querySelector('.transport-step-forward');
   const scrubber = containerElement.querySelector('.transport-scrubber');
   const frameInput = containerElement.querySelector('.transport-frame-input');
+  const frameTotal = containerElement.querySelector('.transport-frame-total');
+  const timeReadout = containerElement.querySelector('.transport-time');
   const readout = containerElement.querySelector('.transport-readout');
   const indexWaiting = containerElement.querySelector('.index-waiting');
   const exactnessWarning = containerElement.querySelector('.exactness-warning');
@@ -91,17 +93,37 @@ export function initializeTransport(app, containerElement) {
   scrubber.addEventListener('keydown', (event) => event.preventDefault());
   scrubber.addEventListener('focus', () => scrubber.blur());
 
+  // Committing happens once, from blur — Enter just moves focus out (which
+  // triggers that blur), so a typed value is committed identically whether
+  // the user presses Enter or simply clicks elsewhere. Escape discards the
+  // edit instead of committing it, via the suppress flag below.
+  let suppressNextFrameInputCommit = false;
+
+  function commitFrameInputIfChanged() {
+    const engine = app.engine;
+    if (!engine) return;
+    const frameNumber = Number.parseInt(frameInput.value, 10);
+    if (Number.isInteger(frameNumber) && frameNumber !== engine.currentFrame) {
+      app.seekToFrame(frameNumber);
+    }
+  }
+
   frameInput.addEventListener('keydown', (event) => {
     event.stopPropagation();   // typing digits must not trigger global hotkeys
     if (event.key === 'Enter') {
-      const frameNumber = Number.parseInt(frameInput.value, 10);
-      if (Number.isInteger(frameNumber)) app.seekToFrame(frameNumber);
+      event.preventDefault();
       frameInput.blur();
     } else if (event.key === 'Escape') {
+      event.preventDefault();
+      suppressNextFrameInputCommit = true;
       frameInput.blur();
     }
   });
-  frameInput.addEventListener('blur', () => updateFrameDisplays());
+  frameInput.addEventListener('blur', () => {
+    if (!suppressNextFrameInputCommit) commitFrameInputIfChanged();
+    suppressNextFrameInputCommit = false;
+    updateFrameDisplays();
+  });
 
   function formatTime(seconds) {
     if (!Number.isFinite(seconds)) return '0:00.00';
@@ -157,8 +179,8 @@ export function initializeTransport(app, containerElement) {
     const totalTimeText = indexState !== 'growing' ? formatTime(engine.duration)
       : declaredDuration > 0 ? `~${formatTime(declaredDuration)}`
       : `${formatTime(engine.duration)}+`;
-    readout.textContent =
-      `frame ${frame} / ${totalFramesText} · ${formatTime(engine.currentTime)} / ${totalTimeText}`;
+    frameTotal.textContent = `/ ${totalFramesText}`;
+    timeReadout.textContent = `${formatTime(engine.currentTime)} / ${totalTimeText}`;
     readout.classList.toggle('index-growing', indexState === 'growing');
     readout.classList.toggle('index-truncated', indexState === 'truncated');
   }
@@ -176,6 +198,9 @@ export function initializeTransport(app, containerElement) {
     scrubber.style.setProperty('--indexed-fraction', `${(indexedFraction * 100).toFixed(2)}%`);
     indexWaiting.hidden = !engine.waitingForIndex;
     exactnessWarning.hidden = engine.frameIndexIsExact !== false;
+    // Wide enough for the last frame number so the box does not resize as the
+    // user types a shorter or longer one.
+    frameInput.style.width = `${String(maximum).length + 1}ch`;
     updateFrameDisplays();
   }
 

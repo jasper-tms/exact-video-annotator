@@ -324,14 +324,6 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .layer-tab .layer-tab-eye.layer-hidden { opacity: 0.35; }
 
-.layer-tab .layer-tab-type {
-  font-size: 10px;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0 4px;
-}
-
 .layer-tab input.layer-tab-rename {
   width: 90px;
   font-size: 13px;
@@ -398,6 +390,12 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 
 /* ---------- Layer detail panel ---------- */
+
+.layer-detail-type {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
 
 .layer-detail-row {
   display: flex;
@@ -583,6 +581,9 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--text-dim);
   font-size: 12px;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* While the index grows, the totals in the readout are a floor and a claim
@@ -607,13 +608,14 @@ button:disabled { opacity: 0.45; cursor: default; }
 .index-waiting[hidden] { display: none; }
 
 #transport-container .transport-frame-input {
-  width: 72px;
   background: var(--surface-raised);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 4px 6px;
+  padding: 2px 4px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .exactness-warning {

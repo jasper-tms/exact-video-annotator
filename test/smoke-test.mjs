@@ -124,10 +124,14 @@ try {
   await page.waitForFunction(() => window.exactVideoAnnotator.currentFrame === 2);
   check(true, 'stepped to frame 2 with ArrowRight');
 
-  // ---- Tool hotkeys toggle: pressing the active tool's key deselects it ----
-  await page.keyboard.press('o');   // the point tool is active at startup
+  // ---- Tool hotkeys toggle: pressing a tool's key selects it; pressing the
+  // active tool's key again deselects it back to pan ----
+  await page.keyboard.press('o');   // pan is active at startup
   let activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
-  check(activeToolId === null, "pressing the active tool's hotkey deselects it");
+  check(activeToolId === 'point', 'pressing o selects the point tool');
+  await page.keyboard.press('o');
+  activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
+  check(activeToolId === 'pan', "pressing the active tool's hotkey deselects it back to pan");
   await page.keyboard.press('o');
   activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
   check(activeToolId === 'point', 'pressing o again reselects the point tool');

@@ -7,6 +7,10 @@
 
 const ANNOTATION_LAYER_TYPES = new Set(['coordinates', 'segmentation', 'frames']);
 
+function layerTypeDisplayName(type) {
+  return `${type[0].toUpperCase()}${type.slice(1)}`;
+}
+
 export function initializeLayerDetail(app, containerElement) {
   function isUserEditingHere() {
     const activeElement = document.activeElement;
@@ -44,6 +48,11 @@ export function initializeLayerDetail(app, containerElement) {
 
     observedLayer = layer;
     layer.addEventListener('layer-changed', observedLayerHandler);
+
+    const typeLine = document.createElement('p');
+    typeLine.className = 'layer-detail-type';
+    typeLine.textContent = `Type: ${layerTypeDisplayName(layer.type)}`;
+    containerElement.appendChild(typeLine);
 
     /* ---- Common controls: visibility, opacity ---- */
 

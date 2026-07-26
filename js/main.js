@@ -406,7 +406,7 @@ initializeAnnotationsTable(app, document.getElementById('annotations-table-conta
 initializeEventHotkeys(app);
 
 app.rebuildAnnotationLayersFromDocument();
-app.setActiveTool('point');
+app.setActiveTool('pan');
 
 /* ---------- Video loading ---------- */
 
@@ -714,7 +714,7 @@ function reflectActiveTool() {
 }
 app.addEventListener('tool-changed', reflectActiveTool);
 // The initial tool is set during bootstrap, before this listener exists, so sync
-// the button highlight once now (otherwise 'point' stays unhighlighted at load).
+// the button highlight once now (otherwise 'pan' stays unhighlighted at load).
 reflectActiveTool();
 
 function reflectToolAvailability() {

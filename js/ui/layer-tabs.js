@@ -324,11 +324,6 @@ export function initializeLayerTabs(app, containerElement) {
     nameElement.textContent = layer.name;
     tab.appendChild(nameElement);
 
-    const typeBadge = document.createElement('span');
-    typeBadge.className = `layer-tab-type layer-type-${layer.type}`;
-    typeBadge.textContent = layer.type === 'video' ? 'video' : layerTypeDisplayName(layer.type);
-    tab.appendChild(typeBadge);
-
     const eyeButton = document.createElement('button');
     eyeButton.type = 'button';
     eyeButton.className = 'layer-tab-eye';
