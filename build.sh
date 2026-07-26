@@ -20,12 +20,10 @@ repositoryUrl="https://github.com/jasper-tms/exact-video-annotator"
 commit="${CF_PAGES_COMMIT_SHA:-$(git rev-parse HEAD 2>/dev/null || echo '')}"
 branch="${CF_PAGES_BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')}"
 
-# `git describe` needs tags and history that a shallow clone may not have, so
-# fall back to the short commit hash.
-tag="$(git describe --tags --always --dirty 2>/dev/null || echo '')"
-if [[ -z "$tag" ]]; then
-  tag="${commit:0:12}"
-fi
+# The VERSION file, not `git describe`: VERSION is checked in, so it survives
+# the shallow tagless clone a host builds from, and it is the same value the
+# release workflow cuts the vX.Y.Z tag from. Bare, with no leading "v".
+annotatorVersion="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo '')"
 
 if [[ -n "$commit" ]]; then
   commitUrl="${repositoryUrl}/commit/${commit}"
@@ -33,12 +31,14 @@ else
   commit="unknown"
   commitUrl="unknown"
 fi
-[[ -n "$tag" ]] || tag="unknown"
+[[ -n "$annotatorVersion" ]] || annotatorVersion="unknown"
 [[ -n "$branch" ]] || branch="unknown"
 
 # Read the engine pin out of index.html so this stays a single source of truth:
 # the whole point of the stamp is telling which engine the live app is running.
-videoEngineVersion="$(sed -n 's|.*exact-video-engine\.js@\([^/]*\)/exact-video-engine\.js.*|\1|p' \
+# The pin names a tag, so it carries a leading "v"; strip it so both versions in
+# the stamp read the same way.
+videoEngineVersion="$(sed -n 's|.*exact-video-engine\.js@v\{0,1\}\([^/]*\)/exact-video-engine\.js.*|\1|p' \
   index.html | head -1)"
 [[ -n "$videoEngineVersion" ]] || videoEngineVersion="unknown"
 
@@ -46,7 +46,7 @@ buildTimestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
 cat > dist/version.json <<EOF
 {
-  "tag": "${tag}",
+  "annotatorVersion": "${annotatorVersion}",
   "commit": "${commit}",
   "commitUrl": "${commitUrl}",
   "branch": "${branch}",
@@ -70,4 +70,4 @@ cat > dist/_headers <<'EOF'
 EOF
 
 echo "Staged $(find dist -type f | wc -l | tr -d ' ') files into dist/"
-echo "Version stamp: ${tag} (engine ${videoEngineVersion}) built ${buildTimestamp}"
+echo "Version stamp: ${annotatorVersion} (engine ${videoEngineVersion}) built ${buildTimestamp}"

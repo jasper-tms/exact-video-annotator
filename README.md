@@ -71,26 +71,30 @@ the extensionless one exists because it is easier to type):
 
 ```json
 {
-  "tag": "da3b37d",
-  "commit": "da3b37dad570540fcb815466a7cf2c751cfea08b",
-  "commitUrl": "https://github.com/jasper-tms/exact-video-annotator/commit/da3b37dad570540fcb815466a7cf2c751cfea08b",
+  "annotatorVersion": "0.9.0",
+  "commit": "fc6a71fdcb59f93198b08c7d69be5dda9fb601ac",
+  "commitUrl": "https://github.com/jasper-tms/exact-video-annotator/commit/fc6a71fdcb59f93198b08c7d69be5dda9fb601ac",
   "branch": "main",
-  "buildTimestamp": "2026-07-25T21:11:27Z",
-  "videoEngineVersion": "v2.0.0"
+  "buildTimestamp": "2026-07-26T12:16:00Z",
+  "videoEngineVersion": "2.2.1"
 }
 ```
 
 `build.sh` writes it, so the stamp describes the commit that produced the
 files being served rather than whatever the repository looks like now.
-`videoEngineVersion` is read back out of the pinned CDN URL in `index.html`,
-which makes this the quickest way to confirm which engine release production
-actually picked up. Both paths are served `Cache-Control: no-store` — a
-version stamp answered from cache would defeat its own purpose.
+`annotatorVersion` is read from `VERSION` (see [Releasing](#releasing)) and
+`videoEngineVersion` out of the pinned CDN URL in `index.html`, which makes
+this the quickest way to confirm which engine release production actually
+picked up. Both versions are reported bare, with no leading `v`. Both paths are
+served `Cache-Control: no-store` — a version stamp answered from cache would
+defeat its own purpose.
 
 On Cloudflare the commit and branch come from `CF_PAGES_COMMIT_SHA` and
-`CF_PAGES_BRANCH`, since its checkout is shallow and may carry no tags. Any
-field that cannot be determined reads `unknown`; a missing stamp never fails
-the build.
+`CF_PAGES_BRANCH`, since its checkout is shallow. That shallowness is also why
+the app version comes from the checked-in `VERSION` rather than from `git
+describe`, which would have no tags to describe and would report a bare hash.
+Any field that cannot be determined reads `unknown`; a missing stamp never
+fails the build.
 
 ### Verifying a deploy
 
@@ -103,6 +107,31 @@ possible: that the engine the page actually loads matches `videoEngineVersion`,
 and that the deployed commit is the local `HEAD`. The second one matters more
 than it looks — run this straight after a push, while Cloudflare is still
 building, and without it every check would pass against the *previous* deploy.
+
+## Releasing
+
+`VERSION` holds the app's version and nothing else, with no leading `v`. Editing
+it on `main` is the whole release: a
+[workflow](.github/workflows/release.yml) tags that commit `vX.Y.Z` and cuts a
+GitHub release from it.
+
+```sh
+echo 0.10.0 > VERSION
+git commit -am "Release v0.10.0"
+git push                          # the workflow tags v0.10.0 and releases it
+```
+
+Nowhere else in the tree states the version, so nothing can drift out of step
+with `VERSION` and there is no sync step or commit hook to run: `build.sh` reads
+`VERSION` when it stamps a build, and the tag is derived from the same file. The
+version is deliberately *not* baked into `index.html` — the deployed app reports
+what it is at `/version`, and a copy in the page would be one more thing to keep
+honest.
+
+(This is the same ritual as
+[exact-video-engine.js](https://github.com/jasper-tms/exact-video-engine.js#releasing),
+minus its `sync_version.sh` hook, which exists there only because a library must
+also state its version in `package.json` and in pinned CDN URLs.)
 
 ## Architecture
 

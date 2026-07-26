@@ -401,4 +401,14 @@ What the UI does with that:
 
 Cloudflare Pages, build command `bash build.sh`, output directory `dist/`.
 `build.sh` copies the static app (index.html, style.css, js/) into `dist/` —
-there is no compile step.
+there is no compile step — and writes the version stamp served at `/version`.
+
+The app's version lives in `VERSION` and nowhere else: no module imports it and
+nothing in `index.html` states it, so there is no copy to keep in step. It
+reaches the outside world only through the stamp `build.sh` writes and the
+`vX.Y.Z` tag the release workflow cuts from the same file. See the README's
+[Releasing](README.md#releasing) and [What is live right
+now](README.md#what-is-live-right-now).
+
+This is unrelated to the annotation document's `version: 1`, which numbers the
+JSON format rather than the app.

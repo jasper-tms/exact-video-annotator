@@ -1,0 +1,43 @@
+name: Tag and release
+
+# Editing VERSION on main is the whole release ritual. Nothing in the tree is a
+# static copy of the version — build.sh reads VERSION when it stamps the build —
+# so there is nothing to keep in step here, only a tag to place on this commit.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # A tag is immutable, so a malformed VERSION would be a malformed tag we
+      # then live with. Catch it before the tag exists rather than after.
+      - name: Get version from VERSION
+        id: get_version
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "error: VERSION must be MAJOR.MINOR.PATCH with no leading 'v';" \
+                 "got '$version'" >&2
+            exit 1
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Create tag and GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: v${{ steps.get_version.outputs.version }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -72,8 +72,10 @@ try {
       return { stamp, engineScript };
     });
     console.log('version:', JSON.stringify(versionFacts.stamp));
+    // The stamp reports the engine version bare; the CDN URL pins a tag, which
+    // carries the leading "v". Put it back rather than matching loosely.
     check(versionFacts.engineScript?.includes(
-            `exact-video-engine.js@${versionFacts.stamp.videoEngineVersion}/`),
+            `exact-video-engine.js@v${versionFacts.stamp.videoEngineVersion}/`),
           'the engine the page loads matches the version stamp');
 
     // The trap this guards: run this straight after a push, while the host is
