@@ -10,6 +10,10 @@
 
 const DRAG_START_THRESHOLD_PIXELS = 5;
 
+function layerTypeDisplayName(type) {
+  return `${type[0].toUpperCase()}${type.slice(1)}`;
+}
+
 const EYE_VISIBLE_SVG = `
   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -58,6 +62,11 @@ export function initializeLayerTabs(app, containerElement) {
     scrollButtons[0].hidden = !overflowing || strip.scrollLeft <= 0;
     scrollButtons[1].hidden = !overflowing
       || strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1;
+    // The ＋ button rides right after the last tab when everything fits, but
+    // pins back to its spot beside ✕ once the strip needs scroll arrows —
+    // both moves are no-ops when it is already where it belongs.
+    if (overflowing) containerElement.insertBefore(addButton, deleteButton);
+    else strip.appendChild(addButton);
   }
   strip.addEventListener('scroll', updateScrollButtons);
   new ResizeObserver(updateScrollButtons).observe(strip);
@@ -65,14 +74,14 @@ export function initializeLayerTabs(app, containerElement) {
   /* ---------- Add-layer menu ---------- */
 
   addButton.addEventListener('click', () => {
-    const existingMenu = containerElement.querySelector('.layer-tab-add-menu');
+    const existingMenu = document.querySelector('.layer-tab-add-menu');
     if (existingMenu) { existingMenu.remove(); return; }
     const menu = document.createElement('div');
     menu.className = 'layer-tab-add-menu';
-    for (const type of ['points', 'shapes', 'events']) {
+    for (const type of ['coordinates', 'segmentation', 'frames']) {
       const option = document.createElement('button');
       option.type = 'button';
-      option.textContent = `New ${type} layer`;
+      option.textContent = `New ${layerTypeDisplayName(type)} layer`;
       option.addEventListener('click', () => {
         menu.remove();
         const layer = app.addAnnotationLayer(type);
@@ -80,7 +89,15 @@ export function initializeLayerTabs(app, containerElement) {
       });
       menu.appendChild(option);
     }
-    addButton.appendChild(menu);
+    // Positioned with fixed viewport coordinates (rather than an absolute
+    // anchor inside addButton) so it isn't clipped when the ＋ button is
+    // riding inside the scrollable tab strip — that ancestor's overflow: auto
+    // would otherwise crop anything overflowing above it.
+    const buttonRect = addButton.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = `${buttonRect.left}px`;
+    menu.style.bottom = `${window.innerHeight - buttonRect.top}px`;
+    document.body.appendChild(menu);
     const dismiss = (event) => {
       if (!menu.contains(event.target) && event.target !== addButton) {
         menu.remove();
@@ -309,7 +326,7 @@ export function initializeLayerTabs(app, containerElement) {
 
     const typeBadge = document.createElement('span');
     typeBadge.className = `layer-tab-type layer-type-${layer.type}`;
-    typeBadge.textContent = layer.type;
+    typeBadge.textContent = layer.type === 'video' ? 'video' : layerTypeDisplayName(layer.type);
     tab.appendChild(typeBadge);
 
     const eyeButton = document.createElement('button');

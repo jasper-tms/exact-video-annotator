@@ -1,7 +1,7 @@
-// The events layer holds temporal-event items: point events (a single frame)
+// The frames layer holds temporal-event items: point events (a single frame)
 // and range events (a span of frames). Events have no spatial presence, so
-// unlike the points and shapes layers this one never draws on the canvas and
-// is never hit-tested or edited by the select tool. It exists so that events
+// unlike the coordinates layer this one never draws on the canvas and is
+// never hit-tested or edited by the drawing tools. It exists so that events
 // live in the same layer list as the other annotations (visibility, z-order,
 // serialization) and so the annotations table can list and delete them.
 //
@@ -11,14 +11,14 @@
 
 import { Layer } from './layer.js';
 
-export class EventsLayer extends Layer {
+export class FramesLayer extends Layer {
   /**
-   * @param {object} documentLayer  The events layer from the annotation
-   *   document ({ id, type: 'events', name, visible, opacity, transform,
+   * @param {object} documentLayer  The frames layer from the annotation
+   *   document ({ id, type: 'frames', name, visible, opacity, transform,
    *   items }). Its `items` array is adopted by reference.
    */
   constructor(documentLayer) {
-    super({ id: documentLayer.id, type: 'events', name: documentLayer.name });
+    super({ id: documentLayer.id, type: 'frames', name: documentLayer.name });
     this.visible = documentLayer.visible;
     this.opacity = documentLayer.opacity;
     this.transform = { ...documentLayer.transform };

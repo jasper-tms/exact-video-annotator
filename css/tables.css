@@ -177,6 +177,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 120px;
+  vertical-align: top;
+}
+
+/* One "(x, y)" pair per line (see formatCoordinatesCell) — monospaced and
+   left as literal whitespace so the padding lines the punctuation up, and
+   free of the generic cell's single-line ellipsis truncation. */
+.annotations-table .data-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: clip;
+  max-width: none;
 }
 
 .annotations-table tbody tr {

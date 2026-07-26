@@ -8,10 +8,11 @@
 // cheaply (toggling a class) as playback moves, never a full rebuild.
 
 const COLUMNS = [
-  { key: 'layer', label: 'Layer' },
-  { key: 'kind', label: 'Kind' },
-  { key: 'label', label: 'Label' },
-  { key: 'frame', label: 'Frame(s)' },
+  { key: 'layer', label: 'Layer', sortable: true },
+  { key: 'kind', label: 'Kind', sortable: true },
+  { key: 'data', label: 'Data (x,y)', sortable: false },
+  { key: 'label', label: 'Label', sortable: true },
+  { key: 'frame', label: 'Frame(s)', sortable: true },
 ];
 
 export function initializeAnnotationsTable(app, containerElement) {
@@ -26,8 +27,9 @@ export function initializeAnnotationsTable(app, containerElement) {
       <table class="annotations-table">
         <thead>
           <tr>
-            ${COLUMNS.map((column) =>
-              `<th data-column="${column.key}" class="sortable">${column.label}</th>`).join('')}
+            ${COLUMNS.map((column) => column.sortable
+              ? `<th data-column="${column.key}" class="sortable">${column.label}</th>`
+              : `<th>${column.label}</th>`).join('')}
             <th class="delete-column"></th>
           </tr>
         </thead>
@@ -91,6 +93,7 @@ export function initializeAnnotationsTable(app, containerElement) {
   function rebuild() {
     const rows = collectRows();
     rows.sort(compareRows);
+    const coordinatePadWidth = computeCoordinatePadWidth(rows);
 
     const countText = `${rows.length} annotation${rows.length === 1 ? '' : 's'}`;
     const selectedLayer = app.selectedLayer;
@@ -125,7 +128,7 @@ export function initializeAnnotationsTable(app, containerElement) {
 
     const currentFrame = app.currentFrame;
     for (const rowData of rows) {
-      const tableRow = buildTableRow(app, rowData);
+      const tableRow = buildTableRow(app, rowData, coordinatePadWidth);
       if (isRowSelected(app, rowData)) tableRow.classList.add('selected');
       tableRow.classList.toggle('at-current-frame', rowData.includesFrame(currentFrame));
       tableBody.appendChild(tableRow);
@@ -155,12 +158,11 @@ export function initializeAnnotationsTable(app, containerElement) {
  * text and a predicate for whether it occupies a given frame.
  */
 function describeItem(app, layer, item) {
-  if (layer.type === 'events') return describeEvent(app, layer, item);
+  if (layer.type === 'frames') return describeEvent(app, layer, item);
   return describeSpatialItem(app, layer, item);
 }
 
 function describeSpatialItem(app, layer, item) {
-  const kind = layer.type === 'shapes' ? item.kind : 'point';
   const className = findName(app.annotationDocument.classes, item.classId);
   // A frame-agnostic item (frame === null) applies to every frame.
   const isFrameAgnostic = item.frame === null;
@@ -170,7 +172,8 @@ function describeSpatialItem(app, layer, item) {
     isEvent: false,
     frame: item.frame,
     layerName: layer.name,
-    kindText: kind,
+    kindText: item.kind,
+    vertices: item.vertices,
     labelText: className ?? item.name ?? '',
     framesText: isFrameAgnostic ? 'all' : String(item.frame),
     includesFrame: isFrameAgnostic ? () => true : (frame) => frame === item.frame,
@@ -189,12 +192,45 @@ function describeEvent(app, layer, item) {
     frame: item.startFrame,
     layerName: layer.name,
     kindText: eventTypeName,
+    vertices: [],
     labelText: '',
     framesText: formatEventFrames(item),
     includesFrame: (frame) => frame >= item.startFrame
       && (inProgress || frame <= item.endFrame),
     selectable: false,
   };
+}
+
+function roundToOneDecimal(value) {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * The longest formatted coordinate value across every row currently shown, so
+ * that every row's parentheses and commas line up in the monospaced column.
+ * Recomputed on every rebuild, so it grows the moment a wider value appears
+ * and shrinks back once it's gone.
+ */
+function computeCoordinatePadWidth(rows) {
+  let maxWidth = 0;
+  for (const row of rows) {
+    for (const [x, y] of row.vertices) {
+      maxWidth = Math.max(maxWidth, String(roundToOneDecimal(x)).length, String(roundToOneDecimal(y)).length);
+    }
+  }
+  return maxWidth;
+}
+
+/** One "(x, y)" pair per line, both numbers right-padded to padWidth so the
+    punctuation lines up down the column. */
+function formatCoordinatesCell(vertices, padWidth) {
+  return vertices
+    .map(([x, y]) => `(${padNumber(x, padWidth)}, ${padNumber(y, padWidth)})`)
+    .join('\n');
+}
+
+function padNumber(value, padWidth) {
+  return String(roundToOneDecimal(value)).padStart(padWidth, ' ');
 }
 
 function formatEventFrames(item) {
@@ -205,11 +241,12 @@ function formatEventFrames(item) {
 
 /* ---------- Row rendering ---------- */
 
-function buildTableRow(app, rowData) {
+function buildTableRow(app, rowData, coordinatePadWidth) {
   const tableRow = document.createElement('tr');
 
   tableRow.appendChild(textCell(rowData.layerName, 'layer-cell'));
   tableRow.appendChild(textCell(rowData.kindText, 'kind-cell'));
+  tableRow.appendChild(textCell(formatCoordinatesCell(rowData.vertices, coordinatePadWidth), 'data-cell'));
   tableRow.appendChild(textCell(rowData.labelText, 'label-cell'));
   tableRow.appendChild(textCell(rowData.framesText, 'frame-cell'));
 

@@ -4,14 +4,15 @@
 
 import { Viewer } from './viewer.js';
 import { VideoLayer } from './layers/video-layer.js';
-import { PointsLayer } from './layers/points-layer.js';
-import { ShapesLayer } from './layers/shapes-layer.js';
-import { EventsLayer } from './layers/events-layer.js';
+import { CoordinatesLayer } from './layers/coordinates-layer.js';
+import { SegmentationLayer } from './layers/segmentation-layer.js';
+import { FramesLayer } from './layers/frames-layer.js';
 import { UndoHistory } from './undo.js';
 import {
   createEmptyDocument, documentToJson, documentFromJson, newId,
   autosaveKey, saveAutosave, loadAutosave,
 } from './document.js';
+import { panTool } from './tools/pan-tool.js';
 import { pointTool } from './tools/point-tool.js';
 import { polygonTool } from './tools/polygon-tool.js';
 import { lineTool } from './tools/line-tool.js';
@@ -22,12 +23,20 @@ import { initializeLayerDetail } from './ui/layer-detail.js';
 import { initializeAnnotationsTable } from './ui/annotations-table.js';
 import { initializeClassManager } from './ui/class-manager.js';
 import { initializeToasts } from './ui/toasts.js';
+import { drawPixelGrid } from './pixel-grid.js';
 
 const ANNOTATION_LAYER_CONSTRUCTORS = {
-  points: PointsLayer,
-  shapes: ShapesLayer,
-  events: EventsLayer,
+  coordinates: CoordinatesLayer,
+  segmentation: SegmentationLayer,
+  frames: FramesLayer,
 };
+
+/** Layer type key -> the required tool, for the tool-rail's availability check. */
+const TOOL_REQUIRED_LAYER_TYPE = { point: 'coordinates', line: 'coordinates', polygon: 'coordinates' };
+
+function layerTypeDisplayName(type) {
+  return `${type[0].toUpperCase()}${type.slice(1)}`;
+}
 
 const AUTOSAVE_DEBOUNCE_MILLISECONDS = 500;
 
@@ -233,13 +242,19 @@ class Application extends EventTarget {
 
   #createViewLayer(documentLayer) {
     const LayerConstructor = ANNOTATION_LAYER_CONSTRUCTORS[documentLayer.type];
-    const viewLayer = new LayerConstructor(documentLayer);
+    // The extra `this` argument is only read by CoordinatesLayer (to look up
+    // the document's integer-coordinate convention); the other constructors
+    // take a single argument and silently ignore it.
+    const viewLayer = new LayerConstructor(documentLayer, this);
     // Panel edits (name/visibility/opacity/transform) flow back to the document.
     viewLayer.addEventListener('layer-changed', () => {
       documentLayer.name = viewLayer.name;
       documentLayer.visible = viewLayer.visible;
       documentLayer.opacity = viewLayer.opacity;
       documentLayer.transform = { ...viewLayer.transform };
+      if (documentLayer.type === 'coordinates') {
+        documentLayer.allowFractionalCoordinates = viewLayer.allowFractionalCoordinates;
+      }
       this.markDocumentChanged();
     });
     return viewLayer;
@@ -259,7 +274,7 @@ class Application extends EventTarget {
   /* ---------- Tools ---------- */
 
   toolRegistry = Object.fromEntries(
-    [pointTool, polygonTool, lineTool].map((tool) => [tool.id, tool]));
+    [panTool, pointTool, polygonTool, lineTool].map((tool) => [tool.id, tool]));
 
   setActiveTool(toolId) {
     // A null toolId means "no tool selected" — a canvas drag then pans the view.
@@ -327,9 +342,20 @@ const videoEngineCanvas = document.getElementById('video-engine-canvas');
 const videoEngineElement = document.getElementById('video-engine-element');
 const dropHint = document.getElementById('drop-hint');
 const indexingStatus = document.getElementById('indexing-status');
-const engineTierLabel = document.getElementById('engine-tier-label');
+const hoveredPixelLabel = document.getElementById('hovered-pixel-label');
 
 app.viewer = new Viewer(stageCanvas);
+
+/** Which world pixel the cursor is over — a property of the canvas itself,
+    not of whatever media layer happens to be loaded, so it shows regardless
+    of whether a video is open. Cleared on pointerleave, below. */
+function updateHoveredPixelLabel(worldPoint) {
+  const pixelX = Math.floor(worldPoint.x);
+  const pixelY = Math.floor(worldPoint.y);
+  hoveredPixelLabel.textContent = `x=${pixelX}, y=${pixelY}`;
+}
+stageCanvas.addEventListener('pointerleave', () => { hoveredPixelLabel.textContent = ''; });
+
 app.viewer.toolDelegate = {
   onPointerDown: (worldPoint, event) => {
     // No tool selected: a canvas drag pans the view (the viewer takes over the
@@ -337,11 +363,15 @@ app.viewer.toolDelegate = {
     if (!app.activeTool) { app.viewer.beginPanFromPointerEvent(event); return; }
     app.activeTool.onPointerDown?.(app, worldPoint, event);
   },
-  onPointerMove: (worldPoint, event) => app.activeTool?.onPointerMove?.(app, worldPoint, event),
+  onPointerMove: (worldPoint, event) => {
+    updateHoveredPixelLabel(worldPoint);
+    app.activeTool?.onPointerMove?.(app, worldPoint, event);
+  },
   onPointerUp: (worldPoint, event) => app.activeTool?.onPointerUp?.(app, worldPoint, event),
   onDoubleClick: (worldPoint, event) => app.activeTool?.onDoubleClick?.(app, worldPoint, event),
 };
 app.viewer.setOverlayPainter((context, renderState) => {
+  drawPixelGrid(context, renderState);
   app.activeTool?.drawOverlay?.(context, renderState);
 });
 
@@ -503,7 +533,6 @@ function attachEngine(engine, { name, sizeBytes }) {
   const videoLayer = new VideoLayer(engine, videoHost);
   app.viewer.addLayer(videoLayer, 0);
 
-  engineTierLabel.textContent = engine.tier ?? '';
   dropHint.classList.add('hidden');
   app.viewer.fitToContent();
 
@@ -599,13 +628,47 @@ redoButton.addEventListener('click', () => app.undoHistory.redo());
 /* ---------- Toolbar ---------- */
 
 const toolButtons = [...document.querySelectorAll('#tool-rail button[data-tool]')];
-for (const button of toolButtons) {
-  button.addEventListener('click', () => {
-    const toolId = button.dataset.tool;
-    // Clicking the already-active tool clears it (no tool → a drag pans).
-    app.setActiveTool(app.activeTool?.id === toolId ? null : toolId);
-  });
+// Preserved so an unavailable button's hotkey tooltip can be restored once a
+// matching layer exists again.
+for (const button of toolButtons) button.dataset.baseTitle = button.title;
+
+function toolIsAvailable(toolId) {
+  const requiredType = TOOL_REQUIRED_LAYER_TYPE[toolId];
+  return !requiredType || app.annotationLayers.some((layer) => layer.type === requiredType);
 }
+
+for (const button of toolButtons) {
+  const toolId = button.dataset.tool;
+  const requiredType = TOOL_REQUIRED_LAYER_TYPE[toolId];
+
+  button.addEventListener('click', () => {
+    if (!toolIsAvailable(toolId)) {
+      app.showToast(
+        `Requires a ${layerTypeDisplayName(requiredType)} layer: Right-click to create one`,
+        { kind: 'warning' });
+      return;
+    }
+    // Switch to a matching layer first, if the active one isn't already of the
+    // required type, so the tool draws into the layer it just switched to.
+    if (requiredType) {
+      const targetLayer = app.findAnnotationLayerForType(requiredType);
+      if (targetLayer && app.activeLayer?.id !== targetLayer.id) app.setActiveLayer(targetLayer.id);
+    }
+    // Clicking the already-active tool deselects it, falling back to pan.
+    app.setActiveTool(app.activeTool?.id === toolId ? 'pan' : toolId);
+  });
+
+  if (requiredType) {
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      if (toolIsAvailable(toolId)) return;
+      const layer = app.addAnnotationLayer(requiredType);
+      app.setActiveLayer(layer.id);
+      app.setActiveTool(toolId);
+    });
+  }
+}
+
 function reflectActiveTool() {
   for (const button of toolButtons) {
     button.classList.toggle('active-tool', button.dataset.tool === app.activeTool?.id);
@@ -616,7 +679,57 @@ app.addEventListener('tool-changed', reflectActiveTool);
 // the button highlight once now (otherwise 'point' stays unhighlighted at load).
 reflectActiveTool();
 
+function reflectToolAvailability() {
+  for (const button of toolButtons) {
+    const toolId = button.dataset.tool;
+    const requiredType = TOOL_REQUIRED_LAYER_TYPE[toolId];
+    if (!requiredType) continue;
+    const available = toolIsAvailable(toolId);
+    button.classList.toggle('rail-button-unavailable', !available);
+    button.title = available
+      ? button.dataset.baseTitle
+      : `Requires a ${layerTypeDisplayName(requiredType)} layer: Right-click to create one`;
+  }
+}
+app.addEventListener('layers-changed', reflectToolAvailability);
+reflectToolAvailability();
+
+/* The paintbrush (segmentation) button has no backing tool yet — pixel-wise
+   painting is not implemented, regardless of whether a Segmentation layer
+   exists, so it always shows the same message rather than participating in
+   the generic tool-availability machinery above. */
+const paintToolButton = document.getElementById('paint-tool-button');
+paintToolButton.classList.add('rail-button-unavailable');
+function announcePaintNotImplemented() {
+  app.showToast("Pixel painting isn't implemented yet.", { kind: 'warning' });
+}
+paintToolButton.addEventListener('click', announcePaintNotImplemented);
+paintToolButton.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  announcePaintNotImplemented();
+});
+
 document.getElementById('fit-view-button').addEventListener('click', () => app.viewer.fitToContent());
+
+/* ---------- Integer coordinate convention ---------- */
+
+const integerCoordinateSelect = document.getElementById('integer-coordinate-select');
+integerCoordinateSelect.addEventListener('change', () => {
+  app.annotationDocument.integerCoordinateOffset = Number(integerCoordinateSelect.value);
+  app.markDocumentChanged();
+});
+function reflectIntegerCoordinateSelect() {
+  const hasCoordinateAnnotations = app.annotationDocument.layers.some((layer) =>
+    layer.type === 'coordinates' && layer.items.length > 0);
+  integerCoordinateSelect.value = String(app.annotationDocument.integerCoordinateOffset ?? 0);
+  integerCoordinateSelect.disabled = hasCoordinateAnnotations;
+  integerCoordinateSelect.title = hasCoordinateAnnotations
+    ? 'Locked: delete every coordinates annotation to change this.'
+    : 'Whether an integer (x, y) names a pixel\'s top-left corner or its center';
+}
+app.addEventListener('document-changed', reflectIntegerCoordinateSelect);
+app.addEventListener('layers-changed', reflectIntegerCoordinateSelect);
+reflectIntegerCoordinateSelect();
 
 /* ---------- Annotation-mode toggle (frame-anchored vs frame-agnostic) ---------- */
 
@@ -757,8 +870,8 @@ window.addEventListener('keydown', (event) => {
 
   for (const tool of Object.values(app.toolRegistry)) {
     if (tool.hotkey === event.key) {
-      // Pressing the active tool's hotkey deselects it (no tool → a drag pans).
-      app.setActiveTool(app.activeTool?.id === tool.id ? null : tool.id);
+      // Pressing the active tool's hotkey deselects it, falling back to pan.
+      app.setActiveTool(app.activeTool?.id === tool.id ? 'pan' : tool.id);
       return;
     }
   }

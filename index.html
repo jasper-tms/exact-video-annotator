@@ -15,12 +15,24 @@
 <body>
   <header id="toolbar">
     <span id="application-title">exact-video-annotator</span>
-    <span class="toolbar-group">
-      <button id="open-video-button" title="Open a video file">Open video</button>
-      <button id="import-annotations-button" title="Import an annotations JSON file">Import</button>
-      <button id="export-annotations-button" title="Export annotations as JSON">Export</button>
-    </span>
-    <span id="engine-tier-label" title="Which playback engine this clip got"></span>
+    <!-- Everything between the title and the hovered-pixel readout scrolls
+         sideways rather than shrinking when the window is too narrow — the
+         title and the readout are the two things that must always stay put. -->
+    <div id="toolbar-scroll-region">
+      <span class="toolbar-group">
+        <button id="open-video-button" title="Open a video file">Open video</button>
+        <button id="import-annotations-button" title="Import an annotations JSON file">Import</button>
+        <button id="export-annotations-button" title="Export annotations as JSON">Export</button>
+      </span>
+      <span class="toolbar-group integer-coordinate-group">
+        <label for="integer-coordinate-select">Integer coordinates are:</label>
+        <select id="integer-coordinate-select">
+          <option value="0">Pixel top-left corner</option>
+          <option value="0.5">Pixel center</option>
+        </select>
+      </span>
+    </div>
+    <span id="hovered-pixel-label" title="The video pixel under the cursor"></span>
   </header>
 
   <!-- First screenful: the canvas owns the screen. A slim icon rail on the
@@ -32,10 +44,19 @@
     <nav id="tool-rail">
       <!-- Each tool also selects and moves existing annotations of its own
            kind; pressing a tool's hotkey (or clicking its button) while it is
-           already active deselects it, and a drag then pans the view. -->
+           already active deselects it, falling back to the pan tool. -->
+      <button data-tool="pan" class="rail-button" data-hotkey="p" title="Pan the view (p)">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+          <polygon points="12,1 15.5,6 13,6 13,18 15.5,18 12,23 8.5,18 11,18 11,6 8.5,6"></polygon>
+          <polygon points="1,12 6,8.5 6,11 18,11 18,8.5 23,12 18,15.5 18,13 6,13 6,15.5"></polygon>
+        </svg>
+      </button>
       <button data-tool="point" class="rail-button" data-hotkey="o" title="Add points (o)">●</button>
       <button data-tool="line" class="rail-button" data-hotkey="l" title="Draw lines (l)">╱</button>
       <button data-tool="polygon" class="rail-button" data-hotkey="g" title="Draw polygons (g)">⬠</button>
+      <!-- Pixel-wise segmentation isn't implemented yet, so this button has no
+           backing tool at all — it always shows a "not implemented" message. -->
+      <button id="paint-tool-button" class="rail-button" title="Paint pixels — not implemented yet">🖌</button>
       <!-- Frame-agnostic toggle: when on (∞ lit), newly drawn annotations apply
            across every frame instead of being anchored to the current frame.
            Defaults to off; it never changes existing annotations. -->

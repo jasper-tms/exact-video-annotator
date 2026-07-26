@@ -5,7 +5,7 @@
 // This is deliberately below the fold: the wheel zooms over the canvas, and
 // scrolls the page down to here everywhere else.
 
-const ANNOTATION_LAYER_TYPES = new Set(['points', 'shapes', 'events']);
+const ANNOTATION_LAYER_TYPES = new Set(['coordinates', 'segmentation', 'frames']);
 
 export function initializeLayerDetail(app, containerElement) {
   function isUserEditingHere() {
@@ -100,6 +100,26 @@ export function initializeLayerDetail(app, containerElement) {
       transformRow.appendChild(fieldLabel);
     }
     containerElement.appendChild(transformRow);
+
+    /* ---- Coordinates layer: fractional-coordinate policy ---- */
+
+    if (layer.type === 'coordinates') {
+      const fractionalRow = document.createElement('div');
+      fractionalRow.className = 'layer-detail-row';
+      const fractionalLabel = document.createElement('label');
+      const fractionalCheckbox = document.createElement('input');
+      fractionalCheckbox.type = 'checkbox';
+      fractionalCheckbox.checked = layer.allowFractionalCoordinates;
+      fractionalCheckbox.addEventListener('change', () =>
+        layer.setAllowFractionalCoordinates(fractionalCheckbox.checked));
+      fractionalLabel.title = 'When off, every new or moved coordinate snaps to '
+        + "the document's integer-coordinate convention (floored for pixel "
+        + 'top-left corner, rounded for pixel center). Freely togglable — '
+        + 'mixing fractional and whole-pixel annotations on one layer is fine.';
+      fractionalLabel.append(fractionalCheckbox, ' allow fractional coordinates');
+      fractionalRow.appendChild(fractionalLabel);
+      containerElement.appendChild(fractionalRow);
+    }
 
     /* ---- Video layer: playback facts ---- */
 

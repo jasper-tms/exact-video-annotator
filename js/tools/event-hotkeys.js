@@ -11,7 +11,7 @@
 //     overlaps the current frame.
 //
 // Every mutation goes through the undo history, and every item array is reached
-// through `app.targetLayerForType('events').items` so that events land in the
+// through `app.targetLayerForType('frames').items` so that events land in the
 // active events layer (creating one if the document somehow has none).
 
 import { newId } from '../document.js';
@@ -45,7 +45,7 @@ function handleKey(app, event) {
 
 function handleAdd(app, eventType) {
   const frame = app.currentFrame;
-  const items = app.targetLayerForType('events').items;
+  const items = app.targetLayerForType('frames').items;
 
   if (eventType.kind === 'point') {
     addPointEvent(app, eventType, items, frame);
@@ -108,7 +108,7 @@ function addOrCompleteRangeEvent(app, eventType, items, frame) {
 
 function handleRemove(app, eventType) {
   const frame = app.currentFrame;
-  const items = app.targetLayerForType('events').items;
+  const items = app.targetLayerForType('frames').items;
 
   const target = findLast(items, (item) => overlapsFrame(eventType, item, frame));
   if (!target) {

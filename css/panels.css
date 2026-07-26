@@ -1,10 +1,10 @@
 /* Toast notifications and shared per-layer-type badge colors.
    (Layer tab and detail styles live in style.css.) */
 
-.layer-type-video  { color: var(--accent);  border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
-.layer-type-points { color: #6fcf97;        border-color: color-mix(in srgb, #6fcf97 55%, var(--border)); }
-.layer-type-shapes { color: #c58af9;        border-color: color-mix(in srgb, #c58af9 55%, var(--border)); }
-.layer-type-events { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
+.layer-type-video        { color: var(--accent);  border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.layer-type-coordinates  { color: #6fcf97;        border-color: color-mix(in srgb, #6fcf97 55%, var(--border)); }
+.layer-type-segmentation { color: #c58af9;        border-color: color-mix(in srgb, #c58af9 55%, var(--border)); }
+.layer-type-frames       { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
 
 /* ---------- Toasts ---------- */
 

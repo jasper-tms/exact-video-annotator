@@ -50,14 +50,34 @@ body {
 }
 
 #application-title {
+  flex: 0 0 auto;
   font-weight: 600;
   color: var(--text-dim);
   white-space: nowrap;
 }
 
+/* Everything that can be clipped/scrolled when the window is too narrow —
+   the title before it and the hovered-pixel readout after it are outside
+   this region so they never scroll out of view. */
+#toolbar-scroll-region {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+#toolbar-scroll-region::-webkit-scrollbar { height: 6px; }
+#toolbar-scroll-region::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
 .toolbar-group {
   display: flex;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 button {
@@ -73,11 +93,29 @@ button {
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.45; cursor: default; }
 
-#engine-tier-label {
-  margin-left: auto;
+.integer-coordinate-group {
+  align-items: center;
+  gap: 6px;
   color: var(--text-dim);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.integer-coordinate-group select {
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+#hovered-pixel-label {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- First screenful: tool rail + canvas + transport + tabs ---------- */
@@ -140,6 +178,12 @@ button:disabled { opacity: 0.45; cursor: default; }
   font-size: 21px;
 }
 
+/* ● and ⬠ sit visibly below true center in their own line box at this font
+   size (a font-metrics quirk of those particular glyphs, not a layout bug);
+   nudge the flex-centered content up so they read as centered in the button. */
+#tool-rail button[data-tool="point"] { padding-bottom: 2px; }
+#tool-rail button[data-tool="polygon"] { padding-bottom: 4px; }
+
 /* Single-key hotkey, tucked into the button's bottom-right corner. Inherits the
    button color (white when active, dim otherwise) and stays out of pointer flow. */
 .rail-button[data-hotkey]::after {
@@ -170,6 +214,13 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* Pinned to the very bottom of the rail (the page-scroll toggle). */
 .rail-button-bottom {
   margin-top: auto;
+}
+
+/* Looks like button:disabled, but stays a real (non-disabled) button so click
+   and contextmenu still fire — used for tools that need a matching layer
+   before they can be used, or that have no implementation yet. */
+.rail-button-unavailable {
+  opacity: 0.45;
 }
 
 /* The scroll toggle's arrow: large, thick-stroked, and flipped to point up
@@ -293,7 +344,6 @@ button:disabled { opacity: 0.45; cursor: default; }
   background: var(--surface);
   color: var(--text-dim);
   padding: 0 12px;
-  position: relative;
 }
 
 /* Deletes the layer selected in the tab bar; sits just right of the ＋. */
@@ -312,9 +362,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 
 .layer-tab-add-menu {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
+  /* position, left, bottom are set inline (see layer-tabs.js) — fixed
+     viewport coordinates so the menu is never clipped by the tab strip's
+     overflow, regardless of which parent the ＋ button currently rides in. */
   z-index: 30;
   background: var(--surface-raised);
   border: 1px solid var(--border);

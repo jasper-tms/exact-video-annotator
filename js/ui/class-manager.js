@@ -191,7 +191,7 @@ function deleteClass(app, classEntry, rebuild) {
 
 function isClassReferenced(app, classId) {
   return app.annotationDocument.layers.some((layer) =>
-    (layer.type === 'points' || layer.type === 'shapes')
+    layer.type === 'coordinates'
     && layer.items.some((item) => item.classId === classId));
 }
 
@@ -312,7 +312,7 @@ function deleteEventType(app, eventType, rebuild) {
 
 function isEventTypeReferenced(app, eventTypeId) {
   return app.annotationDocument.layers.some((layer) =>
-    layer.type === 'events'
+    layer.type === 'frames'
     && layer.items.some((item) => item.eventTypeId === eventTypeId));
 }
 

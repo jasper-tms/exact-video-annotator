@@ -30,12 +30,16 @@ export function createEmptyDocument() {
     video: null,   // provenance, filled at export time
     classes: [],
     eventTypes: [],
+    // Whether an integer (x, y) names a pixel's top-left corner (0, the
+    // default) or its center (0.5) — see the video layer's draw(), the only
+    // place this is consulted. Locked in the UI once any coordinates
+    // annotation exists, since changing it after the fact would silently
+    // re-register every stored (x, y) against a different pixel grid.
+    integerCoordinateOffset: 0,
     layers: [
-      { id: newId(), type: 'points', name: 'Points', visible: true, opacity: 1,
-        transform: { scale: 1, offsetX: 0, offsetY: 0 }, items: [] },
-      { id: newId(), type: 'shapes', name: 'Shapes', visible: true, opacity: 1,
-        transform: { scale: 1, offsetX: 0, offsetY: 0 }, items: [] },
-      { id: newId(), type: 'events', name: 'Events', visible: true, opacity: 1,
+      { id: newId(), type: 'coordinates', name: 'Coordinates', visible: true, opacity: 1,
+        transform: { scale: 1, offsetX: 0, offsetY: 0 }, allowFractionalCoordinates: false, items: [] },
+      { id: newId(), type: 'frames', name: 'Frames', visible: true, opacity: 1,
         transform: { scale: 1, offsetX: 0, offsetY: 0 }, items: [] },
     ],
   };
@@ -50,10 +54,11 @@ export function documentToJson(annotationDocument, videoInformation = null) {
     video: videoInformation ?? annotationDocument.video ?? null,
     classes: annotationDocument.classes,
     eventTypes: annotationDocument.eventTypes,
+    integerCoordinateOffset: annotationDocument.integerCoordinateOffset ?? 0,
     layers: annotationDocument.layers.map((layer) => ({
       ...layer,
       // Never export an in-progress range event (endFrame === null).
-      items: layer.type === 'events'
+      items: layer.type === 'frames'
         ? layer.items.filter((item) => item.endFrame !== null)
         : layer.items,
     })),
@@ -72,10 +77,16 @@ export function documentFromJson(jsonObject) {
     throw new Error(`Unsupported document version ${jsonObject.version} (this app reads version ${DOCUMENT_VERSION}).`);
   }
 
+  const integerCoordinateOffset = jsonObject.integerCoordinateOffset ?? 0;
+  if (integerCoordinateOffset !== 0 && integerCoordinateOffset !== 0.5) {
+    throw new Error(`Unsupported integerCoordinateOffset ${integerCoordinateOffset} (expected 0 or 0.5).`);
+  }
+
   const annotationDocument = {
     video: jsonObject.video ?? null,
     classes: [],
     eventTypes: [],
+    integerCoordinateOffset,
     layers: [],
   };
 
@@ -102,7 +113,7 @@ export function documentFromJson(jsonObject) {
   }
 
   for (const layer of asArray(jsonObject.layers, 'layers')) {
-    if (!['points', 'shapes', 'events'].includes(layer.type)) {
+    if (!['coordinates', 'segmentation', 'frames'].includes(layer.type)) {
       throw new Error(`Unknown layer type "${layer.type}".`);
     }
     const parsedLayer = {
@@ -118,6 +129,9 @@ export function documentFromJson(jsonObject) {
       },
       items: [],
     };
+    if (layer.type === 'coordinates') {
+      parsedLayer.allowFractionalCoordinates = layer.allowFractionalCoordinates === true;
+    }
     for (const item of asArray(layer.items ?? [], `items of layer "${parsedLayer.name}"`)) {
       parsedLayer.items.push(parseItem(layer.type, item));
     }
@@ -129,40 +143,35 @@ export function documentFromJson(jsonObject) {
 
 function parseItem(layerType, item) {
   const id = asString(item.id ?? newId(), 'item id');
-  if (layerType === 'points') {
-    return {
-      id,
-      frame: integerOrNull(item.frame, 'point frame'),
-      x: finiteNumber(item.x, 'point x'),
-      y: finiteNumber(item.y, 'point y'),
-      classId: item.classId ?? null,
-      name: item.name ?? null,
-    };
-  }
-  if (layerType === 'shapes') {
-    if (item.kind !== 'polygon' && item.kind !== 'line') {
-      throw new Error(`Shape has kind "${item.kind}"; expected "polygon" or "line".`);
+  if (layerType === 'coordinates') {
+    if (item.kind !== 'point' && item.kind !== 'line' && item.kind !== 'polygon') {
+      throw new Error(`Coordinates item has kind "${item.kind}"; expected "point", "line", or "polygon".`);
     }
-    const vertices = asArray(item.vertices, 'shape vertices').map((vertex, index) => {
+    const vertices = asArray(item.vertices, 'coordinates vertices').map((vertex, index) => {
       if (!Array.isArray(vertex) || vertex.length !== 2) {
-        throw new Error(`Shape vertex ${index} is not an [x, y] pair.`);
+        throw new Error(`Vertex ${index} is not an [x, y] pair.`);
       }
       return [finiteNumber(vertex[0], 'vertex x'), finiteNumber(vertex[1], 'vertex y')];
     });
-    const minimumVertices = item.kind === 'polygon' ? 3 : 2;
+    const minimumVertices = item.kind === 'polygon' ? 3 : item.kind === 'line' ? 2 : 1;
     if (vertices.length < minimumVertices) {
       throw new Error(`A ${item.kind} needs at least ${minimumVertices} vertices; found ${vertices.length}.`);
     }
     return {
       id,
-      frame: integerOrNull(item.frame, 'shape frame'),
+      frame: integerOrNull(item.frame, 'coordinates frame'),
       kind: item.kind,
       vertices,
       classId: item.classId ?? null,
       name: item.name ?? null,
     };
   }
-  // events
+  if (layerType === 'segmentation') {
+    // Nothing produces segmentation items yet — this stub layer type should
+    // never actually be handed any.
+    throw new Error('Segmentation layer items are not yet supported.');
+  }
+  // frames
   return {
     id,
     eventTypeId: asString(item.eventTypeId, 'event type id reference'),

@@ -1,14 +1,23 @@
-// The shapes layer draws polygons and lines and implements the annotation
-// editing contract (hitTest + snapshot/restore + moveItemBy/moveVertexTo +
-// command methods) so the select tool edits shapes without knowing their
-// internals. See ARCHITECTURE.md. Like every annotation view layer, its `items`
-// array IS the backing document layer's array (same object identity); it holds
-// no copied geometry.
+// The coordinates layer draws and edits pixel-located annotations: points,
+// lines, and polygons, distinguished by each item's `kind`. It is a view over
+// a document layer: its `items` array IS that document layer's `items` array
+// (same object identity), so it holds no copied geometry. See ARCHITECTURE.md
+// ("Annotation-layer editing contract") for the methods the drawing tools rely
+// on. A point is simply a `kind: 'point'` item with a single-element
+// `vertices` array — there is no separate flat x/y representation — so the
+// vertex/segment hit-testing and editing logic below is shared by all three
+// kinds without a point-specific branch.
 
 import { Layer } from './layer.js';
 
 // All sizes below are on-screen pixels; drawing divides them by
 // renderState.pixelsPerLocalUnit so they stay constant regardless of zoom.
+const POINT_RADIUS_SCREEN_PIXELS = 5;
+const POINT_OUTLINE_WIDTH_SCREEN_PIXELS = 1.5;
+const SELECTION_RING_GAP_SCREEN_PIXELS = 3;
+const SELECTION_RING_WIDTH_SCREEN_PIXELS = 2;
+const HOVER_RING_WIDTH_SCREEN_PIXELS = 1.5;
+
 const STROKE_WIDTH_SCREEN_PIXELS = 2;
 const VERTEX_HANDLE_SCREEN_PIXELS = 6;
 const HIT_TOLERANCE_SCREEN_PIXELS = 8;
@@ -20,80 +29,155 @@ const HOVER_STROKE_MULTIPLIER = 1.75;
 const ACTIVE_VERTEX_SIZE_MULTIPLIER = 1.4;
 
 const FALLBACK_COLOR = '#4f9cf9';
+const POINT_OUTLINE_COLOR = '#101014';
+const LABEL_COLOR = '#e8e8ec';
 const HANDLE_ACCENT_COLOR = '#ffffff';
 
-export class ShapesLayer extends Layer {
-  /** @param {object} documentLayer  The `type: 'shapes'` layer in the document. */
-  constructor(documentLayer) {
-    super({ id: documentLayer.id, type: 'shapes', name: documentLayer.name });
+export class CoordinatesLayer extends Layer {
+  /**
+   * @param {object} documentLayer  The `type: 'coordinates'` layer in the document.
+   * @param {object} app  The Application instance — kept only to read
+   *   `app.annotationDocument.integerCoordinateOffset` for snapLocalPoint.
+   */
+  constructor(documentLayer, app) {
+    super({ id: documentLayer.id, type: 'coordinates', name: documentLayer.name });
     this.visible = documentLayer.visible;
     this.opacity = documentLayer.opacity;
     this.transform = { ...documentLayer.transform };
     this.documentLayer = documentLayer;
     // Same array object as the document layer: this is a view, not a copy.
     this.items = documentLayer.items;
+    this.app = app;
+    // Whether items on this layer may hold fractional (x, y) values. When
+    // false, every new or moved vertex snaps to whichever grid the document's
+    // integer-coordinate convention names — this is a live per-layer toggle,
+    // not an undoable command, and never locks (unlike that document setting).
+    this.allowFractionalCoordinates = documentLayer.allowFractionalCoordinates ?? false;
   }
 
   get isEditable() { return true; }
+
+  setAllowFractionalCoordinates(value) {
+    this.allowFractionalCoordinates = value;
+    this.dispatchEvent(new CustomEvent('layer-changed'));
+  }
+
+  /** Applies this layer's fractional-coordinate policy to a local point: pass
+      it through unchanged when fractional coordinates are allowed, otherwise
+      floor it (pixel top-left corner convention) or round it (pixel center
+      convention), matching the document's integer-coordinate setting. Called
+      both by every vertex-creating tool and internally by moveVertexTo /
+      moveItemBy / commandInsertVertex, so no coordinate write can bypass it. */
+  snapLocalPoint(point) {
+    if (this.allowFractionalCoordinates) return point;
+    const offset = this.app?.annotationDocument?.integerCoordinateOffset ?? 0;
+    const roundFunction = offset === 0.5 ? Math.round : Math.floor;
+    return { x: roundFunction(point.x), y: roundFunction(point.y) };
+  }
 
   /* ---------- Drawing ---------- */
 
   draw(context, renderState) {
     const pixelsPerLocalUnit = renderState.pixelsPerLocalUnit;
+    const baseAlpha = context.globalAlpha;
+    for (const item of this.items) {
+      if (item.vertices.length === 0) continue;
+      if (item.kind === 'point') this.#drawPoint(context, renderState, item, pixelsPerLocalUnit, baseAlpha);
+      else this.#drawPath(context, renderState, item, pixelsPerLocalUnit, baseAlpha);
+    }
+    context.globalAlpha = baseAlpha;
+  }
+
+  #drawPoint(context, renderState, item, pixelsPerLocalUnit, baseAlpha) {
+    const radius = POINT_RADIUS_SCREEN_PIXELS / pixelsPerLocalUnit;
+    const outlineWidth = POINT_OUTLINE_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
+    const labelFontSize = LABEL_FONT_SCREEN_PIXELS / pixelsPerLocalUnit;
+    const [x, y] = item.vertices[0];
+    // A frame-agnostic item (frame === null) applies to every frame, so it
+    // always draws at full strength rather than the dimmed off-frame alpha.
+    const onCurrentFrame = item.frame === null || item.frame === renderState.frame;
+    const color = colorForItem(item, renderState);
+
+    context.globalAlpha = onCurrentFrame ? baseAlpha : baseAlpha * OFF_FRAME_ALPHA_MULTIPLIER;
+
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = color;
+    context.fill();
+    context.lineWidth = outlineWidth;
+    context.strokeStyle = POINT_OUTLINE_COLOR;
+    context.stroke();
+
+    const isSelected = matchesItem(renderState.selection, this.id, item.id);
+    const isHovered = matchesItem(renderState.hover, this.id, item.id);
+    if (isSelected) {
+      context.beginPath();
+      context.arc(x, y, radius + SELECTION_RING_GAP_SCREEN_PIXELS / pixelsPerLocalUnit, 0, Math.PI * 2);
+      context.lineWidth = SELECTION_RING_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
+      context.strokeStyle = '#ffffff';
+      context.stroke();
+    } else if (isHovered) {
+      context.beginPath();
+      context.arc(x, y, radius + SELECTION_RING_GAP_SCREEN_PIXELS / pixelsPerLocalUnit, 0, Math.PI * 2);
+      context.lineWidth = HOVER_RING_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
+      context.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      context.stroke();
+    }
+
+    if (item.name) {
+      context.font = `${labelFontSize}px system-ui, sans-serif`;
+      context.textAlign = 'left';
+      context.textBaseline = 'bottom';
+      context.fillStyle = LABEL_COLOR;
+      context.fillText(item.name, x + radius, y - radius);
+    }
+  }
+
+  #drawPath(context, renderState, item, pixelsPerLocalUnit, baseAlpha) {
     const strokeWidth = STROKE_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
     const handleSize = VERTEX_HANDLE_SCREEN_PIXELS / pixelsPerLocalUnit;
     const fontSize = LABEL_FONT_SCREEN_PIXELS / pixelsPerLocalUnit;
-    // The viewer has already set globalAlpha to this layer's opacity; compose
-    // per-item dimming and fill transparency on top of it rather than replacing.
-    const baseAlpha = context.globalAlpha;
+    const isCurrentFrame = item.frame === null || item.frame === renderState.frame;
+    const frameAlpha = isCurrentFrame ? 1 : OFF_FRAME_ALPHA_MULTIPLIER;
+    const color = colorForItem(item, renderState);
+    const isSelected = matchesItem(renderState.selection, this.id, item.id);
+    const isHovered = matchesItem(renderState.hover, this.id, item.id);
 
-    for (const item of this.items) {
-      if (item.vertices.length === 0) continue;
-      // A frame-agnostic shape (frame === null) applies to every frame, so it
-      // always draws at full strength rather than the dimmed off-frame alpha.
-      const isCurrentFrame = item.frame === null || item.frame === renderState.frame;
-      const frameAlpha = isCurrentFrame ? 1 : OFF_FRAME_ALPHA_MULTIPLIER;
-      const color = colorForItem(item, renderState);
-      const isSelected = matchesItem(renderState.selection, this.id, item.id);
-      const isHovered = matchesItem(renderState.hover, this.id, item.id);
+    context.save();
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
 
-      context.save();
-      context.lineJoin = 'round';
-      context.lineCap = 'round';
-
-      // Build the shape path: closed for polygons, open for lines.
-      context.beginPath();
-      context.moveTo(item.vertices[0][0], item.vertices[0][1]);
-      for (let index = 1; index < item.vertices.length; index++) {
-        context.lineTo(item.vertices[index][0], item.vertices[index][1]);
-      }
-      if (item.kind === 'polygon') context.closePath();
-
-      if (item.kind === 'polygon') {
-        context.globalAlpha = baseAlpha * frameAlpha * FILL_ALPHA;
-        context.fillStyle = color;
-        context.fill();
-      }
-
-      context.globalAlpha = baseAlpha * frameAlpha;
-      context.strokeStyle = color;
-      context.lineWidth = isHovered ? strokeWidth * HOVER_STROKE_MULTIPLIER : strokeWidth;
-      context.stroke();
-
-      if (isSelected) {
-        this.#drawVertexHandles(context, item, renderState, handleSize, strokeWidth, color, baseAlpha);
-      }
-
-      if (item.name) {
-        context.globalAlpha = baseAlpha * frameAlpha;
-        context.fillStyle = color;
-        context.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
-        context.textBaseline = 'bottom';
-        context.fillText(item.name, item.vertices[0][0] + handleSize, item.vertices[0][1] - handleSize);
-      }
-
-      context.restore();
+    context.beginPath();
+    context.moveTo(item.vertices[0][0], item.vertices[0][1]);
+    for (let index = 1; index < item.vertices.length; index++) {
+      context.lineTo(item.vertices[index][0], item.vertices[index][1]);
     }
+    if (item.kind === 'polygon') context.closePath();
+
+    if (item.kind === 'polygon') {
+      context.globalAlpha = baseAlpha * frameAlpha * FILL_ALPHA;
+      context.fillStyle = color;
+      context.fill();
+    }
+
+    context.globalAlpha = baseAlpha * frameAlpha;
+    context.strokeStyle = color;
+    context.lineWidth = isHovered ? strokeWidth * HOVER_STROKE_MULTIPLIER : strokeWidth;
+    context.stroke();
+
+    if (isSelected) {
+      this.#drawVertexHandles(context, item, renderState, handleSize, strokeWidth, color, baseAlpha);
+    }
+
+    if (item.name) {
+      context.globalAlpha = baseAlpha * frameAlpha;
+      context.fillStyle = color;
+      context.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
+      context.textBaseline = 'bottom';
+      context.fillText(item.name, item.vertices[0][0] + handleSize, item.vertices[0][1] - handleSize);
+    }
+
+    context.restore();
   }
 
   #drawVertexHandles(context, item, renderState, handleSize, strokeWidth, color, baseAlpha) {
@@ -136,7 +220,6 @@ export class ShapesLayer extends Layer {
     const currentFrameItems = [];
     const offFrameItems = [];
     for (const item of this.items) {
-      // Frame-agnostic shapes (frame === null) rank alongside current-frame ones.
       const onCurrentFrame = item.frame === null || item.frame === renderState.frame;
       (onCurrentFrame ? currentFrameItems : offFrameItems).push(item);
     }
@@ -155,11 +238,11 @@ export class ShapesLayer extends Layer {
     }
 
     // Priority (2): segments. Segment i connects vertex i to i + 1, wrapping to
-    // vertex 0 for closed polygons.
+    // vertex 0 for closed polygons. A point has no segments.
     for (const item of orderedItems) {
       const segmentCount = item.kind === 'polygon'
         ? item.vertices.length
-        : item.vertices.length - 1;
+        : Math.max(0, item.vertices.length - 1);
       for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
         const [ax, ay] = item.vertices[segmentIndex];
         const [bx, by] = item.vertices[(segmentIndex + 1) % item.vertices.length];
@@ -203,22 +286,25 @@ export class ShapesLayer extends Layer {
     const item = this.getItem(itemId);
     if (!item) return;
     for (const vertex of item.vertices) {
-      vertex[0] += deltaLocal.x;
-      vertex[1] += deltaLocal.y;
+      const snapped = this.snapLocalPoint({ x: vertex[0] + deltaLocal.x, y: vertex[1] + deltaLocal.y });
+      vertex[0] = snapped.x;
+      vertex[1] = snapped.y;
     }
   }
 
   moveVertexTo(itemId, vertexIndex, localPoint) {
     const item = this.getItem(itemId);
     if (!item || !item.vertices[vertexIndex]) return;
-    item.vertices[vertexIndex] = [localPoint.x, localPoint.y];
+    const snapped = this.snapLocalPoint(localPoint);
+    item.vertices[vertexIndex] = [snapped.x, snapped.y];
   }
 
   commandInsertVertex(itemId, segmentIndex, localPoint) {
     const item = this.getItem(itemId);
     if (!item) return null;
     const insertIndex = segmentIndex + 1;
-    const newVertex = [localPoint.x, localPoint.y];
+    const snapped = this.snapLocalPoint(localPoint);
+    const newVertex = [snapped.x, snapped.y];
     return {
       label: 'Insert vertex',
       apply: () => { item.vertices.splice(insertIndex, 0, newVertex); },
@@ -229,8 +315,8 @@ export class ShapesLayer extends Layer {
   commandDeleteVertex(itemId, vertexIndex) {
     const item = this.getItem(itemId);
     if (!item || !item.vertices[vertexIndex]) return null;
-    const minimumVertexCount = item.kind === 'polygon' ? 3 : 2;
-    // Removing this vertex would leave too few to be a valid shape, so delete
+    const minimumVertexCount = item.kind === 'polygon' ? 3 : item.kind === 'line' ? 2 : 1;
+    // Removing this vertex would leave too few to be a valid item, so delete
     // the whole item instead — as one undoable command that restores exactly.
     if (item.vertices.length - 1 < minimumVertexCount) {
       return this.commandDeleteItem(itemId);
@@ -248,7 +334,7 @@ export class ShapesLayer extends Layer {
     if (!item) return null;
     const originalIndex = this.items.indexOf(item);
     return {
-      label: 'Delete shape',
+      label: item.kind === 'point' ? 'Delete point' : 'Delete shape',
       apply: () => {
         const index = this.items.indexOf(item);
         if (index !== -1) this.items.splice(index, 1);

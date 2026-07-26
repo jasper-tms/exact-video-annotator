@@ -31,7 +31,13 @@ export class VideoLayer extends Layer {
     const sourceHeight = element.videoHeight ?? element.height;
     if (!sourceWidth || !sourceHeight) return;
     context.imageSmoothingEnabled = renderState.pixelsPerLocalUnit < 4;
-    context.drawImage(element, 0, 0, engine.videoWidth, engine.videoHeight);
+    // Integer (x, y) names a pixel's top-left corner by default (offset 0); an
+    // offset of 0.5 instead names its center, which draws the image shifted up
+    // and left by half a pixel so that convention holds without touching any
+    // stored annotation coordinates.
+    const integerCoordinateOffset = renderState.document?.integerCoordinateOffset ?? 0;
+    context.drawImage(element, -integerCoordinateOffset, -integerCoordinateOffset,
+      engine.videoWidth, engine.videoHeight);
   }
 
   contentBounds() {

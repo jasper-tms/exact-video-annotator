@@ -43,7 +43,7 @@ export const pointTool = {
   },
 
   onPointerDown(app, worldPoint, event) {
-    const layer = app.targetLayerForType('points');
+    const layer = app.targetLayerForType('coordinates');
     // Pressing an existing point selects it, and dragging then moves it;
     // only empty space places a new point.
     const hit = layer.visible ? hitTestLayer(app, layer, worldPoint) : null;
@@ -53,18 +53,18 @@ export const pointTool = {
       app.viewer.requestRender();
       return;
     }
-    pendingPress = { app, layer, localPoint: app.localFromWorld(layer, worldPoint) };
+    pendingPress = { app, layer, localPoint: layer.snapLocalPoint(app.localFromWorld(layer, worldPoint)) };
     app.viewer.requestRender();
   },
 
   onPointerMove(app, worldPoint, event) {
     if (updateDragOnExistingItem(app, worldPoint)) return;
     if (pendingPress) {
-      pendingPress.localPoint = app.localFromWorld(pendingPress.layer, worldPoint);
+      pendingPress.localPoint = pendingPress.layer.snapLocalPoint(app.localFromWorld(pendingPress.layer, worldPoint));
       app.viewer.requestRender();
       return;
     }
-    const layer = app.findAnnotationLayerForType('points');
+    const layer = app.findAnnotationLayerForType('coordinates');
     const hit = updateHover(app, layer, worldPoint);
     app.viewer.stageCanvas.style.cursor = hit ? 'move' : this.cursor;
   },
@@ -78,8 +78,8 @@ export const pointTool = {
     const newItem = {
       id: newId(),
       frame: app.newItemFrame,
-      x: localPoint.x,
-      y: localPoint.y,
+      kind: 'point',
+      vertices: [[localPoint.x, localPoint.y]],
       classId: app.activeClassId,
       name: null,
     };

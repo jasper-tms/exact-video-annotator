@@ -95,7 +95,7 @@ export function createDrawingTool({
       if (!inProgress) {
         // Start a new shape on the shapes target layer, at the current frame,
         // storing the vertex in that layer's local space.
-        const layer = app.targetLayerForType('shapes');
+        const layer = app.targetLayerForType('coordinates');
         // Pressing an existing shape of this same kind selects it, and
         // dragging then moves the grabbed vertex or the whole shape; only
         // empty space starts a new one.
@@ -105,7 +105,7 @@ export function createDrawingTool({
           app.viewer.requestRender();
           return;
         }
-        const localPoint = app.localFromWorld(layer, worldPoint);
+        const localPoint = layer.snapLocalPoint(app.localFromWorld(layer, worldPoint));
         inProgress = {
           app,
           layer,
@@ -123,7 +123,7 @@ export function createDrawingTool({
         if (inProgress.vertices.length >= minimumVertexCount) finish(app);
         return;
       }
-      const localPoint = app.localFromWorld(inProgress.layer, worldPoint);
+      const localPoint = inProgress.layer.snapLocalPoint(app.localFromWorld(inProgress.layer, worldPoint));
       inProgress.vertices.push([localPoint.x, localPoint.y]);
       app.viewer.requestRender();
     },
@@ -135,7 +135,7 @@ export function createDrawingTool({
         app.viewer.requestRender();
         return;
       }
-      const layer = app.findAnnotationLayerForType('shapes');
+      const layer = app.findAnnotationLayerForType('coordinates');
       const hit = updateHover(app, layer, worldPoint, (item) => item?.kind === kind);
       app.viewer.stageCanvas.style.cursor = hit ? 'move' : this.cursor;
     },
@@ -149,7 +149,7 @@ export function createDrawingTool({
         // Double-clicking a segment of an existing shape of this kind inserts
         // a vertex there (the two preceding pointer-downs armed drags that
         // ended without moving, so nothing was committed).
-        const layer = app.findAnnotationLayerForType('shapes');
+        const layer = app.findAnnotationLayerForType('coordinates');
         if (!layer?.visible) return;
         const hit = hitTestLayer(app, layer, worldPoint);
         if (!hit || hit.part !== 'segment') return;

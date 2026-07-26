@@ -3,9 +3,9 @@
 A browser-only, napari-style layered annotation app for video and images, built
 on [exact-video-engine.js](https://github.com/jasper-tms/exact-video-engine.js).
 Multiple layers share one canvas: media layers (video, image) and annotation
-layers (points, shapes, temporal events), each with visibility, opacity,
-z-order, and a scale/offset transform. No server, no build step: plain ES
-modules served statically.
+layers (Coordinates — points/lines/polygons, Segmentation, Frames — temporal
+events), each with visibility, opacity, z-order, and a scale/offset transform.
+No server, no build step: plain ES modules served statically.
 
 ## Coding conventions (binding for all contributors)
 
@@ -82,14 +82,14 @@ other pointer events are forwarded to the active tool by `main.js`.
 There is **no separate select tool**: the point/line/polygon tools hit-test
 their target layer on pointer-down, so pressing an existing annotation of the
 tool's own kind **selects** it, dragging **moves** it (the whole item, or the
-grabbed vertex), and — for shapes — double-clicking a segment inserts a vertex;
-only empty space creates. This shared behavior lives in
+grabbed vertex), and — for lines/polygons — double-clicking a segment inserts a
+vertex; only empty space creates. This shared behavior lives in
 `js/tools/annotation-dragging.js`.
 
 ### `js/layers/layer.js` — exports `class Layer extends EventTarget`
 
 ```js
-layer.id; layer.type;                // 'video' | 'image' | 'points' | 'shapes' | 'events'
+layer.id; layer.type;                // 'video' | 'image' | 'coordinates' | 'segmentation' | 'frames'
 layer.name; layer.visible; layer.opacity;   // opacity 0..1
 layer.transform;                     // { scale, offsetX, offsetY } local → world
 layer.draw(context, renderState) {}  // context already in local coordinates
@@ -113,16 +113,19 @@ layer.hitTest(localPoint, renderState); // annotation layers only, see below
 
 ### Annotation-layer editing contract
 
-Annotation layers (points, shapes) implement `hitTest` plus generic editing
-methods so the shared drag-editing helpers (`js/tools/annotation-dragging.js`)
-work without knowing shape internals:
+The Coordinates layer implements `hitTest` plus generic editing methods so the
+shared drag-editing helpers (`js/tools/annotation-dragging.js`) work without
+knowing item internals (Segmentation and Frames are non-spatial stubs and
+implement neither):
 
 ```js
 layer.hitTest(localPoint, renderState)
   // → { itemId, part: 'body' | 'vertex' | 'segment', vertexIndex } | null
-  // part 'vertex': vertexIndex names the vertex (points layers use 0).
-  // part 'segment' (shapes only): vertexIndex names the segment — segment i
-  //   connects vertex i to vertex i + 1 (wrapping for closed polygons).
+  // part 'vertex': vertexIndex names the vertex (a point item's one vertex is
+  //   always 0).
+  // part 'segment' (lines/polygons only): vertexIndex names the segment —
+  //   segment i connects vertex i to vertex i + 1 (wrapping for closed
+  //   polygons). A point item has no segments.
   // Handle sizes are screen-constant: tolerance = HANDLE_RADIUS_SCREEN_PIXELS
   //                                              / renderState.pixelsPerLocalUnit
 layer.getItem(itemId);               // live item object (read-only use)
@@ -137,10 +140,10 @@ layer.moveItemBy(itemId, deltaLocal);          // translate the whole item
 layer.moveVertexTo(itemId, vertexIndex, localPoint);
 
 // Command-returning methods (caller passes the result to undoHistory.execute):
-layer.commandInsertVertex(itemId, segmentIndex, localPoint);  // shapes only
-layer.commandDeleteVertex(itemId, vertexIndex);  // shapes only; deleting below
-                                                 // the minimum vertex count
-                                                 // (3 polygon, 2 line) deletes
+layer.commandInsertVertex(itemId, segmentIndex, localPoint);  // lines/polygons only
+layer.commandDeleteVertex(itemId, vertexIndex);  // deleting below the minimum
+                                                 // vertex count (1 point, 2
+                                                 // line, 3 polygon) deletes
                                                  // the whole item
 layer.commandDeleteItem(itemId);
 ```
@@ -151,12 +154,16 @@ restores the after-snapshot, `revert()` the before-snapshot.
 Annotation layers are **views over the document**: their `items` array IS the
 corresponding document layer's `items` array (same object identity). They hold
 no copied state. Every annotation layer class has the constructor signature
-`new PointsLayer(documentLayer)` (likewise shapes/events): it copies `id`,
+`new SegmentationLayer(documentLayer)` (likewise Frames): it copies `id`,
 `name`, `visible`, `opacity`, and `transform` from the document layer into the
 base-class fields, keeps `this.documentLayer = documentLayer`, and sets
 `this.items = documentLayer.items`. `main.js` writes base-field changes (from
 the layer panel) back into the document layer whenever the view layer
-dispatches `'layer-changed'`.
+dispatches `'layer-changed'`. `CoordinatesLayer` additionally takes the
+`Application` instance as a second constructor argument (`new
+CoordinatesLayer(documentLayer, app)`) — kept only so `snapLocalPoint` can read
+the document's integer-coordinate convention; the other constructors ignore
+a second argument if passed one.
 
 Frame binding for drawing: an item whose `frame` equals `renderState.frame`
 draws at full strength; other frames draw dimmed at reduced alpha (the
@@ -164,15 +171,17 @@ movim-website "off-frame" convention) so nearby context stays visible. A
 **frame-agnostic** item (`frame === null`) applies across every frame and so
 always draws (and hit-tests) at full strength. The tool rail's anchored/agnostic
 mode toggle (`app.annotationMode`, `app.newItemFrame`) decides which kind the
-point/line/polygon tools create; it never alters existing items. Events layers
-have no spatial drawing (their `draw` is a no-op).
+point/line/polygon tools create; it never alters existing items. Segmentation
+and Frames layers have no spatial drawing (their `draw` is a no-op).
 
 ### `js/document.js` — the annotation document
 
 ```js
 createEmptyDocument() → AnnotationDocument
 documentToJson(annotationDocument) → plain object (stable, versioned)
-documentFromJson(jsonObject) → AnnotationDocument (validates, migrates)
+documentFromJson(jsonObject) → AnnotationDocument (validates; no migration —
+                                                    an old-schema file is
+                                                    rejected outright)
 newId() → unique string id
 autosaveKey(videoInformation) → string      // keyed by video name + size
 saveAutosave(key, annotationDocument); loadAutosave(key); clearAutosave(key)
@@ -189,16 +198,25 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
   eventTypes: [ { id, name, kind: 'point' | 'range', color,
                   addHotkey, removeHotkey } ],    // hotkeys are single characters,
                                                   // case-sensitive (may be null)
+  // Whether an integer (x, y) names a pixel's top-left corner (0, the
+  // default) or its center (0.5); consulted only by the video layer's draw().
+  integerCoordinateOffset: 0 | 0.5,
   layers: [
-    { id, type: 'points', name, visible, opacity, transform,
-      items: [ { id, frame, x, y, classId, name } ] },
+    { id, type: 'coordinates', name, visible, opacity, transform,
+      allowFractionalCoordinates,
+      items: [ { id, frame, kind: 'point' | 'line' | 'polygon',
+                 vertices: [[x, y], ...], classId, name } ] },
       // frame: integer (anchored to that frame) or null (frame-agnostic —
       //        applies across every frame; drawn full-strength on all frames)
-    { id, type: 'shapes', name, visible, opacity, transform,
-      items: [ { id, frame, kind: 'polygon' | 'line',
-                 vertices: [[x, y], ...], classId, name } ] },
-      // frame: integer or null, same frame-agnostic meaning as points
-    { id, type: 'events', name,
+      // a point item's vertices array always has exactly one [x, y] pair
+      // allowFractionalCoordinates: when false (the default), every new or
+      //   moved vertex snaps per integerCoordinateOffset (floor for 0, round
+      //   for 0.5) — see CoordinatesLayer.snapLocalPoint. A live per-layer
+      //   toggle, never locked, freely mixed with fractional annotations.
+    { id, type: 'segmentation', name, visible, opacity, transform, items: [] },
+      // stub: pixel-wise segmentation is not implemented yet, so items is
+      // always empty — nothing produces or parses items for this type
+    { id, type: 'frames', name,
       items: [ { id, eventTypeId, startFrame, endFrame } ] },
       // point events: endFrame === startFrame
       // an in-progress range has endFrame === null (never exported)
@@ -207,7 +225,8 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
 ```
 
 `classId` and `name` on items are both optional (`null`). Colors are CSS color
-strings. A new document starts with one layer of each type.
+strings. A new document starts with one Coordinates layer and one Frames
+layer (Segmentation is opt-in from the ＋ menu, since it's not usable yet).
 
 ### `js/undo.js` — exports `class UndoHistory extends EventTarget`
 
@@ -263,7 +282,7 @@ app.markDocumentChanged();           // dispatches 'document-changed' + autosave
 app.hover;                           // set by tools while hovering an existing
                                      // annotation; same shape as selection
 app.togglePlayback(); app.stepFrame(delta);
-app.annotationLayers;                // view layers of type points/shapes/events
+app.annotationLayers;                // view layers of type coordinates/segmentation/frames
 app.setActiveLayer(layerId);
 app.addAnnotationLayer(type);        // undoable; returns the new view layer
 app.removeAnnotationLayer(layerId);  // undoable
