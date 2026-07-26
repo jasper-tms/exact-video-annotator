@@ -63,6 +63,9 @@ class Application extends EventTarget {
   annotationMode = 'anchored';
   #keyHandlers = [];
   #autosaveTimer = null;
+  // The frame last asked for via seekToFrame/stepFrame, kept to answer
+  // isSeekPending: whether the engine has actually caught up to it yet.
+  #requestedFrame = null;
 
   /* ---------- Coordinates ---------- */
 
@@ -105,6 +108,23 @@ class Application extends EventTarget {
 
   get currentFrame() { return this.engine?.currentFrame ?? 0; }
 
+  /** Whether the pixels on screen have not yet caught up with the last seek.
+      `currentFrame` lands the instant a seek is requested — on the WebCodecs
+      tier, before the target frame is necessarily decoded — so a host that
+      wants to know whether the picture itself has settled needs to compare
+      against `presentedFrame` instead. Always false during playback: only a
+      discrete, paused seek (a scrub click, a step, a table-row jump) counts
+      as "pending" in this sense. */
+  get isSeekPending() {
+    return this.engine != null && this.engine.paused
+      && this.#requestedFrame !== null
+      // Older pinned engine builds have no presentedFrame; degrade to "never
+      // pending" rather than comparing against undefined, which would never
+      // match a real frame index and leave this stuck true forever.
+      && typeof this.engine.presentedFrame === 'number'
+      && this.engine.presentedFrame !== this.#requestedFrame;
+  }
+
   /** The `frame` value a newly drawn annotation should get: the current frame
       in anchored mode, or null (applies to every frame) in agnostic mode. */
   get newItemFrame() {
@@ -121,7 +141,9 @@ class Application extends EventTarget {
   seekToFrame(frameIndex) {
     if (!this.engine) return;
     const lastFrame = Math.max(0, (this.engine.numFrames ?? 1) - 1);
-    this.engine.seekToFrame(Math.min(lastFrame, Math.max(0, frameIndex)));
+    const clampedFrame = Math.min(lastFrame, Math.max(0, frameIndex));
+    this.#requestedFrame = clampedFrame;
+    this.engine.seekToFrame(clampedFrame);
     this.viewer.requestRender();
   }
 
@@ -580,7 +602,9 @@ async function recoverFromFatalDecode() {
 /* ---------- Animation loop ---------- */
 
 let lastReportedFrame = -1;
+let lastReportedPresentedFrame = -1;
 let lastReportedWaitingForIndex = false;
+let lastReportedSeekPending = false;
 
 function animationTick(now) {
   const engine = app.engine;
@@ -590,6 +614,20 @@ function animationTick(now) {
       lastReportedFrame = engine.currentFrame;
       app.dispatchEvent(new CustomEvent('frame-changed'));
       app.viewer.requestRender();
+    }
+    // The frame actually painted on screen can lag behind currentFrame: on the
+    // WebCodecs tier currentFrame lands the instant a seek is requested, before
+    // the target frame is necessarily decoded. Repaint off presentedFrame too,
+    // so a seek that stalls mid-decode still gets its canvas caught up once the
+    // stall clears, instead of sitting on the previous frame until some
+    // unrelated action (a pan, a hotkey) requests a render for its own reasons.
+    if (engine.presentedFrame !== lastReportedPresentedFrame) {
+      lastReportedPresentedFrame = engine.presentedFrame;
+      app.viewer.requestRender();
+    }
+    if (app.isSeekPending !== lastReportedSeekPending) {
+      lastReportedSeekPending = app.isSeekPending;
+      app.dispatchEvent(new CustomEvent('seek-pending-changed'));
     }
     // Playback pinned at the last indexed frame is the one state nothing else
     // announces: the frame stops changing, so 'frame-changed' goes quiet, and

@@ -29,6 +29,33 @@ export function initializeTransport(app, containerElement) {
   const exactnessWarning = containerElement.querySelector('.exactness-warning');
 
   let scrubbingWasPlaying = false;
+  let isDraggingScrubber = false;
+
+  // A seek that is still catching up mutes the scrubber's thumb, but only
+  // once it has taken a moment — an already-cached nearby frame resolves
+  // within a tick or two, and greying the thumb for that would just flicker.
+  // Never armed while dragging: rapid-fire seeks mid-drag are expected to lag
+  // a little, and muting on every intermediate tick would be noise, not
+  // signal (see 'seek-pending-changed' below for how pointerup catches up
+  // on a drag's final, possibly-slow frame).
+  const PENDING_INDICATOR_DELAY_MILLISECONDS = 400;
+  let pendingIndicatorTimer = null;
+
+  function clearPendingIndicator() {
+    if (pendingIndicatorTimer !== null) {
+      clearTimeout(pendingIndicatorTimer);
+      pendingIndicatorTimer = null;
+    }
+    scrubber.classList.remove('seek-pending');
+  }
+
+  function armPendingIndicator() {
+    if (isDraggingScrubber || pendingIndicatorTimer !== null) return;
+    pendingIndicatorTimer = setTimeout(() => {
+      pendingIndicatorTimer = null;
+      if (app.isSeekPending) scrubber.classList.add('seek-pending');
+    }, PENDING_INDICATOR_DELAY_MILLISECONDS);
+  }
 
   playButton.addEventListener('click', () => app.togglePlayback());
 
@@ -37,6 +64,8 @@ export function initializeTransport(app, containerElement) {
 
   // Holding the scrubber suspends playback; releasing it resumes.
   scrubber.addEventListener('pointerdown', () => {
+    isDraggingScrubber = true;
+    clearPendingIndicator();
     if (app.engine && !app.engine.paused) {
       scrubbingWasPlaying = true;
       app.engine.pause();
@@ -46,6 +75,11 @@ export function initializeTransport(app, containerElement) {
     app.seekToFrame(Number(scrubber.value));
   });
   scrubber.addEventListener('pointerup', () => {
+    isDraggingScrubber = false;
+    // The drag's final frame may itself still be catching up; 'seek-pending-changed'
+    // already fired (and was ignored) while isDraggingScrubber was true, so pick
+    // it up here rather than waiting for a change that already happened.
+    if (app.isSeekPending) armPendingIndicator();
     if (scrubbingWasPlaying) {
       scrubbingWasPlaying = false;
       app.engine?.play();
@@ -160,6 +194,10 @@ export function initializeTransport(app, containerElement) {
   app.addEventListener('frame-changed', updateFrameDisplays);
   app.addEventListener('playback-changed', updateControls);
   app.addEventListener('index-changed', updateIndexDisplays);
+  app.addEventListener('seek-pending-changed', () => {
+    if (app.isSeekPending) armPendingIndicator();
+    else clearPendingIndicator();
+  });
 
   updateControls();
 }

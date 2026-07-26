@@ -572,6 +572,12 @@ button:disabled { opacity: 0.45; cursor: default; }
 #transport-container .transport-scrubber:disabled::-webkit-slider-thumb { background: var(--text-dim); }
 #transport-container .transport-scrubber:disabled::-moz-range-thumb { background: var(--text-dim); }
 
+/* A seek that has not landed on screen yet (js/ui/transport.js decides when
+   this is worth showing) mutes the thumb the same way a disabled one is
+   muted, so the two read as the same "not interactive right now" language. */
+#transport-container .transport-scrubber.seek-pending::-webkit-slider-thumb { background: var(--text-dim); }
+#transport-container .transport-scrubber.seek-pending::-moz-range-thumb { background: var(--text-dim); }
+
 #transport-container .transport-readout {
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
