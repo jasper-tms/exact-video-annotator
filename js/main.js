@@ -431,6 +431,10 @@ async function loadVideoSource(source, { name, sizeBytes }) {
     showIndexingStatus({ fraction: 0, framesFound: 0, etaMs: 0 });
     const engine = await createBestEngine(source, {
       canvas: videoEngineCanvas, video: videoEngineElement,
+      // We read and display exact source-pixel values for annotation, never a
+      // smoothed approximation of them — the engine defaults to smoothing on
+      // (right for a typical video player, wrong for us).
+      imageSmoothingEnabled: false,
       // Hand back a playable engine as soon as the opening frames have been
       // certified, and keep indexing the rest underneath it, rather than making
       // someone wait for the last byte of a long clip before they can annotate
@@ -596,6 +600,7 @@ async function recoverFromFatalDecode() {
     if (oldVideoLayer) app.viewer.removeLayer(oldVideoLayer);
     const engine = await createBestEngine(app.videoSource, {
       canvas: videoEngineCanvas, video: videoEngineElement, prefer: 'native',
+      imageSmoothingEnabled: false,
     });
     attachEngine(engine, information);
     engine.seekToFrame(frameBeforeFailure);
