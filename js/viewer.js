@@ -205,7 +205,11 @@ export class Viewer extends EventTarget {
         devicePixelRatioNow * layerTransform.offsetX,
         devicePixelRatioNow * layerTransform.offsetY,
       );
-      layer.draw(context, { ...renderState, pixelsPerLocalUnit: layerTransform.scale });
+      layer.draw(context, {
+        ...renderState,
+        pixelsPerLocalUnit: layerTransform.scale,
+        devicePixelRatio: devicePixelRatioNow,
+      });
       context.restore();
     }
 
@@ -216,7 +220,11 @@ export class Viewer extends EventTarget {
         devicePixelRatioNow * view.scale, 0, 0, devicePixelRatioNow * view.scale,
         devicePixelRatioNow * view.offsetX, devicePixelRatioNow * view.offsetY,
       );
-      this.overlayPainter(context, { ...renderState, pixelsPerLocalUnit: view.scale });
+      this.overlayPainter(context, {
+        ...renderState,
+        pixelsPerLocalUnit: view.scale,
+        devicePixelRatio: devicePixelRatioNow,
+      });
       context.restore();
     }
   }

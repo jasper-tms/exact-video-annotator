@@ -30,7 +30,13 @@ export class VideoLayer extends Layer {
     const sourceWidth = element.videoWidth ?? element.width;
     const sourceHeight = element.videoHeight ?? element.height;
     if (!sourceWidth || !sourceHeight) return;
-    context.imageSmoothingEnabled = renderState.pixelsPerLocalUnit < 4;
+    // pixelsPerLocalUnit is CSS pixels per source pixel; smoothing must key off
+    // the actual backing-store density (CSS pixels are further multiplied by
+    // devicePixelRatio there), or a retina screen keeps smoothing on past the
+    // point where each source pixel should render as one crisp, solid square.
+    const backingPixelsPerSourcePixel = renderState.pixelsPerLocalUnit
+      * (renderState.devicePixelRatio ?? 1);
+    context.imageSmoothingEnabled = backingPixelsPerSourcePixel < 4;
     // Integer (x, y) names a pixel's top-left corner by default (offset 0); an
     // offset of 0.5 instead names its center, which draws the image shifted up
     // and left by half a pixel so that convention holds without touching any
