@@ -93,16 +93,49 @@ button {
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.45; cursor: default; }
 
-.integer-coordinate-group {
-  align-items: center;
-  gap: 6px;
+#hovered-pixel-label {
+  flex: 0 0 auto;
   color: var(--text-dim);
   font-size: 12px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.integer-coordinate-group select {
+/* ---------- Settings modal ---------- */
+
+.settings-dialog {
+  min-width: 280px;
+  padding: 16px;
   background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+
+.settings-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.settings-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.settings-row select {
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -110,12 +143,21 @@ button:disabled { opacity: 0.45; cursor: default; }
   font-size: 12px;
 }
 
-#hovered-pixel-label {
-  flex: 0 0 auto;
-  color: var(--text-dim);
-  font-size: 12px;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+.coordinate-select-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.coordinate-select-lock-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  cursor: not-allowed;
+}
+
+.settings-dialog-close {
+  display: block;
+  margin-left: auto;
 }
 
 /* ---------- First screenful: tool rail + canvas + transport + tabs ---------- */

@@ -23,6 +23,7 @@ import { initializeLayerDetail } from './ui/layer-detail.js';
 import { initializeAnnotationsTable } from './ui/annotations-table.js';
 import { initializeClassManager } from './ui/class-manager.js';
 import { initializeToasts } from './ui/toasts.js';
+import { initializeSettingsModal } from './ui/settings-modal.js';
 import { drawPixelGrid } from './pixel-grid.js';
 
 const ANNOTATION_LAYER_CONSTRUCTORS = {
@@ -408,6 +409,7 @@ initializeLayerTabs(app, document.getElementById('layer-tabs-container'));
 initializeLayerDetail(app, document.getElementById('layer-detail-container'));
 initializeClassManager(app, document.getElementById('class-manager-container'));
 initializeAnnotationsTable(app, document.getElementById('annotations-table-container'));
+initializeSettingsModal(app, document.getElementById('settings-button'));
 initializeEventHotkeys(app);
 
 app.rebuildAnnotationLayersFromDocument();
@@ -758,26 +760,6 @@ paintToolButton.addEventListener('contextmenu', (event) => {
 });
 
 document.getElementById('fit-view-button').addEventListener('click', () => app.viewer.fitToContent());
-
-/* ---------- Integer coordinate convention ---------- */
-
-const integerCoordinateSelect = document.getElementById('integer-coordinate-select');
-integerCoordinateSelect.addEventListener('change', () => {
-  app.annotationDocument.integerCoordinateOffset = Number(integerCoordinateSelect.value);
-  app.markDocumentChanged();
-});
-function reflectIntegerCoordinateSelect() {
-  const hasCoordinateAnnotations = app.annotationDocument.layers.some((layer) =>
-    layer.type === 'coordinates' && layer.items.length > 0);
-  integerCoordinateSelect.value = String(app.annotationDocument.integerCoordinateOffset ?? 0);
-  integerCoordinateSelect.disabled = hasCoordinateAnnotations;
-  integerCoordinateSelect.title = hasCoordinateAnnotations
-    ? 'Locked: delete every coordinates annotation to change this.'
-    : 'Whether an integer (x, y) names a pixel\'s top-left corner or its center';
-}
-app.addEventListener('document-changed', reflectIntegerCoordinateSelect);
-app.addEventListener('layers-changed', reflectIntegerCoordinateSelect);
-reflectIntegerCoordinateSelect();
 
 /* ---------- Annotation-mode toggle (frame-anchored vs frame-agnostic) ---------- */
 
