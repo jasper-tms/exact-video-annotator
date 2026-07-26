@@ -10,7 +10,8 @@ export function initializeTransport(app, containerElement) {
     <input type="range" class="transport-scrubber" min="0" max="0" step="1" value="0" disabled>
     <span class="transport-readout"><span>Frame</span><input type="text" class="transport-frame-input"
       inputmode="numeric" title="Frame number (press Enter to jump)" disabled><span
-      class="transport-frame-total"></span><span>·</span><span class="transport-time"></span></span>
+      class="transport-frame-total"></span><span class="transport-time-gap">·</span><span
+      class="transport-time"></span></span>
     <span class="index-waiting" hidden
           title="Playback has reached the last frame indexed so far and is waiting for the index to catch up."
           >waiting for index…</span>
@@ -25,6 +26,7 @@ export function initializeTransport(app, containerElement) {
   const scrubber = containerElement.querySelector('.transport-scrubber');
   const frameInput = containerElement.querySelector('.transport-frame-input');
   const frameTotal = containerElement.querySelector('.transport-frame-total');
+  const timeGap = containerElement.querySelector('.transport-time-gap');
   const timeReadout = containerElement.querySelector('.transport-time');
   const readout = containerElement.querySelector('.transport-readout');
   const indexWaiting = containerElement.querySelector('.index-waiting');
@@ -160,6 +162,28 @@ export function initializeTransport(app, containerElement) {
     return Math.max(lastFrame, projectedFrames - 1);
   }
 
+  /** The clip's total duration as displayed in the readout: a plain time once
+      the pass has read the whole clip, otherwise a declared-duration estimate
+      ('~') or a growing floor ('+'). Depends only on facts the index carries,
+      not on the current playhead, so sizing code can call it too. */
+  function totalTimeText(engine) {
+    const indexState = engine.frameIndexState ?? 'complete';
+    if (indexState !== 'growing') return formatTime(engine.duration);
+    const declaredDuration = engine.expectedDuration ?? 0;
+    return declaredDuration > 0 ? `~${formatTime(declaredDuration)}` : `${formatTime(engine.duration)}+`;
+  }
+
+  /** How many digit characters the minutes portion of a formatted time takes
+      up — the only part of that string whose length varies as playback
+      proceeds (seconds and the decimal are always a fixed width). A leading
+      '~' (declared-duration estimate) sits before the minutes, so strip it
+      before measuring; a trailing '+' (growing floor) sits after the whole
+      time and does not affect where the minutes end. */
+  function minuteDigitCount(formattedTime) {
+    const withoutEstimateMark = formattedTime.startsWith('~') ? formattedTime.slice(1) : formattedTime;
+    return withoutEstimateMark.indexOf(':');
+  }
+
   function updateFrameDisplays() {
     const engine = app.engine;
     if (!engine) return;
@@ -175,12 +199,20 @@ export function initializeTransport(app, containerElement) {
     const totalFramesText = indexState === 'growing' ? `${lastFrame}+`
       : indexState === 'truncated' ? `${lastFrame} (partial)`
       : `${lastFrame}`;
-    const declaredDuration = engine.expectedDuration ?? 0;
-    const totalTimeText = indexState !== 'growing' ? formatTime(engine.duration)
-      : declaredDuration > 0 ? `~${formatTime(declaredDuration)}`
-      : `${formatTime(engine.duration)}+`;
     frameTotal.textContent = `/ ${totalFramesText}`;
-    timeReadout.textContent = `${formatTime(engine.currentTime)} / ${totalTimeText}`;
+
+    const currentTimeText = formatTime(engine.currentTime);
+    const totalTime = totalTimeText(engine);
+    timeReadout.textContent = `${currentTimeText} / ${totalTime}`;
+
+    // Reserve blank space to the left of the current time's minute digits, so
+    // a newly grown digit (9:59 -> 10:00, 99:59 -> 100:00) fills into space
+    // that was already there instead of pushing the total time to the right.
+    // The dot separator floats centered in whatever remains of that gap, so
+    // it drifts half a digit's width to the left each time the gap shrinks.
+    const reservedDigits = Math.max(0, minuteDigitCount(totalTime) - minuteDigitCount(currentTimeText));
+    timeGap.style.width = `calc(1ch + ${reservedDigits}ch)`;
+
     readout.classList.toggle('index-growing', indexState === 'growing');
     readout.classList.toggle('index-truncated', indexState === 'truncated');
   }
@@ -199,8 +231,11 @@ export function initializeTransport(app, containerElement) {
     indexWaiting.hidden = !engine.waitingForIndex;
     exactnessWarning.hidden = engine.frameIndexIsExact !== false;
     // Wide enough for the last frame number so the box does not resize as the
-    // user types a shorter or longer one.
-    frameInput.style.width = `${String(maximum).length + 1}ch`;
+    // user types a shorter or longer one. The box is border-box, so its own
+    // padding and border (10px, see .transport-frame-input) would otherwise eat
+    // into a plain "+1ch" buffer meant for breathing room — add that overhead
+    // back in pixels so the digits themselves always fit.
+    frameInput.style.width = `calc(${String(maximum).length}ch + 14px)`;
     updateFrameDisplays();
   }
 

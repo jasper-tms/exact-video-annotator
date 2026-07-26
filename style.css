@@ -586,6 +586,14 @@ button:disabled { opacity: 0.45; cursor: default; }
   gap: 4px;
 }
 
+/* Its width is set by js/ui/transport.js to reserve space for the current
+   time's minute digits to grow into; the dot stays centered as that space
+   shrinks. */
+#transport-container .transport-time-gap {
+  display: inline-flex;
+  justify-content: center;
+}
+
 /* While the index grows, the totals in the readout are a floor and a claim
    rather than facts, so they are dimmed; they come up to full weight when the
    pass has read the whole clip. A truncated index is not tentative — it is
