@@ -51,6 +51,15 @@ hotkeys, undo/redo, and the export round-trip. Fails on any page error.
 Pass `--url` to run those same checks against a deployed app rather than a local
 server — see below.
 
+```sh
+node test/growing-index-test.mjs
+```
+
+Covers what the app shows while a clip is still being indexed — the two-tone
+scrubber, the frame count marked as a floor, the wait at the end of the indexed
+range, and a pass that stops early. It drives those states through a wrapped
+engine rather than a large fixture; see the comment at the top of the file.
+
 ## Deploying
 
 Cloudflare Pages: build command `bash build.sh`, output directory `dist/`.

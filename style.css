@@ -10,6 +10,10 @@
   --accent: #4f9cf9;
   --warning: #e2a636;
   --error: #e05656;
+  /* Scrubber track: the indexed (seekable) range against the rest of a clip
+     whose index is still being built. */
+  --scrubber-indexed: #6b6d7a;
+  --scrubber-unindexed: #34353d;
   --toolbar-height: 44px;
 }
 
@@ -425,6 +429,24 @@ button:disabled { opacity: 0.45; cursor: default; }
 #drop-hint.hidden { display: none; }
 .drop-hint-details { font-size: 12px; max-width: 380px; }
 
+/* Indexing progress, bottom-left of the stage. Stays up while a clip plays
+   whose index is still growing underneath it. */
+#indexing-status {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+#indexing-status[hidden] { display: none; }
+
 #stage-container.drag-over::after {
   content: "";
   position: absolute;
@@ -447,10 +469,58 @@ button:disabled { opacity: 0.45; cursor: default; }
   user-select: none;
 }
 
+/* The scrubber's track is painted in two greys, the way a video player shows
+   buffering: solid for the range whose frames are indexed and therefore
+   seekable, dim for the remainder of a clip still being indexed. The fraction
+   is set by js/ui/transport.js; a complete index leaves it at 100%, which is
+   the ordinary single-tone track. Both vendor track/thumb pairs have to be
+   written out — a shared selector list would be dropped whole by any browser
+   that does not recognize one of its parts. */
 #transport-container .transport-scrubber {
+  --indexed-fraction: 100%;
+  --scrubber-track: linear-gradient(to right,
+    var(--scrubber-indexed) 0 var(--indexed-fraction),
+    var(--scrubber-unindexed) var(--indexed-fraction) 100%);
   flex: 1 1 auto;
   min-width: 60px;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 16px;
+  background: transparent;
 }
+
+#transport-container .transport-scrubber::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--scrubber-track);
+}
+
+#transport-container .transport-scrubber::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--scrubber-track);
+}
+
+#transport-container .transport-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;   /* centre the thumb on the 6px track */
+  border-radius: 50%;
+  border: none;
+  background: var(--text);
+}
+
+#transport-container .transport-scrubber::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: none;
+  background: var(--text);
+}
+
+#transport-container .transport-scrubber:disabled::-webkit-slider-thumb { background: var(--text-dim); }
+#transport-container .transport-scrubber:disabled::-moz-range-thumb { background: var(--text-dim); }
 
 #transport-container .transport-readout {
   font-variant-numeric: tabular-nums;
@@ -458,6 +528,27 @@ button:disabled { opacity: 0.45; cursor: default; }
   font-size: 12px;
   white-space: nowrap;
 }
+
+/* While the index grows, the totals in the readout are a floor and a claim
+   rather than facts, so they are dimmed; they come up to full weight when the
+   pass has read the whole clip. A truncated index is not tentative — it is
+   final and short — so it takes the warning color instead. */
+#transport-container .transport-readout.index-growing {
+  color: color-mix(in srgb, var(--text-dim) 65%, transparent);
+}
+
+#transport-container .transport-readout.index-truncated {
+  color: var(--warning);
+}
+
+.index-waiting {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+  font-style: italic;
+}
+
+.index-waiting[hidden] { display: none; }
 
 #transport-container .transport-frame-input {
   width: 72px;

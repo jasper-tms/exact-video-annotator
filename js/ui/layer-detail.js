@@ -108,11 +108,24 @@ export function initializeLayerDetail(app, containerElement) {
       facts.className = 'layer-detail-facts';
       const information = app.videoInformation ?? {};
       const engine = app.engine;
+      // While the index is still being built, the frame count and the duration
+      // describe the part of the clip indexed so far, so they are labelled as
+      // the floor they are rather than presented as totals.
+      const indexState = engine.frameIndexState ?? 'complete';
+      const declaredDuration = engine.expectedDuration ?? 0;
+      const framesText = indexState === 'growing'
+        ? `${engine.numFrames} indexed so far (still indexing)`
+        : indexState === 'truncated'
+          ? `${engine.numFrames} (indexing stopped early; the rest of the clip is unavailable)`
+          : String(engine.numFrames);
+      const durationText = indexState === 'growing' && declaredDuration > 0
+        ? `${engine.duration?.toFixed(3)} s indexed of ${declaredDuration.toFixed(3)} s declared`
+        : `${engine.duration?.toFixed(3)} s`;
       for (const [term, value] of [
         ['file', information.name],
         ['dimensions', `${engine.videoWidth} × ${engine.videoHeight}`],
-        ['frames', engine.numFrames],
-        ['duration', `${engine.duration?.toFixed(3)} s`],
+        ['frames', framesText],
+        ['duration', durationText],
         ['mean frame rate', information.frameRate ? `${information.frameRate} frames/second` : null],
         ['frame indices', engine.frameIndexIsExact === false ? 'APPROXIMATE (clip could not be indexed)' : 'exact'],
         ['engine tier', engine.tier],
@@ -142,6 +155,7 @@ export function initializeLayerDetail(app, containerElement) {
   app.viewer.addEventListener('layers-changed', rebuildIfIdle);
   app.addEventListener('document-changed', rebuildIfIdle);
   app.addEventListener('video-loaded', rebuildIfIdle);
+  app.addEventListener('index-changed', rebuildIfIdle);
 
   rebuild();
 }

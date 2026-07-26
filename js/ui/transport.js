@@ -11,6 +11,9 @@ export function initializeTransport(app, containerElement) {
     <input type="text" class="transport-frame-input" inputmode="numeric"
            title="Frame number (press Enter to jump)" disabled>
     <span class="transport-readout"></span>
+    <span class="index-waiting" hidden
+          title="Playback has reached the last frame indexed so far and is waiting for the index to catch up."
+          >waiting for index…</span>
     <span class="exactness-warning" hidden
           title="This clip could not be indexed, so frame numbers are only as good as an assumed constant frame rate."
           >frame numbers approximate</span>
@@ -22,6 +25,7 @@ export function initializeTransport(app, containerElement) {
   const scrubber = containerElement.querySelector('.transport-scrubber');
   const frameInput = containerElement.querySelector('.transport-frame-input');
   const readout = containerElement.querySelector('.transport-readout');
+  const indexWaiting = containerElement.querySelector('.index-waiting');
   const exactnessWarning = containerElement.querySelector('.exactness-warning');
 
   let scrubbingWasPlaying = false;
@@ -72,15 +76,73 @@ export function initializeTransport(app, containerElement) {
     return `${wholeMinutes}:${remainingSeconds.toFixed(2).padStart(5, '0')}`;
   }
 
+  /** The last frame the engine will name right now. While the index is growing
+      this is a floor that rises, never a total — every frame up to it is
+      exact and stays exact. */
+  function lastIndexedFrame(engine) {
+    return Math.max(0, (engine.numFrames ?? 1) - 1);
+  }
+
+  /** How far right the scrubber's track should reach.
+
+      Sizing it by the indexed frame count would stretch the track under the
+      cursor on every publish, so while the index grows the track is sized
+      against the whole clip instead: the container's DECLARED duration scaled
+      into frames by the mean rate of the part already indexed. That projection
+      is geometry only — it is never displayed and never names a frame, and
+      app.seekToFrame still clamps to what is actually indexed, so the grey
+      remainder cannot be seeked into. It snaps to the true count the moment
+      the index settles. A container that declares no duration (expectedDuration
+      0) has nothing to project from, and the track simply grows. */
+  function scrubberMaximum(engine) {
+    const lastFrame = lastIndexedFrame(engine);
+    if (engine.frameIndexState !== 'growing') return lastFrame;
+    const declaredDuration = engine.expectedDuration ?? 0;
+    const indexedDuration = engine.duration ?? 0;
+    if (!(indexedDuration > 0) || !(declaredDuration > indexedDuration)) return lastFrame;
+    const projectedFrames = Math.round(engine.numFrames * declaredDuration / indexedDuration);
+    return Math.max(lastFrame, projectedFrames - 1);
+  }
+
   function updateFrameDisplays() {
     const engine = app.engine;
     if (!engine) return;
     const frame = engine.currentFrame ?? 0;
     scrubber.value = String(frame);
     if (document.activeElement !== frameInput) frameInput.value = String(frame);
-    const lastFrame = Math.max(0, (engine.numFrames ?? 1) - 1);
+
+    const lastFrame = lastIndexedFrame(engine);
+    const indexState = engine.frameIndexState ?? 'complete';
+    // A growing count is a floor ('+'), and a declared duration is the
+    // container's claim rather than a scanned fact ('~'). Both marks come off
+    // once the pass has actually read the whole clip.
+    const totalFramesText = indexState === 'growing' ? `${lastFrame}+`
+      : indexState === 'truncated' ? `${lastFrame} (partial)`
+      : `${lastFrame}`;
+    const declaredDuration = engine.expectedDuration ?? 0;
+    const totalTimeText = indexState !== 'growing' ? formatTime(engine.duration)
+      : declaredDuration > 0 ? `~${formatTime(declaredDuration)}`
+      : `${formatTime(engine.duration)}+`;
     readout.textContent =
-      `frame ${frame} / ${lastFrame} · ${formatTime(engine.currentTime)} / ${formatTime(engine.duration)}`;
+      `frame ${frame} / ${totalFramesText} · ${formatTime(engine.currentTime)} / ${totalTimeText}`;
+    readout.classList.toggle('index-growing', indexState === 'growing');
+    readout.classList.toggle('index-truncated', indexState === 'truncated');
+  }
+
+  /** Scrubber geometry and the index-state chips — everything that moves when
+      the index publishes more frames rather than when the playhead moves. */
+  function updateIndexDisplays() {
+    const engine = app.engine;
+    if (!engine) return;
+    const maximum = scrubberMaximum(engine);
+    scrubber.max = String(maximum);
+    // The share of the track that is actually indexed; the rest is painted as
+    // the lighter "not here yet" grey, the way a buffered range is.
+    const indexedFraction = maximum > 0 ? Math.min(1, lastIndexedFrame(engine) / maximum) : 1;
+    scrubber.style.setProperty('--indexed-fraction', `${(indexedFraction * 100).toFixed(2)}%`);
+    indexWaiting.hidden = !engine.waitingForIndex;
+    exactnessWarning.hidden = engine.frameIndexIsExact !== false;
+    updateFrameDisplays();
   }
 
   function updateControls() {
@@ -91,14 +153,13 @@ export function initializeTransport(app, containerElement) {
     }
     if (!hasVideo) return;
     playButton.textContent = engine.paused ? '▶' : '⏸';
-    scrubber.max = String(Math.max(0, (engine.numFrames ?? 1) - 1));
-    exactnessWarning.hidden = engine.frameIndexIsExact !== false;
-    updateFrameDisplays();
+    updateIndexDisplays();
   }
 
   app.addEventListener('video-loaded', updateControls);
   app.addEventListener('frame-changed', updateFrameDisplays);
   app.addEventListener('playback-changed', updateControls);
+  app.addEventListener('index-changed', updateIndexDisplays);
 
   updateControls();
 }

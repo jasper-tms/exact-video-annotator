@@ -31,6 +31,11 @@ const ANNOTATION_LAYER_CONSTRUCTORS = {
 
 const AUTOSAVE_DEBOUNCE_MILLISECONDS = 500;
 
+// A growing index publishes frames faster than a panel rebuild is worth; this
+// is how often those publishes are allowed to reach the UI. A settled index
+// bypasses it — see attachEngine.
+const INDEX_EVENT_THROTTLE_MILLISECONDS = 200;
+
 class Application extends EventTarget {
   viewer = null;
   engine = null;
@@ -321,6 +326,7 @@ const videoHost = document.getElementById('video-host');
 const videoEngineCanvas = document.getElementById('video-engine-canvas');
 const videoEngineElement = document.getElementById('video-engine-element');
 const dropHint = document.getElementById('drop-hint');
+const indexingStatus = document.getElementById('indexing-status');
 const engineTierLabel = document.getElementById('engine-tier-label');
 
 app.viewer = new Viewer(stageCanvas);
@@ -361,32 +367,135 @@ async function loadVideoSource(source, { name, sizeBytes }) {
       app.engine = null;
     }
     app.videoSource = source;
+    // Destroying an engine does not stop an index pass already reading the
+    // file, so a clip opened while another was still indexing would otherwise
+    // keep hearing the old pass's progress. Only the newest load may write.
+    const loadIdentifier = ++mostRecentLoadIdentifier;
+    showIndexingStatus({ fraction: 0, framesFound: 0, etaMs: 0 });
     const engine = await createBestEngine(source, {
       canvas: videoEngineCanvas, video: videoEngineElement,
+      // Hand back a playable engine as soon as the opening frames have been
+      // certified, and keep indexing the rest underneath it, rather than making
+      // someone wait for the last byte of a long clip before they can annotate
+      // its first second. Every frame number reported is still exact and
+      // permanent — only the SET of nameable frames grows — so an annotation
+      // written now against frame 412 keeps meaning that picture. See the
+      // engine README's "Playing while the index is still being built".
+      playWhileIndexing: true,
+      onProgress: (progress) => {
+        if (loadIdentifier === mostRecentLoadIdentifier) showIndexingStatus(progress);
+      },
     });
     attachEngine(engine, { name, sizeBytes });
   } catch (error) {
+    hideIndexingStatus();
     app.showToast(`Could not open the video: ${error.message ?? error}`, { kind: 'error' });
   }
 }
 
-function attachEngine(engine, { name, sizeBytes }) {
-  app.engine = engine;
-  app.videoInformation = {
+/* ---------- Indexing progress ---------- */
+
+// Counts loads so a superseded one can tell it is no longer the current video.
+let mostRecentLoadIdentifier = 0;
+
+function formatIndexingEta(milliseconds) {
+  // etaMs is 0 at the very start and at the end, where it means "no estimate"
+  // rather than "no time left".
+  if (!milliseconds) return '';
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return ` (~${seconds} s left)`;
+  return ` (~${Math.round(seconds / 60)} min left)`;
+}
+
+function showIndexingStatus(progress) {
+  const percent = Math.round((progress.fraction ?? 0) * 100);
+  const frames = progress.framesFound ?? 0;
+  indexingStatus.hidden = false;
+  indexingStatus.textContent =
+    `Indexing… ${percent}% · ${frames.toLocaleString()} frames so far${formatIndexingEta(progress.etaMs)}`;
+}
+
+function hideIndexingStatus() {
+  indexingStatus.hidden = true;
+  indexingStatus.textContent = '';
+}
+
+/** The video's facts as the engine currently knows them. While the index is
+    still growing these describe the certified prefix, not the whole clip —
+    numberOfFrames is a floor and durationSeconds is the time indexed so far —
+    which is why `frameIndexState` travels with them into the export instead of
+    letting a partial count pass for a total. Rebuilt on every index event, so
+    an export taken after the pass finishes carries the finished numbers. */
+function videoInformationFromEngine(engine, { name, sizeBytes }) {
+  return {
     name,
     sizeBytes: sizeBytes ?? null,
     numberOfFrames: engine.numFrames,
     // Mean rate, provenance only — frame indices are the source of truth.
     frameRate: engine.duration ? Number((engine.numFrames / engine.duration).toFixed(3)) : null,
     frameIndexIsExact: engine.frameIndexIsExact,
+    // 'complete' | 'growing' | 'truncated'. The native tier reports none, and
+    // only ever hands back a finished index.
+    frameIndexState: engine.frameIndexState ?? 'complete',
     durationSeconds: engine.duration,
+    declaredDurationSeconds: engine.expectedDuration || null,
     width: engine.videoWidth,
     height: engine.videoHeight,
   };
+}
+
+function attachEngine(engine, { name, sizeBytes }) {
+  app.engine = engine;
+  app.videoInformation = videoInformationFromEngine(engine, { name, sizeBytes });
+  if (engine.frameIndexState !== 'growing') hideIndexingStatus();
+
+  // The index publishes certified prefixes as it goes; each one moves the frame
+  // count, the duration and the scrubber's geometry, so refresh the facts and
+  // tell the panels. Publishes can arrive faster than a DOM rebuild is worth,
+  // hence the throttle — but a settled index is dispatched immediately, since
+  // that is the edge the readout changes color on.
+  let lastIndexDispatchMilliseconds = 0;
+  let pendingIndexDispatch = null;
+  const refreshIndexFacts = ({ immediate }) => {
+    // A throttled dispatch can outlive the video it belongs to.
+    if (app.engine !== engine) return;
+    app.videoInformation = videoInformationFromEngine(engine, { name, sizeBytes });
+    clearTimeout(pendingIndexDispatch);
+    const sinceLast = performance.now() - lastIndexDispatchMilliseconds;
+    if (!immediate && sinceLast < INDEX_EVENT_THROTTLE_MILLISECONDS) {
+      pendingIndexDispatch = setTimeout(() => refreshIndexFacts({ immediate: true }),
+        INDEX_EVENT_THROTTLE_MILLISECONDS - sinceLast);
+      return;
+    }
+    lastIndexDispatchMilliseconds = performance.now();
+    app.dispatchEvent(new CustomEvent('index-changed'));
+  };
+
+  // Complete and truncated are both ends of the pass: nothing more is coming,
+  // so the progress badge goes away and the panels get the final numbers now
+  // rather than at the end of a throttle window.
+  const settleIndex = () => {
+    if (app.engine !== engine) return;
+    hideIndexingStatus();
+    refreshIndexFacts({ immediate: true });
+  };
+
+  engine.addEventListener('indexextended', () => refreshIndexFacts({ immediate: false }));
+  engine.addEventListener('indexcomplete', settleIndex);
+  engine.addEventListener('indextruncated', settleIndex);
 
   engine.addEventListener('errormessage', (event) => {
     const detail = event.detail ?? {};
     if (!detail.message) return;
+    // An index that stopped early is flagged fatal too, but it is not a dead
+    // decoder: the frames already published stay exact and keep playing, and
+    // rebuilding on the native tier would only re-scan the same container —
+    // which that tier refuses a partial result from anyway. Say so and keep
+    // the engine we have.
+    if (detail.incomplete) {
+      app.showToast(detail.message, { kind: 'warning' });
+      return;
+    }
     if (detail.fatal) recoverFromFatalDecode();
     else app.showToast(detail.message, { kind: 'warning' });
   });
@@ -442,6 +551,7 @@ async function recoverFromFatalDecode() {
 /* ---------- Animation loop ---------- */
 
 let lastReportedFrame = -1;
+let lastReportedWaitingForIndex = false;
 
 function animationTick(now) {
   const engine = app.engine;
@@ -451,6 +561,13 @@ function animationTick(now) {
       lastReportedFrame = engine.currentFrame;
       app.dispatchEvent(new CustomEvent('frame-changed'));
       app.viewer.requestRender();
+    }
+    // Playback pinned at the last indexed frame is the one state nothing else
+    // announces: the frame stops changing, so 'frame-changed' goes quiet, and
+    // the engine is neither paused nor at the end of the clip.
+    if (engine.waitingForIndex !== lastReportedWaitingForIndex) {
+      lastReportedWaitingForIndex = !!engine.waitingForIndex;
+      app.dispatchEvent(new CustomEvent('index-changed'));
     }
     if (!engine.paused) app.viewer.requestRender();
   }

@@ -277,9 +277,11 @@ app.addKeyHandler(handler);          // handler(event) → true if handled; runs
                                      // after tool onKeyDown (event-hotkeys)
 app.isTypingTarget(event);           // true when focus is in a text input
 app.videoInformation;                // { name, sizeBytes, numberOfFrames, ... } | null
+                                     // rebuilt on every index event, so its
+                                     // counts follow a growing index
 // app extends EventTarget; events: 'document-changed', 'frame-changed',
 // 'selection-changed', 'layers-changed', 'tool-changed', 'video-loaded',
-// 'playback-changed'
+// 'playback-changed', 'index-changed'
 ```
 
 UI modules export `initialize<Thing>(app, containerElement)` and subscribe to
@@ -289,7 +291,8 @@ app events; they never poll.
 
 - `js/ui/transport.js` — play/pause, ±1 frame step, frame-unit scrubber,
   numeric frame input, frame/time readout, exactness indicator
-  (`engine.frameIndexIsExact === false` shows a visible warning chip).
+  (`engine.frameIndexIsExact === false` shows a visible warning chip), and the
+  growing-index displays described under "Video pipeline" below.
   Keyboard: Space play/pause; `ArrowLeft`/`,` and `ArrowRight`/`.` step.
 - `js/ui/layer-tabs.js` — the layer tab bar under the canvas (leftmost tab =
   bottom of the stack): click to select, double-click to rename, drag a tab
@@ -347,7 +350,45 @@ range on demand (the engine's `FileRangeReader`), the container index is a few
 range reads for MP4, and decode memory is byte-budgeted around the playhead.
 
 A fatal mid-stream decode error (see engine README) rebuilds with
-`createBestEngine(source, { prefer: 'native' })` at the same playhead.
+`createBestEngine(source, { prefer: 'native' })` at the same playhead — except
+when the error carries `detail.incomplete`, which is an index that stopped
+early rather than a dead decoder. Those frames keep playing and the native tier
+would only re-scan the same container, so that case only warns.
+
+### An index that is still being built
+
+The app opens clips with `playWhileIndexing: true`, so a container with no
+central index (WebM/MKV, fragmented MP4) starts playing as soon as its opening
+frames are certified and keeps indexing underneath. `engine.numFrames` and
+`engine.duration` then describe the **indexed prefix**, not the clip, and rise
+as it grows; `engine.expectedDuration` is the container's declared total, a
+claim that never names a frame. Every frame number already published is exact
+and permanent, so annotations written during indexing need no special handling.
+
+Matroska declares that total, so WebM and MKV get a scrubber sized against the
+whole clip. A fragmented MP4 usually declares none (`expectedDuration` is `0`),
+and its track simply grows — the paths below all handle a `0` declared duration
+rather than assuming one.
+
+What the UI does with that:
+
+- `engine.frameIndexState` drives the readout: `frame 128 / 1284+ · 0:04.20 /
+  ~2:14.03` dimmed while `growing` (the `+` marks a floor, the `~` a declared
+  total), full weight and no marks when `complete`, and the warning color with
+  `(partial)` when `truncated`.
+- The scrubber's `max` is projected from the declared duration so the track
+  does not stretch under the cursor; the un-indexed remainder is painted in a
+  dimmer grey, and `app.seekToFrame` clamps to what is indexed, so it cannot be
+  seeked into. The projection is geometry only and is never displayed.
+- `engine.waitingForIndex` (playback pinned at the last indexed frame — not
+  paused, not the end of the clip) shows a "waiting for index…" chip. The
+  animation loop watches it, since the playhead stops moving and
+  `'frame-changed'` goes quiet.
+- `#indexing-status` reports the pass itself from `onProgress`
+  (`{fraction, framesFound, etaMs}`), from the first read until the index
+  settles.
+- `videoInformation.frameIndexState` travels into the export, so annotations
+  saved mid-pass are not recorded against a frame count that was only a floor.
 
 ## Persistence
 

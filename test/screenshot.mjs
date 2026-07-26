@@ -12,7 +12,9 @@ const { chromium } = await import(playwrightPath);
 
 const repositoryRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const outputDirectory = process.argv[2] ?? repositoryRoot;
-const port = 8798;
+// Clear of the engine repository's own test servers, which sit in the 8798+
+// range and would otherwise answer every request here with a 404.
+const port = 8872;
 
 const server = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'],
   { cwd: repositoryRoot, stdio: 'ignore' });
