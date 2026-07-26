@@ -151,6 +151,10 @@ layer.commandDeleteItem(itemId);
 A finished drag is committed with a generic snapshot command: `apply()`
 restores the after-snapshot, `revert()` the before-snapshot.
 
+On top of this contract, a layer may implement the optional annotation-logic
+hooks under "Plugins" below, which let it adjust geometry as it is drawn or
+dragged. Layers without them are untouched by that machinery.
+
 Annotation layers are **views over the document**: their `items` array IS the
 corresponding document layer's `items` array (same object identity). They hold
 no copied state. Every annotation layer class has the constructor signature
@@ -204,6 +208,7 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
   layers: [
     { id, type: 'coordinates', name, visible, opacity, transform,
       allowFractionalCoordinates,
+      plugin: { id: 'line-fitter', options: { … } },   // optional, see "Plugins"
       items: [ { id, frame, kind: 'point' | 'line' | 'polygon',
                  vertices: [[x, y], ...], classId, name } ] },
       // frame: integer (anchored to that frame) or null (frame-agnostic —
@@ -227,6 +232,11 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
 `classId` and `name` on items are both optional (`null`). Colors are CSS color
 strings. A new document starts with one Coordinates layer and one Frames
 layer (Segmentation is opt-in from the ＋ menu, since it's not usable yet).
+
+A layer's optional `plugin` field names the plugin the layer belongs to and
+carries that plugin's settings. Its items stay ordinary items of the layer's
+`type`, so a build without that plugin still reads the file (it says so, opens
+the layer plain, and keeps the field on re-export).
 
 ### `js/undo.js` — exports `class UndoHistory extends EventTarget`
 
@@ -284,7 +294,8 @@ app.hover;                           // set by tools while hovering an existing
 app.togglePlayback(); app.stepFrame(delta);
 app.annotationLayers;                // view layers of type coordinates/segmentation/frames
 app.setActiveLayer(layerId);
-app.addAnnotationLayer(type);        // undoable; returns the new view layer
+app.addAnnotationLayer(type, { pluginId });  // undoable; returns the new view
+                                     // layer (a plugin's, with a pluginId)
 app.removeAnnotationLayer(layerId);  // undoable
 app.findAnnotationLayerForType(type);// active layer if it matches, else first
                                      // of that type, else null (never creates
@@ -316,10 +327,13 @@ app events; they never poll.
 - `js/ui/layer-tabs.js` — the layer tab bar under the canvas (leftmost tab =
   bottom of the stack): click to select, double-click to rename, drag a tab
   sideways to re-order the stack; each tab carries an eye icon (right of the
-  name and type badge) toggling visibility; ＋ adds an annotation layer and ✕
-  deletes the selected one (confirming when it holds annotations).
+  name and type badge) toggling visibility; ＋ adds an annotation layer — its
+  menu's second page, **Plugins ›**, adds a plugin layer — and ✕ deletes the
+  selected one (confirming when it holds annotations). A plugin layer's badge
+  names its plugin rather than its storage type.
 - `js/ui/layer-detail.js` — settings for the selected layer (visibility,
-  opacity, scale/offset transform; playback facts for the video layer).
+  opacity, scale/offset transform; playback facts for the video layer; a
+  plugin's own settings, built by the plugin).
 - `js/ui/annotations-table.js` — items of the selected layer by default, or of
   every annotation layer when "Show all annotations" (top right of the panel)
   is checked; sortable; click a row to select + jump to its frame; per-row
@@ -334,6 +348,125 @@ app events; they never poll.
   frame, second press ends it; point events are single-press; remove key
   deletes the event overlapping the current frame).
 
+## Plugins
+
+A plugin is an annotation layer type with extra annotation logic baked in. It
+is added from the tab bar's ＋ menu under **Plugins ›** (which also lists a
+not-yet-functional **Upload…**), appears as its own tab, and contributes its
+own settings to the layer detail panel.
+
+A plugin does **not** invent a storage format: it reuses one of the built-in
+annotation layer types, so its annotations are ordinary items of that layer's
+type in the document and in the export. Only the layer says which plugin made
+it.
+
+`js/plugins/registry.js` holds the descriptors:
+
+```js
+{
+  id, name, description,
+  layerType: 'coordinates' | 'segmentation' | 'frames',   // storage, and what tools target
+  preferredToolId,                             // selected when a layer is added
+  createViewLayer(documentLayer, app) → Layer,  // documentLayer.plugin = {id, options}
+  buildSettings(app, layer) → HTMLElement,      // shown in the layer detail panel
+}
+```
+
+The layer it builds is a normal annotation layer (usually a subclass of one)
+that may implement any of these **optional annotation-logic hooks**. The
+drawing tools and the drag helpers call them when they exist, so a layer
+without them behaves exactly as before:
+
+```js
+layer.plugin;                                    // the descriptor, or absent
+layer.options;                                   // the plugin's settings
+layer.shouldFinishAfterVertex(vertices, kind);   // → true ends the shape now
+layer.afterVertexPlaced(app, vertices, kind);    // may move the in-progress
+                                                 // vertices (layer-local)
+layer.beforeShapeCommitted(app, vertices, kind); // last word before the item
+                                                 // becomes an undo command
+layer.afterItemDragged(app, itemId);             // runs inside the drag's own
+                                                 // command, so both undo as one
+layer.refitItem(app, itemId);                    // → true if geometry changed;
+                                                 // used by `r` and the panel
+```
+
+`js/plugins/refit.js` wraps `refitItem` in an undo command;
+`js/plugins/frame-pixels.js` is the shared way to read the pixels of the frame
+on screen (a luminance patch of the engine's display element, plus
+layer-local ↔ video-pixel conversions), for plugins whose logic looks at the
+image. Its sampler honors the coordinate convention the video layer draws
+with: **integers sit at pixel corners** (pixel `k` spans `[k, k + 1)`, its
+center is `k + 0.5`), so a fit lands where the feature is *drawn* — the border
+between two pixel rows is an exact integer, the center of a pixel-aligned
+stripe a half-integer. An index-as-position sampler would put every fit half a
+pixel off on screen while looking correct in its own coordinates.
+
+### The line fitter (`js/plugins/line-fitter/`)
+
+A coordinates layer that snaps what you draw onto the structure under it. Drop two
+points near an edge and the line locks onto the edge; the fit runs the moment
+the second point lands (a line on this layer is done at two points — no Enter),
+after a drag when "re-fit after dragging" is on, and on demand with `r`.
+
+- **Points move perpendicular to their own segment only**, so the drawn length
+  is preserved to within a fraction of a pixel however far they travel.
+- A vertex that already belongs to a fitted segment may only **slide along**
+  that segment when the next one is fitted, so extending a polyline (or closing
+  a polygon) cannot drag an earlier segment off the edge it found. Polygons are
+  therefore fitted segment by segment as they are drawn, closing segment last.
+- Both modes score a placement from its **perpendicular profile**: the mean
+  luminance at each distance out from the candidate line, averaged along its
+  length. Averaging along the line first is what makes a faint edge that runs
+  the length of the line beat a strong one that merely crosses it.
+- **Lock to edge** differentiates that profile at the line with a Gaussian
+  derivative, normalized so the score reads as the height of the step the line
+  sits on.
+- **Lock to stripe center** compares a band of the profile centered on the line
+  against the flanks just outside it, over every stripe half-width in range
+  (1–20 px wide by default), minus half of any difference BETWEEN the two
+  flanks — being centered means the same background on both sides, and that
+  penalty exactly cancels the score's one imposter (a band parked beside the
+  stripe with the whole stripe caught in one flank), which the descent would
+  otherwise settle into. The winning half-width is a real measurement of the
+  stripe, which is what the panel reports.
+- **Both scores must peak, not plateau** — this is the whole reason they are
+  shaped this way. A two-tap difference `|I(p+1) − I(p−1)|` scores *identically*
+  anywhere within a tap-spacing of an edge, and a line-versus-two-probes score
+  is flat right across the middle of a stripe once the probes clear it. Under a
+  flat score the search stops wherever it entered the flat region, so the fit
+  lands near the feature but never on it, differently every time. Both
+  replacements have a single maximum, at the edge and at the stripe's center
+  respectively; `test/line-fitter-test.mjs` pins that down by fitting a hard
+  step and a one-pixel stripe from ten starting offsets and two tilts and
+  requiring every one to land in the same place.
+- **The search is a local descent, not a sweep, in both modes.** From exactly
+  where the points were dropped, the placement walks uphill in score — each
+  endpoint nudged along its allowed direction, alone and together — moving
+  only while a neighboring placement strictly improves, with the step halving
+  from 0.5 px down to 0.01 px. It settles into the NEAREST local optimum and
+  can never cross a valley to a stronger feature further away, which is the
+  point: a faint edge under the line always beats a bold one a few pixels off.
+  Travel is deliberately unbounded — while every step keeps improving, the
+  line is still riding one continuous feature and may follow it as far as it
+  goes (a wide soft edge pulls a line in from many pixels away). What bounds
+  the fit instead is capture: the score only feels a feature within the
+  profile's reach (about ±2 px in edge mode, the widest stripe plus its
+  flanks in stripe mode), so a line placed further off than that from
+  anything at all visibly stays put rather than leaping. Exact ties go to
+  leaving the points where the user put them, so a flat image moves nothing.
+  Fitted coordinates within 0.01 px of a half-integer are rounded to it
+  (edges live on pixel borders, stripe centers on pixel centers).
+- Pixels are read one bounded patch at a time: the layer reads the shape's
+  bounding box plus the profile's reach and a few pixels of travel headroom,
+  and a fit that ends pressed against the patch border (where clamped pixels
+  read as flat) is simply re-run against a fresh patch read around where it
+  got to, until it stops moving.
+
+`js/plugins/line-fitter/fit-line.js` is pure math over a `sampleLuminance(x, y)`
+function, with no DOM and no app — which is what lets `test/line-fitter-test.mjs`
+drive it with synthetic edges and stripes.
+
 ## Keyboard map (global, suppressed while typing in inputs)
 
 | Key | Action |
@@ -346,6 +479,7 @@ app events; they never poll.
 | `v` | toggle the selected layer's visibility |
 | `a` | toggle frame-agnostic mode for new annotations |
 | `f` | fit the view to the content |
+| `r` | re-fit the selected annotation (plugin layers that fit; see "Plugins") |
 | `Delete`/`Backspace` | delete selected item (or selected vertex) — works in any tool |
 | `Escape` | cancel in-progress shape / clear selection |
 | `Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z` | undo, redo |

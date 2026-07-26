@@ -8,6 +8,8 @@
 // the layer stack. The ＋ button adds an annotation layer and the ✕ button
 // beside it deletes the selected one (confirming when it holds annotations).
 
+import { listPlugins } from '../plugins/registry.js';
+
 const DRAG_START_THRESHOLD_PIXELS = 5;
 
 function layerTypeDisplayName(type) {
@@ -73,22 +75,67 @@ export function initializeLayerTabs(app, containerElement) {
 
   /* ---------- Add-layer menu ---------- */
 
+  function menuOption(menu, label, { title = '', disabled = false }, onChoose) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.textContent = label;
+    if (title) option.title = title;
+    option.disabled = disabled;
+    // The menu lives inside the ＋ button, so a click here would otherwise
+    // bubble up to it and be taken as "close the menu".
+    if (!disabled) {
+      option.addEventListener('click', (event) => {
+        event.stopPropagation();
+        onChoose(menu);
+      });
+    }
+    menu.appendChild(option);
+    return option;
+  }
+
+  /** The ＋ menu's first page: one entry per built-in annotation layer type,
+      then the way into the plugins. */
+  function showLayerTypeOptions(menu) {
+    menu.replaceChildren();
+    for (const type of ['coordinates', 'segmentation', 'frames']) {
+      menuOption(menu, `New ${layerTypeDisplayName(type)} layer`, {}, () => {
+        menu.remove();
+        const layer = app.addAnnotationLayer(type);
+        app.setActiveLayer(layer.id);
+      });
+    }
+    const separator = document.createElement('div');
+    separator.className = 'layer-tab-add-menu-separator';
+    menu.appendChild(separator);
+    menuOption(menu, 'Plugins ›', { title: 'Annotation layers with extra logic baked in' },
+      () => showPluginOptions(menu));
+  }
+
+  /** The ＋ menu's plugin page. */
+  function showPluginOptions(menu) {
+    menu.replaceChildren();
+    menuOption(menu, '‹ Back', {}, () => showLayerTypeOptions(menu));
+    const separator = document.createElement('div');
+    separator.className = 'layer-tab-add-menu-separator';
+    menu.appendChild(separator);
+    for (const plugin of listPlugins()) {
+      menuOption(menu, plugin.name, { title: plugin.description }, () => {
+        menu.remove();
+        const layer = app.addAnnotationLayer(plugin.layerType, { pluginId: plugin.id });
+        app.setActiveLayer(layer.id);
+        if (plugin.preferredToolId) app.setActiveTool(plugin.preferredToolId);
+      });
+    }
+    menuOption(menu, 'Upload…', { title: 'Loading your own plugin file is not available yet',
+      disabled: true }, () => {});
+  }
+
   addButton.addEventListener('click', () => {
     const existingMenu = document.querySelector('.layer-tab-add-menu');
     if (existingMenu) { existingMenu.remove(); return; }
     const menu = document.createElement('div');
     menu.className = 'layer-tab-add-menu';
-    for (const type of ['coordinates', 'segmentation', 'frames']) {
-      const option = document.createElement('button');
-      option.type = 'button';
-      option.textContent = `New ${layerTypeDisplayName(type)} layer`;
-      option.addEventListener('click', () => {
-        menu.remove();
-        const layer = app.addAnnotationLayer(type);
-        app.setActiveLayer(layer.id);
-      });
-      menu.appendChild(option);
-    }
+    showLayerTypeOptions(menu);
     // Positioned with fixed viewport coordinates (rather than an absolute
     // anchor inside addButton) so it isn't clipped when the ＋ button is
     // riding inside the scrollable tab strip — that ancestor's overflow: auto

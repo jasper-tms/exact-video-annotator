@@ -132,6 +132,16 @@ export function documentFromJson(jsonObject) {
     if (layer.type === 'coordinates') {
       parsedLayer.allowFractionalCoordinates = layer.allowFractionalCoordinates === true;
     }
+    // A plugin layer stores its annotations as the plain type above and names
+    // its plugin here, so a build without that plugin can still read the file.
+    if (layer.plugin !== undefined && layer.plugin !== null) {
+      parsedLayer.plugin = {
+        id: asString(layer.plugin.id, 'layer plugin id'),
+        options: (typeof layer.plugin.options === 'object' && layer.plugin.options !== null)
+          ? { ...layer.plugin.options }
+          : {},
+      };
+    }
     for (const item of asArray(layer.items ?? [], `items of layer "${parsedLayer.name}"`)) {
       parsedLayer.items.push(parseItem(layer.type, item));
     }

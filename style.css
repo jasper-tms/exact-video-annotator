@@ -412,6 +412,33 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .layer-tab-add-menu button { border: none; text-align: left; }
 
+.layer-tab-add-menu-separator {
+  height: 1px;
+  margin: 3px 2px;
+  background: var(--border);
+}
+
+/* ---------- Plugin settings (inside the layer detail panel) ---------- */
+
+.plugin-settings {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.plugin-settings h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.plugin-settings-explanation,
+.plugin-settings-status {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin: 4px 0;
+}
+
 /* ---------- Below the fold: details sections ---------- */
 
 #details-section {

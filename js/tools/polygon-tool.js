@@ -57,6 +57,9 @@ export function createDrawingTool({
   function finish(app) {
     if (!inProgress || inProgress.vertices.length < minimumVertexCount) return false;
     const layer = inProgress.layer;
+    // Plugin layers get the last word on the geometry before it is committed
+    // (the line fitter fits a polygon's closing segment here).
+    layer.beforeShapeCommitted?.(app, inProgress.vertices, kind);
     const items = layer.items;
     const item = {
       id: newId(),
@@ -125,6 +128,15 @@ export function createDrawingTool({
       }
       const localPoint = inProgress.layer.snapLocalPoint(app.localFromWorld(inProgress.layer, worldPoint));
       inProgress.vertices.push([localPoint.x, localPoint.y]);
+      // On a plugin layer, dropping a vertex can move the geometry (the line
+      // fitter snaps the segment just completed onto the edge under it) and can
+      // end the shape outright (a fitted line is done at two points).
+      const layer = inProgress.layer;
+      layer.afterVertexPlaced?.(app, inProgress.vertices, kind);
+      if (layer.shouldFinishAfterVertex?.(inProgress.vertices, kind)) {
+        finish(app);
+        return;
+      }
       app.viewer.requestRender();
     },
 

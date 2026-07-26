@@ -26,6 +26,11 @@ import, with localStorage autosave as a safety net.
   independent of window size, zoom, device pixel ratio, and rotation.
 - Keyboard-first: tools, frame stepping, and user-definable per-event-type
   hotkeys (case-sensitive add/remove keys).
+- **Plugins are layers.** An annotation layer can carry extra annotation logic
+  — the bundled **line fitter** snaps a drawn line onto the edge, or the middle
+  of the stripe, underneath it — while still storing plain annotations that a
+  build without the plugin can read. Add one from the ＋ menu's **Plugins ›**
+  page; see [ARCHITECTURE.md](ARCHITECTURE.md#plugins).
 
 ## Running
 
@@ -50,6 +55,16 @@ hotkeys, undo/redo, and the export round-trip. Fails on any page error.
 
 Pass `--url` to run those same checks against a deployed app rather than a local
 server — see below.
+
+```sh
+node test/line-fitter-test.mjs
+```
+
+The line-fitter plugin: the fitting math against synthetic edges and stripes
+(including that points move perpendicular only, and that a later segment can
+only slide a shared vertex along the segment fitted before it), then the plugin
+end to end — added from the ＋ menu, two clicks committing one fitted line
+against the fixture's real pixels, re-fitting, and the JSON round trip.
 
 ```sh
 node test/growing-index-test.mjs

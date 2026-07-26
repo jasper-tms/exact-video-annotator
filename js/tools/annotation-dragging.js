@@ -67,6 +67,10 @@ export function endDragOnExistingItem(app) {
   if (!dragState) return false;
   if (dragState.moved) {
     const { layer, itemId, beforeSnapshot } = dragState;
+    // A plugin layer may adjust what was dropped (the line fitter re-snaps it
+    // onto the edge). It runs before the after-snapshot, so the drag and the
+    // adjustment undo together as the one move they look like.
+    layer.afterItemDragged?.(app, itemId);
     const afterSnapshot = layer.snapshotItemGeometry(itemId);
     app.undoHistory.execute({
       label: 'Move',

@@ -13,6 +13,8 @@ import {
   autosaveKey, saveAutosave, loadAutosave,
 } from './document.js';
 import { panTool } from './tools/pan-tool.js';
+import { findPlugin } from './plugins/registry.js';
+import { refitSelectedItem } from './plugins/refit.js';
 import { pointTool } from './tools/point-tool.js';
 import { polygonTool } from './tools/polygon-tool.js';
 import { lineTool } from './tools/line-tool.js';
@@ -284,14 +286,23 @@ class Application extends EventTarget {
     this.markDocumentChanged();
   }
 
-  addAnnotationLayer(type) {
+  /**
+   * Add an annotation layer of the given type. With a pluginId, the layer is
+   * that plugin's: same storage type, but built by the plugin so it carries
+   * the plugin's annotation logic and settings.
+   */
+  addAnnotationLayer(type, { pluginId = null } = {}) {
+    const plugin = pluginId === null ? null : findPlugin(pluginId);
     const documentLayer = {
       id: newId(), type,
-      name: `${type[0].toUpperCase()}${type.slice(1)} ${this.annotationLayers.filter((layer) => layer.type === type).length + 1}`,
+      name: plugin
+        ? `${plugin.name} ${this.annotationLayers.filter((layer) => layer.plugin?.id === plugin.id).length + 1}`
+        : `${type[0].toUpperCase()}${type.slice(1)} ${this.annotationLayers.filter((layer) => layer.type === type).length + 1}`,
       visible: true, opacity: 1,
       transform: { scale: 1, offsetX: 0, offsetY: 0 },
       items: [],
     };
+    if (plugin) documentLayer.plugin = { id: plugin.id, options: {} };
     const viewLayer = this.#createViewLayer(documentLayer);
     this.undoHistory.execute({
       label: 'Add layer',
@@ -334,12 +345,23 @@ class Application extends EventTarget {
   }
 
   #createViewLayer(documentLayer) {
-    const LayerConstructor = ANNOTATION_LAYER_CONSTRUCTORS[documentLayer.type];
-    // The extra `this` argument is only read by CoordinatesLayer (to look up
-    // the document's integer-coordinate convention); the other constructors
-    // take a single argument and silently ignore it.
-    const viewLayer = new LayerConstructor(documentLayer, this);
-    // Panel edits (name/visibility/opacity/transform) flow back to the document.
+    const pluginId = documentLayer.plugin?.id ?? null;
+    const plugin = pluginId === null ? null : findPlugin(pluginId);
+    if (pluginId !== null && !plugin) {
+      // A document written by a build that had this plugin. Its annotations are
+      // ordinary items, so open them on a plain layer of the storage type and
+      // keep the plugin field so re-exporting does not drop it.
+      this.showToast(`Layer "${documentLayer.name}" was made by the "${pluginId}" plugin, `
+        + 'which is not available here — opening it as a plain layer.', { kind: 'warning' });
+    }
+    // The extra `this` (app) argument is only read by CoordinatesLayer (to look
+    // up the document's integer-coordinate convention); the other constructors,
+    // and every plugin built on one of them, take it and silently ignore it.
+    const viewLayer = plugin
+      ? plugin.createViewLayer(documentLayer, this)
+      : new ANNOTATION_LAYER_CONSTRUCTORS[documentLayer.type](documentLayer, this);
+    // Panel edits (name/visibility/opacity/transform, plugin options) flow back
+    // to the document.
     viewLayer.addEventListener('layer-changed', () => {
       documentLayer.name = viewLayer.name;
       documentLayer.visible = viewLayer.visible;
@@ -347,6 +369,9 @@ class Application extends EventTarget {
       documentLayer.transform = { ...viewLayer.transform };
       if (documentLayer.type === 'coordinates') {
         documentLayer.allowFractionalCoordinates = viewLayer.allowFractionalCoordinates;
+      }
+      if (viewLayer.plugin) {
+        documentLayer.plugin = { id: viewLayer.plugin.id, options: { ...viewLayer.options } };
       }
       this.markDocumentChanged();
     });
@@ -476,6 +501,14 @@ initializeClassManager(app, document.getElementById('class-manager-container'));
 initializeAnnotationsTable(app, document.getElementById('annotations-table-container'));
 initializeSettingsModal(app, document.getElementById('settings-button'));
 initializeEventHotkeys(app);
+
+// `r` re-fits the selected annotation on a plugin layer that can fit (the line
+// fitter). Registered after the event hotkeys so a user-defined event key named
+// `r` keeps winning; it also does nothing unless a fittable item is selected.
+app.addKeyHandler((event) => {
+  if (event.key !== 'r' && event.key !== 'R') return false;
+  return refitSelectedItem(app);
+});
 
 app.rebuildAnnotationLayersFromDocument();
 app.setActiveTool('pan');

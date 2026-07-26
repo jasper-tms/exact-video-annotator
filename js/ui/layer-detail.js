@@ -15,7 +15,13 @@ export function initializeLayerDetail(app, containerElement) {
   function isUserEditingHere() {
     const activeElement = document.activeElement;
     if (!activeElement || !containerElement.contains(activeElement)) return false;
-    return activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA';
+    if (activeElement.tagName === 'TEXTAREA') return true;
+    // Only TYPING must be protected from a rebuild. Radios and checkboxes are
+    // click-and-done, yet keep focus after the click — and their clicks often
+    // need the rebuild they would otherwise block (switching the line fitter
+    // to stripe mode is what reveals its stripe-width fields).
+    return activeElement.tagName === 'INPUT'
+      && activeElement.type !== 'radio' && activeElement.type !== 'checkbox';
   }
 
   function rebuildIfIdle() {
@@ -51,7 +57,9 @@ export function initializeLayerDetail(app, containerElement) {
 
     const typeLine = document.createElement('p');
     typeLine.className = 'layer-detail-type';
-    typeLine.textContent = `Type: ${layerTypeDisplayName(layer.type)}`;
+    typeLine.textContent = layer.plugin
+      ? `Type: ${layer.plugin.name} (${layerTypeDisplayName(layer.type)} layer)`
+      : `Type: ${layerTypeDisplayName(layer.type)}`;
     containerElement.appendChild(typeLine);
 
     /* ---- Common controls: visibility, opacity ---- */
@@ -170,6 +178,12 @@ export function initializeLayerDetail(app, containerElement) {
       containerElement.appendChild(facts);
     }
 
+    /* ---- Plugin layers: the plugin's own settings ---- */
+
+    if (layer.plugin?.buildSettings) {
+      containerElement.appendChild(layer.plugin.buildSettings(app, layer));
+    }
+
     /* ---- Annotation layers: a one-line item count ---- */
 
     if (ANNOTATION_LAYER_TYPES.has(layer.type)) {
@@ -181,6 +195,9 @@ export function initializeLayerDetail(app, containerElement) {
   }
 
   app.addEventListener('layers-changed', rebuildIfIdle);
+  // Plugin settings can depend on what is selected (the line fitter's "re-fit
+  // selected" button is only live with one of its own annotations selected).
+  app.addEventListener('selection-changed', rebuildIfIdle);
   app.viewer.addEventListener('layers-changed', rebuildIfIdle);
   app.addEventListener('document-changed', rebuildIfIdle);
   app.addEventListener('video-loaded', rebuildIfIdle);
