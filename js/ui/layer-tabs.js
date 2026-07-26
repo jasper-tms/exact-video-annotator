@@ -317,7 +317,7 @@ export function initializeLayerTabs(app, containerElement) {
     const tab = document.createElement('div');
     tab.className = 'layer-tab';
     if (isSelected) tab.classList.add('active');
-    tab.title = `${layer.name} — click to select, double-click to rename, drag to re-order`;
+    tab.title = `Layer "${layer.name}"\nClick to select, double-click to rename, drag to re-order`;
 
     const nameElement = document.createElement('span');
     nameElement.className = 'layer-tab-name';

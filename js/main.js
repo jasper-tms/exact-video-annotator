@@ -184,6 +184,11 @@ class Application extends EventTarget {
   }
 
   setActiveLayer(layerId) {
+    // A no-op re-selection must not dispatch: the tab bar rebuilds its DOM on
+    // every 'layers-changed' event, and doing that on the first click of a
+    // double-click (to rename a tab already selected) would detach the very
+    // element the second click and dblclick are about to land on.
+    if (layerId === this.activeLayerId) return;
     this.activeLayerId = layerId;
     this.dispatchEvent(new CustomEvent('layers-changed'));
   }
