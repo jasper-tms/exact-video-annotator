@@ -2,7 +2,7 @@
 
 A layered, frame-exact annotation app for video and images that runs entirely
 in the browser. Think napari or neuroglancer, but built for video: image/video
-layers and annotation layers (points, polygons, lines, temporal events) share
+layers and annotation layers (points, polylines, lines, temporal events) share
 one canvas, each with visibility, opacity, z-order, and scale/offset
 transforms — and the playhead is frame-exact, courtesy of
 [exact-video-engine.js](https://github.com/jasper-tms/exact-video-engine.js).

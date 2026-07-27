@@ -16,7 +16,7 @@ import {
 } from '../frame-pixels.js';
 import {
   DEFAULT_LINE_FITTER_OPTIONS, fitNewestSegment, fitClosingSegment, fitWholeShape,
-  readMarginPixels, profileReachPixels,
+  verticesFormClosedLoop, readMarginPixels, profileReachPixels,
 } from './fit-line.js';
 
 // The fit's travel is unbounded, but each pixel read is not: when a fit ends
@@ -61,11 +61,6 @@ export class LineFitterLayer extends CoordinatesLayer {
 
   /* ---------- Annotation-logic hooks ---------- */
 
-  /** A line is done as soon as its second point is down; polygons are not. */
-  shouldFinishAfterVertex(vertices, kind) {
-    return kind === 'line' && vertices.length >= 2;
-  }
-
   /** A vertex was just dropped: fit the segment it completed. */
   afterVertexPlaced(app, vertices, kind) {  // eslint-disable-line no-unused-vars
     if (vertices.length < 2) return;
@@ -74,10 +69,10 @@ export class LineFitterLayer extends CoordinatesLayer {
         [fitNewestSegment(videoVertices, sampleLuminance, this.options)]);
   }
 
-  /** The shape is about to be committed: a polygon still needs its closing
-      segment fitted (a line has no segment left to fit). */
+  /** The shape is about to be committed: a closed polyline still needs its
+      closing segment fitted (an open one has no segment left to fit). */
   beforeShapeCommitted(app, vertices, kind) {
-    if (kind !== 'polygon' || vertices.length < 3) return;
+    if (kind !== 'polyline' || !verticesFormClosedLoop(vertices)) return;
     this.#fitInVideoPixels(app, vertices,
       (videoVertices, sampleLuminance) =>
         [fitClosingSegment(videoVertices, sampleLuminance, this.options)]);

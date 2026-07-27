@@ -3,7 +3,7 @@
 A browser-only, napari-style layered annotation app for video and images, built
 on [exact-video-engine.js](https://github.com/jasper-tms/exact-video-engine.js).
 Multiple layers share one canvas: media layers (video, image) and annotation
-layers (Coordinates — points/lines/polygons, Segmentation, Frames — temporal
+layers (Coordinates — points/lines/polylines, Segmentation, Frames — temporal
 events), each with visibility, opacity, z-order, and a scale/offset transform.
 No server, no build step: plain ES modules served statically.
 
@@ -79,12 +79,17 @@ is already active toggles it off), a left-drag pans as well, via
 `viewer.beginPanFromPointerEvent(event)`. Space is exclusively play/pause. All
 other pointer events are forwarded to the active tool by `main.js`.
 
-There is **no separate select tool**: the point/line/polygon tools hit-test
+There is **no separate select tool**: the point/line/polyline tools hit-test
 their target layer on pointer-down, so pressing an existing annotation of the
-tool's own kind **selects** it, dragging **moves** it (the whole item, or the
-grabbed vertex), and — for lines/polygons — double-clicking a segment inserts a
-vertex; only empty space creates. This shared behavior lives in
-`js/tools/annotation-dragging.js`.
+tool's own kind **selects** it and dragging **moves** it (the whole item, or
+the grabbed vertex). This shared behavior lives in
+`js/tools/annotation-dragging.js`. Starting a brand-new annotation always takes
+a **double-click** — on empty space, or on an annotation of a different kind
+than the active tool; a single click there instead arms a click-and-drag pan,
+so an empty-space drag always pans regardless of which tool is active. A
+double-click on a same-kind annotation is a no-op (it was already selected by
+the two preceding pointer-downs), except double-clicking a **segment** (not a
+vertex) of a same-kind line/polyline, which inserts a vertex there.
 
 ### `js/layers/layer.js` — exports `class Layer extends EventTarget`
 
@@ -123,9 +128,11 @@ layer.hitTest(localPoint, renderState)
   // → { itemId, part: 'body' | 'vertex' | 'segment', vertexIndex } | null
   // part 'vertex': vertexIndex names the vertex (a point item's one vertex is
   //   always 0).
-  // part 'segment' (lines/polygons only): vertexIndex names the segment —
-  //   segment i connects vertex i to vertex i + 1 (wrapping for closed
-  //   polygons). A point item has no segments.
+  // part 'segment' (lines/polylines only): vertexIndex names the segment —
+  //   segment i connects vertex i to vertex i + 1. A closed polyline's closing
+  //   edge is an ordinary trailing segment here, not a wrap-around special
+  //   case — see "Polylines: open vs. closed" below. A point item has no
+  //   segments.
   // Handle sizes are screen-constant: tolerance = HANDLE_RADIUS_SCREEN_PIXELS
   //                                              / renderState.pixelsPerLocalUnit
 layer.getItem(itemId);               // live item object (read-only use)
@@ -137,16 +144,35 @@ layer.items;                         // the backing array from the document
 layer.snapshotItemGeometry(itemId);            // → opaque deep copy
 layer.restoreItemGeometry(itemId, snapshot);   // set geometry from a snapshot
 layer.moveItemBy(itemId, deltaLocal);          // translate the whole item
-layer.moveVertexTo(itemId, vertexIndex, localPoint);
+layer.moveVertexTo(itemId, vertexIndex, localPoint);  // moving vertex 0 of a
+                                                 // closed polyline also moves
+                                                 // its closing duplicate
 
 // Command-returning methods (caller passes the result to undoHistory.execute):
-layer.commandInsertVertex(itemId, segmentIndex, localPoint);  // lines/polygons only
+layer.commandInsertVertex(itemId, segmentIndex, localPoint);  // lines/polylines only
 layer.commandDeleteVertex(itemId, vertexIndex);  // deleting below the minimum
                                                  // vertex count (1 point, 2
-                                                 // line, 3 polygon) deletes
-                                                 // the whole item
+                                                 // line/open polyline, 4 closed
+                                                 // polyline) deletes the whole
+                                                 // item instead
 layer.commandDeleteItem(itemId);
 ```
+
+### Polylines: open vs. closed
+
+A polyline (`kind: 'polyline'`) is closed **exactly when its last stored vertex
+is a literal duplicate of its first** — `isClosedPolyline(item)` in
+`js/layers/coordinates-layer.js` is the sole source of truth; there is no
+separate flag, and a line is never closed. The polyline tool
+(`js/tools/polyline-tool.js`) appends that duplicate only when the shape is
+closed by clicking back on its first vertex; finishing any other way (Enter,
+double-click, or the line tool's fixed two-vertex cap) always leaves the shape
+open. Because closure lives entirely in the vertex list, the closing edge is
+just an ordinary trailing segment — rendering, hit-testing, and vertex
+insertion need no separate "wrap to vertex 0" case. Dragging vertex 0 of a
+closed polyline moves its closing duplicate along with it (`moveVertexTo`);
+the duplicate itself is never independently draggable, since hit-testing
+always finds vertex 0 first when the two coincide.
 
 A finished drag is committed with a generic snapshot command: `apply()`
 restores the after-snapshot, `revert()` the before-snapshot.
@@ -175,7 +201,7 @@ movim-website "off-frame" convention) so nearby context stays visible. A
 **frame-agnostic** item (`frame === null`) applies across every frame and so
 always draws (and hit-tests) at full strength. The tool rail's anchored/agnostic
 mode toggle (`app.annotationMode`, `app.newItemFrame`) decides which kind the
-point/line/polygon tools create; it never alters existing items. Segmentation
+point/line/polyline tools create; it never alters existing items. Segmentation
 and Frames layers have no spatial drawing (their `draw` is a no-op).
 
 ### `js/document.js` — the annotation document
@@ -209,11 +235,13 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
     { id, type: 'coordinates', name, visible, opacity, transform,
       allowFractionalCoordinates,
       plugin: { id: 'line-fitter', options: { … } },   // optional, see "Plugins"
-      items: [ { id, frame, kind: 'point' | 'line' | 'polygon',
+      items: [ { id, frame, kind: 'point' | 'line' | 'polyline',
                  vertices: [[x, y], ...], classId, name } ] },
       // frame: integer (anchored to that frame) or null (frame-agnostic —
       //        applies across every frame; drawn full-strength on all frames)
       // a point item's vertices array always has exactly one [x, y] pair
+      // a polyline item is closed iff its last vertex duplicates its first —
+      //   see "Polylines: open vs. closed" above; a line item never is
       // allowFractionalCoordinates: when false (the default), every new or
       //   moved vertex snaps per integerCoordinateOffset (floor for 0, round
       //   for 0.5) — see CoordinatesLayer.snapLocalPoint. A live per-layer
@@ -405,16 +433,20 @@ pixel off on screen while looking correct in its own coordinates.
 ### The line fitter (`js/plugins/line-fitter/`)
 
 A coordinates layer that snaps what you draw onto the structure under it. Drop two
-points near an edge and the line locks onto the edge; the fit runs the moment
-the second point lands (a line on this layer is done at two points — no Enter),
-after a drag when "re-fit after dragging" is on, and on demand with `r`.
+points near an edge and the line locks onto the edge; the fit runs the moment a
+vertex is dropped (the line tool is always done at two points, per its fixed
+vertex cap — see "Polylines: open vs. closed"), after a drag when "re-fit after
+dragging" is on, and on demand with `r`.
 
 - **Points move perpendicular to their own segment only**, so the drawn length
   is preserved to within a fraction of a pixel however far they travel.
 - A vertex that already belongs to a fitted segment may only **slide along**
-  that segment when the next one is fitted, so extending a polyline (or closing
-  a polygon) cannot drag an earlier segment off the edge it found. Polygons are
-  therefore fitted segment by segment as they are drawn, closing segment last.
+  that segment when the next one is fitted, so extending a polyline cannot drag
+  an earlier segment off the edge it found. A closed polyline's closing segment
+  — the last real corner back to the duplicate that marks it closed — is
+  therefore fitted last, after every other segment, with that duplicate synced
+  back onto the real first vertex once it lands (`fitClosingSegment` in
+  `fit-line.js`).
 - Both modes score a placement from its **perpendicular profile**: the mean
   luminance at each distance out from the candidate line, averaged along its
   length. Averaging along the line first is what makes a faint edge that runs
@@ -474,7 +506,7 @@ drive it with synthetic edges and stripes.
 | `Space` | play/pause |
 | `ArrowLeft` / `,` , `ArrowRight` / `.` | step one frame |
 | `o` | point tool |
-| `g` | polygon tool |
+| `g` | polyline tool |
 | `l` | line tool |
 | `v` | toggle the selected layer's visibility |
 | `a` | toggle frame-agnostic mode for new annotations |

@@ -213,18 +213,16 @@ button:disabled { opacity: 0.45; cursor: default; }
   justify-content: center;
 }
 
-/* These glyphs render small at the base size; enlarge them to fill the button. */
+/* This glyph renders small at the base size; enlarge it to fill the button. */
 #tool-rail button[data-tool="point"],
-#tool-rail button[data-tool="polygon"],
 #frame-agnostic-toggle {
   font-size: 21px;
 }
 
-/* ● and ⬠ sit visibly below true center in their own line box at this font
-   size (a font-metrics quirk of those particular glyphs, not a layout bug);
-   nudge the flex-centered content up so they read as centered in the button. */
+/* ● sits visibly below true center in its own line box at this font size (a
+   font-metrics quirk of that particular glyph, not a layout bug); nudge the
+   flex-centered content up so it reads as centered in the button. */
 #tool-rail button[data-tool="point"] { padding-bottom: 2px; }
-#tool-rail button[data-tool="polygon"] { padding-bottom: 4px; }
 
 /* Single-key hotkey, tucked into the button's bottom-right corner. Inherits the
    button color (white when active, dim otherwise) and stays out of pointer flow. */

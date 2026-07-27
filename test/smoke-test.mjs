@@ -1,6 +1,6 @@
 // End-to-end smoke test: serves the app, opens it in headless Chromium, loads
 // the frame-numbered VFR fixture, and exercises the core flows — playback,
-// frame stepping, placing a point, drawing a polygon, an event hotkey, undo,
+// frame stepping, placing a point, drawing a polyline, an event hotkey, undo,
 // and export. Fails on any page error or console error.
 //
 // Run:  node test/smoke-test.mjs
@@ -170,21 +170,24 @@ try {
   check(restoredPoint.x === pointFacts.item.x && restoredPoint.y === pointFacts.item.y,
         'undo restores the dragged point');
 
-  // ---- Draw a triangle with the polygon tool (a double-click places the
-  // first vertex; single clicks place the rest once the shape is started) ----
+  // ---- Draw a closed triangle with the polyline tool (a double-click places
+  // the first vertex; single clicks place the rest once the shape is
+  // started; clicking back on the first vertex closes it) ----
   await page.keyboard.press('g');
-  await page.mouse.dblclick(stageBox.x + stageBox.width * 0.3, stageBox.y + stageBox.height * 0.3);
+  const triangleFirstVertex =
+    { x: stageBox.x + stageBox.width * 0.3, y: stageBox.y + stageBox.height * 0.3 };
+  await page.mouse.dblclick(triangleFirstVertex.x, triangleFirstVertex.y);
   await page.mouse.click(stageBox.x + stageBox.width * 0.6, stageBox.y + stageBox.height * 0.3);
   await page.mouse.click(stageBox.x + stageBox.width * 0.45, stageBox.y + stageBox.height * 0.6);
-  await page.keyboard.press('Enter');
+  await page.mouse.click(triangleFirstVertex.x, triangleFirstVertex.y);
   const polygonFacts = await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
     const shapesLayer = application.annotationDocument.layers.find((layer) => layer.type === 'shapes');
     return { itemCount: shapesLayer.items.length, item: shapesLayer.items[0] ?? null };
   });
-  check(polygonFacts.itemCount === 1, 'polygon tool created one shape');
-  check(polygonFacts.item?.kind === 'polygon' && polygonFacts.item?.vertices.length === 3,
-        'polygon has 3 vertices');
+  check(polygonFacts.itemCount === 1, 'polyline tool created one shape');
+  check(polygonFacts.item?.kind === 'polyline' && polygonFacts.item?.vertices.length === 4,
+        'closing near the first vertex creates a 4-vertex closed polyline');
 
   // ---- Event hotkey (create an event type, press its key) ----
   await page.evaluate(() => {
@@ -206,7 +209,7 @@ try {
   check(eventFacts.item?.startFrame === 2 && eventFacts.item?.endFrame === 2,
         'point event bound to the current frame');
 
-  // ---- Undo unwinds the event, polygon, then point ----
+  // ---- Undo unwinds the event, polyline, then point ----
   for (let undoCount = 0; undoCount < 3; undoCount++) {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
   }

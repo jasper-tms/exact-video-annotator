@@ -286,7 +286,7 @@ export class Viewer extends EventTarget {
     });
 
     canvas.addEventListener('contextmenu', (event) => {
-      // Right-click is reserved for tools (for example, closing a polygon).
+      // Right-click is reserved for tools (for example, closing a polyline).
       event.preventDefault();
     });
   }

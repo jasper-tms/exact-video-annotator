@@ -363,27 +363,36 @@ try {
         'export/import keeps the plugin layer and its annotation');
   check(roundTripFacts.mode === 'edge', "export/import keeps the plugin's options");
 
-  /* ---- A polygon on the same layer is fitted segment by segment ---- */
+  /* ---- A closed polyline on the same layer is fitted segment by segment,
+          closing segment last ---- */
 
   await page.keyboard.press('g');
-  await page.mouse.dblclick(stageBox.x + stageBox.width * 0.3, stageBox.y + stageBox.height * 0.3);
+  const polylineFirstVertex =
+    { x: stageBox.x + stageBox.width * 0.3, y: stageBox.y + stageBox.height * 0.3 };
+  await page.mouse.dblclick(polylineFirstVertex.x, polylineFirstVertex.y);
   await page.mouse.click(stageBox.x + stageBox.width * 0.6, stageBox.y + stageBox.height * 0.3);
   await page.mouse.click(stageBox.x + stageBox.width * 0.45, stageBox.y + stageBox.height * 0.6);
-  await page.keyboard.press('Enter');
-  const polygonFacts = await page.evaluate(() => {
+  await page.mouse.click(polylineFirstVertex.x, polylineFirstVertex.y);  // close it
+  const polylineFacts = await page.evaluate(() => {
     const layer = window.exactVideoAnnotator.activeLayer;
-    const polygon = layer.items.find((item) => item.kind === 'polygon') ?? null;
+    const polyline = layer.items.find((item) => item.kind === 'polyline') ?? null;
     return {
       itemCount: layer.items.length,
-      vertexCount: polygon?.vertices.length ?? 0,
+      vertexCount: polyline?.vertices.length ?? 0,
+      firstEqualsLast: polyline
+        ? polyline.vertices[0][0] === polyline.vertices[polyline.vertices.length - 1][0]
+          && polyline.vertices[0][1] === polyline.vertices[polyline.vertices.length - 1][1]
+        : false,
       lastFitDescription: layer.lastFitDescription,
     };
   });
-  console.log('drawn polygon:', JSON.stringify(polygonFacts));
-  check(polygonFacts.itemCount === 2 && polygonFacts.vertexCount === 3,
-        'a polygon on a fitter layer still needs Enter, and keeps its three vertices');
-  check(!String(polygonFacts.lastFitDescription).startsWith('could not fit'),
-        `the closing segment was fitted too (${polygonFacts.lastFitDescription})`);
+  console.log('drawn polyline:', JSON.stringify(polylineFacts));
+  check(polylineFacts.itemCount === 2 && polylineFacts.vertexCount === 4,
+        'closing near the first vertex creates a 4-vertex closed polyline');
+  check(polylineFacts.firstEqualsLast,
+        'the closed polyline\'s last vertex still duplicates its first after fitting');
+  check(!String(polylineFacts.lastFitDescription).startsWith('could not fit'),
+        `the closing segment was fitted too (${polylineFacts.lastFitDescription})`);
 
   /* ---- Re-fitting: the r key, and the after-a-drag preference ---- */
 

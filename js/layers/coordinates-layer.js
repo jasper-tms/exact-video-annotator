@@ -1,5 +1,5 @@
 // The coordinates layer draws and edits pixel-located annotations: points,
-// lines, and polygons, distinguished by each item's `kind`. It is a view over
+// lines, and polylines, distinguished by each item's `kind`. It is a view over
 // a document layer: its `items` array IS that document layer's `items` array
 // (same object identity), so it holds no copied geometry. See ARCHITECTURE.md
 // ("Annotation-layer editing contract") for the methods the drawing tools rely
@@ -7,6 +7,13 @@
 // `vertices` array — there is no separate flat x/y representation — so the
 // vertex/segment hit-testing and editing logic below is shared by all three
 // kinds without a point-specific branch.
+//
+// A polyline is closed exactly when its last stored vertex is a literal
+// duplicate of its first (see `isClosedPolyline` below) — there is no
+// separate flag, and a line is never closed. Because closure is baked into
+// the vertex list itself, the closing edge of a closed polyline is just an
+// ordinary trailing segment in that list; nothing below needs to special-case
+// wrapping the last vertex back to the first.
 
 import { Layer } from './layer.js';
 
@@ -152,9 +159,10 @@ export class CoordinatesLayer extends Layer {
     for (let index = 1; index < item.vertices.length; index++) {
       context.lineTo(item.vertices[index][0], item.vertices[index][1]);
     }
-    if (item.kind === 'polygon') context.closePath();
+    const closed = isClosedPolyline(item);
+    if (closed) context.closePath();
 
-    if (item.kind === 'polygon') {
+    if (closed) {
       context.globalAlpha = baseAlpha * frameAlpha * FILL_ALPHA;
       context.fillStyle = color;
       context.fill();
@@ -237,24 +245,24 @@ export class CoordinatesLayer extends Layer {
       }
     }
 
-    // Priority (2): segments. Segment i connects vertex i to i + 1, wrapping to
-    // vertex 0 for closed polygons. A point has no segments.
+    // Priority (2): segments. Segment i connects vertex i to i + 1. A closed
+    // polyline's closing edge is an ordinary trailing segment here, not a
+    // wrap-around special case, since its last vertex already duplicates its
+    // first. A point has no segments.
     for (const item of orderedItems) {
-      const segmentCount = item.kind === 'polygon'
-        ? item.vertices.length
-        : Math.max(0, item.vertices.length - 1);
+      const segmentCount = Math.max(0, item.vertices.length - 1);
       for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
         const [ax, ay] = item.vertices[segmentIndex];
-        const [bx, by] = item.vertices[(segmentIndex + 1) % item.vertices.length];
+        const [bx, by] = item.vertices[segmentIndex + 1];
         if (distanceToSegment(localPoint.x, localPoint.y, ax, ay, bx, by) <= tolerance) {
           return { itemId: item.id, part: 'segment', vertexIndex: segmentIndex };
         }
       }
     }
 
-    // Priority (3): polygon interiors only.
+    // Priority (3): closed polyline interiors only.
     for (const item of orderedItems) {
-      if (item.kind !== 'polygon') continue;
+      if (!isClosedPolyline(item)) continue;
       if (pointInPolygon(localPoint.x, localPoint.y, item.vertices)) {
         return { itemId: item.id, part: 'body' };
       }
@@ -295,8 +303,14 @@ export class CoordinatesLayer extends Layer {
   moveVertexTo(itemId, vertexIndex, localPoint) {
     const item = this.getItem(itemId);
     if (!item || !item.vertices[vertexIndex]) return;
+    // A closed polyline's last vertex is a literal duplicate of its first;
+    // dragging vertex 0 must keep that duplicate in lockstep, or the shape
+    // would silently spring open. (The duplicate itself is never draggable —
+    // hit-testing always finds vertex 0 first, since they're coincident.)
+    const wasClosed = vertexIndex === 0 && isClosedPolyline(item);
     const snapped = this.snapLocalPoint(localPoint);
     item.vertices[vertexIndex] = [snapped.x, snapped.y];
+    if (wasClosed) item.vertices[item.vertices.length - 1] = [snapped.x, snapped.y];
   }
 
   commandInsertVertex(itemId, segmentIndex, localPoint) {
@@ -315,7 +329,11 @@ export class CoordinatesLayer extends Layer {
   commandDeleteVertex(itemId, vertexIndex) {
     const item = this.getItem(itemId);
     if (!item || !item.vertices[vertexIndex]) return null;
-    const minimumVertexCount = item.kind === 'polygon' ? 3 : item.kind === 'line' ? 2 : 1;
+    // A closed polyline needs at least 4 stored vertices (3 distinct corners
+    // plus the closing duplicate) to remain a non-degenerate closed shape.
+    const minimumVertexCount = item.kind === 'point' ? 1
+      : isClosedPolyline(item) ? 4
+      : 2;
     // Removing this vertex would leave too few to be a valid item, so delete
     // the whole item instead — as one undoable command that restores exactly.
     if (item.vertices.length - 1 < minimumVertexCount) {
@@ -347,6 +365,16 @@ export class CoordinatesLayer extends Layer {
 }
 
 /* ---------- Module-level geometry helpers ---------- */
+
+/** A polyline is closed exactly when its last stored vertex duplicates its
+    first — there is no separate boolean or kind for it; a line is never
+    closed. */
+export function isClosedPolyline(item) {
+  if (item.kind !== 'polyline' || item.vertices.length < 2) return false;
+  const first = item.vertices[0];
+  const last = item.vertices[item.vertices.length - 1];
+  return first[0] === last[0] && first[1] === last[1];
+}
 
 function colorForItem(item, renderState) {
   const classEntry = renderState.document?.classes?.find((entry) => entry.id === item.classId);

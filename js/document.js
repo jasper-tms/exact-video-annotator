@@ -154,8 +154,8 @@ export function documentFromJson(jsonObject) {
 function parseItem(layerType, item) {
   const id = asString(item.id ?? newId(), 'item id');
   if (layerType === 'coordinates') {
-    if (item.kind !== 'point' && item.kind !== 'line' && item.kind !== 'polygon') {
-      throw new Error(`Coordinates item has kind "${item.kind}"; expected "point", "line", or "polygon".`);
+    if (item.kind !== 'point' && item.kind !== 'line' && item.kind !== 'polyline') {
+      throw new Error(`Coordinates item has kind "${item.kind}"; expected "point", "line", or "polyline".`);
     }
     const vertices = asArray(item.vertices, 'coordinates vertices').map((vertex, index) => {
       if (!Array.isArray(vertex) || vertex.length !== 2) {
@@ -163,7 +163,10 @@ function parseItem(layerType, item) {
       }
       return [finiteNumber(vertex[0], 'vertex x'), finiteNumber(vertex[1], 'vertex y')];
     });
-    const minimumVertices = item.kind === 'polygon' ? 3 : item.kind === 'line' ? 2 : 1;
+    // A polyline may be as short as a line (2 vertices, open); whether it is
+    // closed is read from the vertices themselves (see isClosedPolyline), not
+    // enforced here.
+    const minimumVertices = item.kind === 'point' ? 1 : 2;
     if (vertices.length < minimumVertices) {
       throw new Error(`A ${item.kind} needs at least ${minimumVertices} vertices; found ${vertices.length}.`);
     }

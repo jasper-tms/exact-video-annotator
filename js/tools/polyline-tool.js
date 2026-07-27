@@ -1,19 +1,26 @@
-// The polygon tool draws closed polygons; it also exports the shared drawing-
-// tool factory that the line tool reuses (both tools have identical placement,
-// rubber-band, and finish/cancel behavior; only closing rules differ). See
-// ARCHITECTURE.md for the tool contract. Geometry is stored in the target
-// layer's local space; the finished shape is committed as one undo command.
-// Each tool also edits existing shapes of its own kind (select, drag-move,
-// double-click a segment to insert a vertex) via annotation-dragging.js —
-// there is no separate select tool.
+// The polyline tool draws an open or closed multi-segment shape; it also
+// exports the shared drawing-tool factory that the line tool reuses (both
+// tools have identical placement, rubber-band, and finish/cancel behavior;
+// only closing rules and vertex-count limits differ). See ARCHITECTURE.md for
+// the tool contract. Geometry is stored in the target layer's local space; the
+// finished shape is committed as one undo command. Each tool also edits
+// existing shapes of its own kind (select, drag-move, double-click a segment
+// to insert a vertex) via annotation-dragging.js — there is no separate select
+// tool.
+//
+// A polyline is open or closed purely by data: closed means its last stored
+// vertex is a literal duplicate of its first (see coordinates-layer.js's
+// `isClosedPolyline`) — there is no separate kind or flag for it. Clicking
+// back on the first vertex is the only thing that appends that duplicate and
+// closes the shape; finishing any other way (Enter, double-click, or running
+// out of the tool's maximum vertex count) always leaves it open.
 //
 // Starting a brand-new shape takes a double-click on empty space (or on an
 // annotation of a different kind); a single click there instead arms a
 // potential pan, so dragging on empty space always pans the view. Once a
 // shape is in progress, each further single click places the next vertex —
 // unless that press turns into a drag, which pans instead of dropping a
-// point. Finishing is a click on the first vertex (polygons only), a
-// double-click, or Enter.
+// point.
 
 import { newId } from '../document.js';
 import {
@@ -29,6 +36,11 @@ const OVERLAY_VERTEX_SCREEN_PIXELS = 5;
 // How far a press has to move before it's treated as a pan instead of a
 // click placing the next vertex.
 const DRAG_THRESHOLD_SCREEN_PIXELS = 4;
+// Closing a shape (clicking back on its first vertex) needs enough vertices
+// that the result is an actual shape rather than a point re-clicked on
+// itself — independent of minimumVertexCount, which only guards finishing
+// open.
+const MINIMUM_VERTICES_TO_CLOSE = 3;
 
 const DRAWING_FALLBACK_COLOR = '#4f9cf9';
 const CLOSING_CUE_COLOR = '#ffffff';
@@ -44,12 +56,12 @@ function distanceInScreenPixels(app, worldA, worldB) {
 }
 
 /**
- * Build a click-to-place drawing tool. Both the polygon and line tools are made
+ * Build a click-to-place drawing tool. Both the polyline and line tools are made
  * this way; each returned tool keeps its own private in-progress state in this
  * closure, so switching between the two tools never crosses their state.
  */
 export function createDrawingTool({
-  id, name, hotkey, kind, commandLabel, minimumVertexCount, canClickToClose,
+  id, name, hotkey, kind, commandLabel, minimumVertexCount, maximumVertexCount, canClickToClose,
 }) {
   // In-progress shape, or null: { app, layer, frame, vertices: [[x, y], ...],
   // pointerWorld }. Vertices live in the target layer's local space.
@@ -76,9 +88,14 @@ export function createDrawingTool({
     const localPoint = layer.snapLocalPoint(app.localFromWorld(layer, worldPoint));
     inProgress.vertices.push([localPoint.x, localPoint.y]);
     // On a plugin layer, dropping a vertex can move the geometry (the line
-    // fitter snaps the segment just completed onto the edge under it) and can
-    // end the shape outright (a fitted line is done at two points).
+    // fitter snaps the segment just completed onto the edge under it).
     layer.afterVertexPlaced?.(app, inProgress.vertices, kind);
+    // The line tool caps at two vertices — a line is always a single segment,
+    // finished the moment its second point is down.
+    if (maximumVertexCount && inProgress.vertices.length >= maximumVertexCount) {
+      finish(app);
+      return;
+    }
     if (layer.shouldFinishAfterVertex?.(inProgress.vertices, kind)) {
       finish(app);
       return;
@@ -90,7 +107,7 @@ export function createDrawingTool({
     if (!inProgress || inProgress.vertices.length < minimumVertexCount) return false;
     const layer = inProgress.layer;
     // Plugin layers get the last word on the geometry before it is committed
-    // (the line fitter fits a polygon's closing segment here).
+    // (the line fitter fits a closed polyline's closing segment here).
     layer.beforeShapeCommitted?.(app, inProgress.vertices, kind);
     const items = layer.items;
     const item = {
@@ -145,9 +162,16 @@ export function createDrawingTool({
       }
       if (canClickToClose
           && distanceInScreenPixels(app, worldVertexAt(0), worldPoint) <= CLOSE_DISTANCE_SCREEN_PIXELS) {
-        // Clicking the first vertex closes the polygon when it is large enough;
-        // otherwise ignore the click rather than stack a duplicate vertex.
-        if (inProgress.vertices.length >= minimumVertexCount) finish(app);
+        // Clicking the first vertex closes the shape when it is large enough
+        // to be one; otherwise ignore the click rather than stack a duplicate
+        // vertex. Closing means literally duplicating the first vertex onto
+        // the end of the array — that duplication is the only thing that
+        // makes a shape read as closed anywhere else in the app.
+        if (inProgress.vertices.length >= MINIMUM_VERTICES_TO_CLOSE) {
+          const first = inProgress.vertices[0];
+          inProgress.vertices.push([first[0], first[1]]);
+          finish(app);
+        }
         return;
       }
       // Defer placing the vertex until release, so a drag from here can pan
@@ -288,8 +312,8 @@ export function createDrawingTool({
       }
 
       // Closing cue: ring the first vertex when the pointer is close enough to
-      // close a large-enough polygon.
-      if (canClickToClose && pointer && worldVertices.length >= minimumVertexCount
+      // close a large-enough shape.
+      if (canClickToClose && pointer && worldVertices.length >= MINIMUM_VERTICES_TO_CLOSE
           && distanceInScreenPixels(app, worldVertices[0], pointer) <= CLOSE_DISTANCE_SCREEN_PIXELS) {
         context.beginPath();
         context.arc(worldVertices[0].x, worldVertices[0].y, vertexSize, 0, Math.PI * 2);
@@ -303,12 +327,12 @@ export function createDrawingTool({
   };
 }
 
-export const polygonTool = createDrawingTool({
-  id: 'polygon',
-  name: 'Draw polygons',
+export const polylineTool = createDrawingTool({
+  id: 'polyline',
+  name: 'Draw polylines',
   hotkey: 'g',
-  kind: 'polygon',
-  commandLabel: 'Add polygon',
-  minimumVertexCount: 3,
+  kind: 'polyline',
+  commandLabel: 'Add polyline',
+  minimumVertexCount: 2,
   canClickToClose: true,
 });

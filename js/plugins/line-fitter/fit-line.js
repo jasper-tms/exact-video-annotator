@@ -396,16 +396,36 @@ export function fitNewestSegment(vertices, sampleLuminance, options) {
 }
 
 /**
- * Fit the segment that closes a polygon (last vertex back to the first). Both
- * of its endpoints already belong to fitted segments, so both may only slide
- * along those.
+ * Whether a polyline's stored vertices already encode a closed loop: its last
+ * vertex is a literal duplicate of its first. The sole source of truth for
+ * "is this shape closed" — see coordinates-layer.js's `isClosedPolyline` for
+ * the item-level equivalent.
+ */
+export function verticesFormClosedLoop(vertices) {
+  return vertices.length >= 2
+    && vertices[0][0] === vertices[vertices.length - 1][0]
+    && vertices[0][1] === vertices[vertices.length - 1][1];
+}
+
+/**
+ * Fit the segment that closes a polyline: the last real corner back to the
+ * duplicate vertex that marks the shape closed. Both of its endpoints already
+ * belong to fitted segments, so both may only slide along those — the duplicate
+ * slides along the first segment, standing in for the real first vertex, which
+ * is then written to match: the duplicate and the first vertex must always
+ * stay identical, or the shape would silently spring open.
  */
 export function fitClosingSegment(vertices, sampleLuminance, options) {
   const count = vertices.length;
-  if (count < 3) return null;
-  const movementA = slideMovement(vertices, count - 2, count - 1);
+  if (count < 4) return null;
+  const movementA = slideMovement(vertices, count - 3, count - 2);
   const movementB = slideMovement(vertices, 1, 0);
-  return fitSegment(vertices, count - 1, 0, movementA, movementB, sampleLuminance, options);
+  const summary = fitSegment(vertices, count - 2, count - 1, movementA, movementB, sampleLuminance, options);
+  if (summary) {
+    vertices[0][0] = vertices[count - 1][0];
+    vertices[0][1] = vertices[count - 1][1];
+  }
+  return summary;
 }
 
 /**
@@ -416,7 +436,11 @@ export function fitClosingSegment(vertices, sampleLuminance, options) {
  */
 export function fitWholeShape(vertices, kind, sampleLuminance, options) {
   const summaries = [];
-  for (let index = 1; index < vertices.length; index++) {
+  const closed = kind === 'polyline' && verticesFormClosedLoop(vertices);
+  // A closed shape's last segment (the closing one) needs the special
+  // slide-both-ends handling below, not the generic per-vertex fit.
+  const lastOrdinaryIndex = closed ? vertices.length - 2 : vertices.length - 1;
+  for (let index = 1; index <= lastOrdinaryIndex; index++) {
     const movementA = index === 1
       ? freeMovement(vertices[index - 1], vertices[index])
       : slideMovement(vertices, index - 2, index - 1);
@@ -424,7 +448,7 @@ export function fitWholeShape(vertices, kind, sampleLuminance, options) {
     const summary = fitSegment(vertices, index - 1, index, movementA, movementB, sampleLuminance, options);
     if (summary) summaries.push(summary);
   }
-  if (kind === 'polygon' && vertices.length >= 3) {
+  if (closed) {
     const summary = fitClosingSegment(vertices, sampleLuminance, options);
     if (summary) summaries.push(summary);
   }

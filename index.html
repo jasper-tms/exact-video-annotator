@@ -49,7 +49,18 @@
       </button>
       <button data-tool="point" class="rail-button" data-hotkey="o" title="Add points (o)">●</button>
       <button data-tool="line" class="rail-button" data-hotkey="l" title="Draw lines (l)">╱</button>
-      <button data-tool="polygon" class="rail-button" data-hotkey="g" title="Draw polygons (g)">⬠</button>
+      <button data-tool="polyline" class="rail-button" data-hotkey="g" title="Draw polylines (g)">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5,21 L5,12 L12,5 L20,4"></path>
+          <path d="M20,4 L5,21" stroke-dasharray="3,2.5"></path>
+          <circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none"></circle>
+          <circle cx="12" cy="5" r="1.3" fill="currentColor" stroke="none"></circle>
+          <circle cx="20" cy="4" r="1.3" fill="currentColor" stroke="none"></circle>
+          <circle cx="5" cy="21" r="1.6" fill="currentColor" stroke="none"></circle>
+          <circle cx="5" cy="21" r="3" fill="none" stroke-width="1.4"></circle>
+        </svg>
+      </button>
       <!-- Pixel-wise segmentation isn't implemented yet, so this button has no
            backing tool at all — it always shows a "not implemented" message. -->
       <button id="paint-tool-button" class="rail-button" title="Paint pixels — not implemented yet">🖌</button>

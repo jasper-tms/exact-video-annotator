@@ -16,7 +16,7 @@ import { panTool } from './tools/pan-tool.js';
 import { findPlugin } from './plugins/registry.js';
 import { refitSelectedItem } from './plugins/refit.js';
 import { pointTool } from './tools/point-tool.js';
-import { polygonTool } from './tools/polygon-tool.js';
+import { polylineTool } from './tools/polyline-tool.js';
 import { lineTool } from './tools/line-tool.js';
 import { initializeEventHotkeys } from './tools/event-hotkeys.js';
 import { initializeTransport } from './ui/transport.js';
@@ -35,7 +35,7 @@ const ANNOTATION_LAYER_CONSTRUCTORS = {
 };
 
 /** Layer type key -> the required tool, for the tool-rail's availability check. */
-const TOOL_REQUIRED_LAYER_TYPE = { point: 'coordinates', line: 'coordinates', polygon: 'coordinates' };
+const TOOL_REQUIRED_LAYER_TYPE = { point: 'coordinates', line: 'coordinates', polyline: 'coordinates' };
 
 function layerTypeDisplayName(type) {
   return `${type[0].toUpperCase()}${type.slice(1)}`;
@@ -392,7 +392,7 @@ class Application extends EventTarget {
   /* ---------- Tools ---------- */
 
   toolRegistry = Object.fromEntries(
-    [panTool, pointTool, polygonTool, lineTool].map((tool) => [tool.id, tool]));
+    [panTool, pointTool, polylineTool, lineTool].map((tool) => [tool.id, tool]));
 
   setActiveTool(toolId) {
     // A null toolId means "no tool selected" — a canvas drag then pans the view.

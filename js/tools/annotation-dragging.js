@@ -1,4 +1,4 @@
-// Shared "grab what's already there" behavior for the point, line, and polygon
+// Shared "grab what's already there" behavior for the point, line, and polyline
 // tools — there is no separate select tool; each drawing tool selects, drags,
 // and edits annotations of its own kind. Pressing an existing item selects it,
 // dragging moves the whole item or the grabbed vertex, and hovering highlights
@@ -90,7 +90,7 @@ export function cancelDragOnExistingItem() {
 /**
  * Update app.hover from a hit-test of the given layer (skipped when the layer
  * is missing or hidden). itemFilter, when given, restricts hover to matching
- * items (the line/polygon tools only grab shapes of their own kind). Returns
+ * items (the line/polyline tools only grab shapes of their own kind). Returns
  * the accepted hit, or null.
  */
 export function updateHover(app, layer, worldPoint, itemFilter = null) {
