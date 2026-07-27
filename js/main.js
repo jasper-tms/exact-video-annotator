@@ -1016,6 +1016,17 @@ stageContainer.addEventListener('drop', async (event) => {
   else loadVideoSource(file, { name: file.name, sizeBytes: file.size });
 });
 
+/* ---------- Buttons: no lingering focus ring after a mouse click ----------
+   A button that keeps DOM focus after a click shows the browser's focus ring
+   again the moment any key is pressed (pressing a hotkey flips the page into
+   "keyboard modality", which re-triggers :focus-visible even though the key
+   had nothing to do with that button). Stopping the mousedown default keeps
+   buttons out of focus on click entirely, while Tab-driven keyboard focus
+   (and its outline) is untouched, since this only fires on mousedown. */
+document.addEventListener('mousedown', (event) => {
+  if (event.target.closest('button')) event.preventDefault();
+});
+
 /* ---------- Global keyboard ---------- */
 
 window.addEventListener('keydown', (event) => {

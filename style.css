@@ -92,6 +92,10 @@ button {
 
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.45; cursor: default; }
+/* Suppress the outline left behind after a mouse click (it stays until focus
+   moves elsewhere, e.g. a tool button clicked then swapped via hotkey), while
+   keeping it for keyboard navigation (:focus-visible, e.g. tabbing through). */
+button:focus:not(:focus-visible) { outline: none; }
 
 #hovered-pixel-label {
   flex: 0 0 auto;
