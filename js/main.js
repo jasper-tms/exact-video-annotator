@@ -778,6 +778,21 @@ redoButton.addEventListener('click', () => app.undoHistory.redo());
 /* ---------- Toolbar ---------- */
 
 const toolButtons = [...document.querySelectorAll('#tool-rail button[data-tool]')];
+// Number keys are assigned by position in the tool rail — '1' for the first
+// button (pan, at the top), increasing going down — rather than written
+// statically per tool, so the assignment always follows the rail's actual
+// order. '0' is reserved for the scroll-to-details button further down the
+// rail (see reflectScrollToggle); a tool rail with more than this many tools
+// simply leaves the rest without a number key.
+const MAXIMUM_NUMBERED_TOOLS = 9;
+const toolHotkeys = new Map();
+toolButtons.forEach((button, index) => {
+  if (index >= MAXIMUM_NUMBERED_TOOLS) return;
+  const hotkey = String(index + 1);
+  toolHotkeys.set(button.dataset.tool, hotkey);
+  button.dataset.hotkey = hotkey;
+  button.title = `${button.title} (${hotkey})`;
+});
 // Preserved so an unavailable button's hotkey tooltip can be restored once a
 // matching layer exists again.
 for (const button of toolButtons) button.dataset.baseTitle = button.title;
@@ -787,9 +802,44 @@ function toolIsAvailable(toolId) {
   return !requiredType || app.annotationLayers.some((layer) => layer.type === requiredType);
 }
 
+// Pressing (or holding) the already-active tool's button or hotkey used to
+// fall back to pan; now that every tool pans on its own (an empty-space drag
+// always pans, regardless of active tool), there is nothing useful to fall
+// back to. It just blinks the button's background instead, acknowledging the
+// press without changing anything — starting the instant the mouse/key goes
+// down and lasting exactly as long as it's held, with a floor so even the
+// briefest tap still reads as a visible blink.
+const TOOL_BLINK_MINIMUM_DURATION_MILLISECONDS = 50;
+
+// Each button tracks its own blink start time (or none), so a mouse blink and
+// a keyboard blink on two different buttons never interfere with each other.
+function beginToolBlink(button) {
+  if (button.toolBlinkStartTime !== undefined) return;   // already blinking
+  button.toolBlinkStartTime = Date.now();
+  button.classList.add('tool-blink');
+}
+
+function endToolBlink(button) {
+  const startTime = button.toolBlinkStartTime;
+  if (startTime === undefined) return;
+  button.toolBlinkStartTime = undefined;
+  const remaining = TOOL_BLINK_MINIMUM_DURATION_MILLISECONDS - (Date.now() - startTime);
+  if (remaining <= 0) button.classList.remove('tool-blink');
+  else setTimeout(() => button.classList.remove('tool-blink'), remaining);
+}
+
 for (const button of toolButtons) {
   const toolId = button.dataset.tool;
   const requiredType = TOOL_REQUIRED_LAYER_TYPE[toolId];
+
+  // The blink itself starts on mousedown and ends on mouseup or on the
+  // cursor leaving the button — not on 'click', which only fires once the
+  // press is already fully over.
+  button.addEventListener('mousedown', () => {
+    if (toolIsAvailable(toolId) && app.activeTool?.id === toolId) beginToolBlink(button);
+  });
+  button.addEventListener('mouseup', () => endToolBlink(button));
+  button.addEventListener('mouseleave', () => endToolBlink(button));
 
   button.addEventListener('click', () => {
     if (!toolIsAvailable(toolId)) {
@@ -798,14 +848,14 @@ for (const button of toolButtons) {
         { kind: 'warning' });
       return;
     }
+    if (app.activeTool?.id === toolId) return;   // already blinking, nothing else to do
     // Switch to a matching layer first, if the active one isn't already of the
     // required type, so the tool draws into the layer it just switched to.
     if (requiredType) {
       const targetLayer = app.findAnnotationLayerForType(requiredType);
       if (targetLayer && app.activeLayer?.id !== targetLayer.id) app.setActiveLayer(targetLayer.id);
     }
-    // Clicking the already-active tool deselects it, falling back to pan.
-    app.setActiveTool(app.activeTool?.id === toolId ? 'pan' : toolId);
+    app.setActiveTool(toolId);
   });
 
   if (requiredType) {
@@ -891,7 +941,7 @@ function reflectScrollToggle() {
   const atTop = isScrolledToTop();
   // The arrow SVG points down by default; rotate it 180° to point up.
   scrollToggleButton.classList.toggle('pointing-up', !atTop);
-  scrollToggleButton.title = atTop ? 'Scroll down to the details' : 'Scroll back to the top';
+  scrollToggleButton.title = atTop ? 'Scroll down to the details (0)' : 'Scroll back to the top (0)';
 }
 
 scrollToggleButton.addEventListener('click', () => {
@@ -998,18 +1048,27 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  for (const tool of Object.values(app.toolRegistry)) {
-    if (tool.hotkey === event.key) {
-      // Pressing the active tool's hotkey deselects it, falling back to pan.
-      app.setActiveTool(app.activeTool?.id === tool.id ? 'pan' : tool.id);
+  if (event.key === '0') { scrollToggleButton.click(); return; }
+
+  for (const [toolId, hotkey] of toolHotkeys) {
+    if (hotkey === event.key) {
+      if (app.activeTool?.id === toolId) {
+        // Held down, the blink lasts exactly as long as the key does — ended
+        // by the matching keyup below, not a fixed timer.
+        const button = toolButtons.find((candidate) => candidate.dataset.tool === toolId);
+        if (button) beginToolBlink(button);
+      } else {
+        app.setActiveTool(toolId);
+      }
       return;
     }
   }
 
   if (app.activeTool?.onKeyDown?.(app, event)) { event.preventDefault(); return; }
 
-  // Escape clears the selection when no tool claimed it (a tool claims it for
-  // canceling an in-progress placement or shape).
+  // Escape clears the selection when no tool claimed it (a tool claims it to
+  // commit an in-progress line/polyline as an open shape, or to cancel outright
+  // when there are too few vertices to be one).
   if (event.key === 'Escape' && app.selection) {
     app.setSelection(null);
     return;
@@ -1023,6 +1082,16 @@ window.addEventListener('keydown', (event) => {
   }
 
   if (app.runKeyHandlers(event)) event.preventDefault();
+});
+
+// Ends a tool hotkey's blink exactly when the key is released, matching a
+// held mousedown's mouseup/mouseleave. Harmless if that tool's button was
+// never blinking (typing in an input, or the key belongs to no tool).
+window.addEventListener('keyup', (event) => {
+  const toolId = [...toolHotkeys].find(([, hotkey]) => hotkey === event.key)?.[0];
+  if (!toolId) return;
+  const button = toolButtons.find((candidate) => candidate.dataset.tool === toolId);
+  if (button) endToolBlink(button);
 });
 
 /* ---------- Optional ?video= URL parameter ---------- */

@@ -243,6 +243,13 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: #fff;
 }
 
+/* Clicking (or hotkey-pressing) the already-active tool no longer falls back
+   to pan; it just blinks the background briefly, halfway from the active
+   blue to the inactive grey, as a small acknowledgment of the press. */
+.rail-button.active-tool.tool-blink {
+  background: color-mix(in srgb, var(--accent) 50%, var(--surface-raised) 50%);
+}
+
 /* The annotation-mode toggle sits above the tools; the active mode is filled
    like an active tool but stays visually a mode, not the currently held tool. */
 .rail-button.mode-active {

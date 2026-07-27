@@ -124,17 +124,16 @@ try {
   await page.waitForFunction(() => window.exactVideoAnnotator.currentFrame === 2);
   check(true, 'stepped to frame 2 with ArrowRight');
 
-  // ---- Tool hotkeys toggle: pressing a tool's key selects it; pressing the
-  // active tool's key again deselects it back to pan ----
-  await page.keyboard.press('o');   // pan is active at startup
+  // ---- Tool hotkeys select a tool; pressing the active tool's key again no
+  // longer deselects it (every tool pans on its own now) — it just blinks the
+  // button. Number keys are assigned by tool-rail position — point is the 2nd
+  // button, so '2'. ----
+  await page.keyboard.press('2');   // pan is active at startup
   let activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
-  check(activeToolId === 'point', 'pressing o selects the point tool');
-  await page.keyboard.press('o');
+  check(activeToolId === 'point', "pressing '2' selects the point tool");
+  await page.keyboard.press('2');
   activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
-  check(activeToolId === 'pan', "pressing the active tool's hotkey deselects it back to pan");
-  await page.keyboard.press('o');
-  activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
-  check(activeToolId === 'point', 'pressing o again reselects the point tool');
+  check(activeToolId === 'point', "pressing the active tool's hotkey again leaves it active");
 
   // ---- Place a point with the point tool (a double-click starts it; a
   // single click only selects or pans) ----
@@ -172,8 +171,9 @@ try {
 
   // ---- Draw a closed triangle with the polyline tool (a double-click places
   // the first vertex; single clicks place the rest once the shape is
-  // started; clicking back on the first vertex closes it) ----
-  await page.keyboard.press('g');
+  // started; clicking back on the first vertex closes it). Polyline is the
+  // 4th tool-rail button, so its hotkey is '4'. ----
+  await page.keyboard.press('4');
   const triangleFirstVertex =
     { x: stageBox.x + stageBox.width * 0.3, y: stageBox.y + stageBox.height * 0.3 };
   await page.mouse.dblclick(triangleFirstVertex.x, triangleFirstVertex.y);

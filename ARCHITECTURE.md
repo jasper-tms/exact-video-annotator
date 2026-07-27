@@ -80,16 +80,20 @@ is already active toggles it off), a left-drag pans as well, via
 other pointer events are forwarded to the active tool by `main.js`.
 
 There is **no separate select tool**: the point/line/polyline tools hit-test
-their target layer on pointer-down, so pressing an existing annotation of the
-tool's own kind **selects** it and dragging **moves** it (the whole item, or
-the grabbed vertex). This shared behavior lives in
-`js/tools/annotation-dragging.js`. Starting a brand-new annotation always takes
-a **double-click** — on empty space, or on an annotation of a different kind
-than the active tool; a single click there instead arms a click-and-drag pan,
-so an empty-space drag always pans regardless of which tool is active. A
-double-click on a same-kind annotation is a no-op (it was already selected by
-the two preceding pointer-downs), except double-clicking a **segment** (not a
-vertex) of a same-kind line/polyline, which inserts a vertex there.
+their target layer on pointer-down, so pressing an existing annotation of
+**any** kind **selects** it and dragging **moves** it (the whole item, or the
+grabbed vertex) — no tool is blind to another kind's annotations. This shared
+behavior lives in `js/tools/annotation-dragging.js`. A click on empty space
+instead **deselects**; if it turns into a drag instead, it **pans** the view
+regardless of which tool is active. Starting a brand-new annotation always
+takes a **double-click** — on empty space, or on an annotation of a different
+kind than the active tool. A double-click on a same-kind annotation is a no-op
+(it was already selected by the two preceding pointer-downs), except
+double-clicking a **segment** (not a vertex) of a same-kind line/polyline,
+which inserts a vertex there — this one interaction stays kind-specific.
+Escape on an in-progress line/polyline commits whatever has been placed so far
+as an open shape rather than discarding it (falling back to discarding only
+when there are too few vertices to be a valid shape at all).
 
 ### `js/layers/layer.js` — exports `class Layer extends EventTarget`
 
@@ -505,20 +509,25 @@ drive it with synthetic edges and stripes.
 | --- | --- |
 | `Space` | play/pause |
 | `ArrowLeft` / `,` , `ArrowRight` / `.` | step one frame |
-| `o` | point tool |
-| `g` | polyline tool |
-| `l` | line tool |
+| `1`–`9` | activate the Nth tool-rail button from the top (currently: `1` pan, `2` point, `3` line, `4` polyline) |
+| `0` | scroll to/from the details section (same button, bottom of the tool rail) |
 | `v` | toggle the selected layer's visibility |
 | `a` | toggle frame-agnostic mode for new annotations |
 | `f` | fit the view to the content |
 | `r` | re-fit the selected annotation (plugin layers that fit; see "Plugins") |
 | `Delete`/`Backspace` | delete selected item (or selected vertex) — works in any tool |
-| `Escape` | cancel in-progress shape / clear selection |
+| `Escape` | commit an in-progress line/polyline as an open shape (or cancel outright if too few vertices), else clear the selection |
 | `Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z` | undo, redo |
 | event-type hotkeys | user-defined, case-sensitive |
 
-A tool hotkey pressed while that tool is already active **deselects** it
-(back to no tool, where a left-drag pans).
+Tool number keys are assigned by position, not written statically per tool —
+see the `toolHotkeys` map built in `main.js` from `#tool-rail button[data-tool]`
+order. Only the first 9 tool-rail buttons get one; `0` is reserved for the
+scroll-to-details button regardless of how many tools exist. A tool hotkey (or
+button click) for the tool that is already active does not deselect it back to
+pan — every tool pans on its own now (an empty-space drag always pans), so
+there is nothing useful to fall back to — it just **blinks** the button
+briefly instead, acknowledging the press.
 
 ## Video pipeline
 

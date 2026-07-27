@@ -366,7 +366,7 @@ try {
   /* ---- A closed polyline on the same layer is fitted segment by segment,
           closing segment last ---- */
 
-  await page.keyboard.press('g');
+  await page.keyboard.press('4'); // polyline is the 4th tool-rail button
   const polylineFirstVertex =
     { x: stageBox.x + stageBox.width * 0.3, y: stageBox.y + stageBox.height * 0.3 };
   await page.mouse.dblclick(polylineFirstVertex.x, polylineFirstVertex.y);

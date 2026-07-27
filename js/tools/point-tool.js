@@ -1,11 +1,12 @@
 // The point tool: double-click empty space (or an annotation of a different
 // kind) to place a new point annotation, committed as one undoable "Add
-// point" command. A single click there instead arms a potential pan, so
-// dragging on empty space always pans the view. Pressing an existing point
-// selects it, and dragging it moves it — the shared behavior in
-// annotation-dragging.js — so there is no separate select tool. A
-// double-click on an existing point does nothing; it was already selected by
-// the two preceding pointer-downs.
+// point" command. A single click there instead deselects (or, if it turns
+// into a drag, pans the view instead). Pressing an existing annotation of ANY
+// kind selects it, and dragging then moves it — the shared behavior in
+// annotation-dragging.js, unfiltered by kind, so there is no separate select
+// tool and no tool is blind to another kind's annotations. A double-click on
+// an existing point does nothing; it was already selected by the two
+// preceding pointer-downs.
 
 import { newId } from '../document.js';
 import {
@@ -13,41 +14,62 @@ import {
   endDragOnExistingItem, cancelDragOnExistingItem, updateHover, clearHover,
 } from './annotation-dragging.js';
 
+// How far a press on empty space has to move before it's treated as a pan
+// instead of a click that deselects.
+const DRAG_THRESHOLD_SCREEN_PIXELS = 4;
+
+// A press on empty space, not yet resolved as a click (deselect on release)
+// or a drag (pan instead): { downClientX, downClientY }, or null.
+let pendingEmptyPress = null;
+
 export const pointTool = {
   id: 'point',
   name: 'Add points',
-  hotkey: 'o',
   cursor: 'crosshair',
 
   activate(app) {},
   deactivate(app) {
+    pendingEmptyPress = null;
     cancelDragOnExistingItem();
     clearHover(app);
   },
 
   onPointerDown(app, worldPoint, event) {
     const layer = app.targetLayerForType('coordinates');
-    // Pressing an existing point selects it, and dragging then moves it.
-    // Placing a new point takes a double-click, so a press anywhere else
-    // just arms a potential pan.
+    // Pressing an existing annotation of any kind selects it, and dragging
+    // then moves it. Placing a new point takes a double-click, so a press
+    // anywhere else defers: a click deselects, a drag pans.
     const hit = layer.visible ? hitTestLayer(app, layer, worldPoint) : null;
     if (hit) {
       beginDragOnExistingItem(app, layer, hit, worldPoint);
       app.viewer.requestRender();
       return;
     }
-    app.viewer.beginPanFromPointerEvent(event);
+    pendingEmptyPress = { downClientX: event.clientX, downClientY: event.clientY };
   },
 
   onPointerMove(app, worldPoint, event) {
     if (updateDragOnExistingItem(app, worldPoint)) return;
+    if (pendingEmptyPress) {
+      const deltaX = event.clientX - pendingEmptyPress.downClientX;
+      const deltaY = event.clientY - pendingEmptyPress.downClientY;
+      if (Math.hypot(deltaX, deltaY) > DRAG_THRESHOLD_SCREEN_PIXELS) {
+        pendingEmptyPress = null;
+        app.viewer.beginPanFromPointerEvent(event);
+      }
+      return;
+    }
     const layer = app.findAnnotationLayerForType('coordinates');
     const hit = updateHover(app, layer, worldPoint);
     app.viewer.stageCanvas.style.cursor = hit ? 'move' : this.cursor;
   },
 
   onPointerUp(app, worldPoint, event) {
-    endDragOnExistingItem(app);
+    if (endDragOnExistingItem(app)) return;
+    if (pendingEmptyPress) {
+      pendingEmptyPress = null;
+      app.setSelection(null);
+    }
   },
 
   onDoubleClick(app, worldPoint, event) {

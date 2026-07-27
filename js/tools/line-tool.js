@@ -10,7 +10,6 @@ import { createDrawingTool } from './polyline-tool.js';
 export const lineTool = createDrawingTool({
   id: 'line',
   name: 'Draw lines',
-  hotkey: 'l',
   kind: 'line',
   commandLabel: 'Add line',
   minimumVertexCount: 2,

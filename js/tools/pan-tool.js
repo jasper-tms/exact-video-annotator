@@ -8,7 +8,6 @@
 export const panTool = {
   id: 'pan',
   name: 'Pan',
-  hotkey: 'p',
   cursor: 'grab',
 
   activate(app) {},    // eslint-disable-line no-unused-vars
