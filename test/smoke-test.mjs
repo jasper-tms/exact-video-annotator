@@ -136,9 +136,10 @@ try {
   activeToolId = await page.evaluate(() => window.exactVideoAnnotator.activeTool?.id ?? null);
   check(activeToolId === 'point', 'pressing o again reselects the point tool');
 
-  // ---- Place a point with the point tool ----
+  // ---- Place a point with the point tool (a double-click starts it; a
+  // single click only selects or pans) ----
   const stageBox = await page.locator('#stage-canvas').boundingBox();
-  await page.mouse.click(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
+  await page.mouse.dblclick(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
   const pointFacts = await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
     const pointsLayer = application.annotationDocument.layers.find((layer) => layer.type === 'points');
@@ -169,9 +170,10 @@ try {
   check(restoredPoint.x === pointFacts.item.x && restoredPoint.y === pointFacts.item.y,
         'undo restores the dragged point');
 
-  // ---- Draw a triangle with the polygon tool ----
+  // ---- Draw a triangle with the polygon tool (a double-click places the
+  // first vertex; single clicks place the rest once the shape is started) ----
   await page.keyboard.press('g');
-  await page.mouse.click(stageBox.x + stageBox.width * 0.3, stageBox.y + stageBox.height * 0.3);
+  await page.mouse.dblclick(stageBox.x + stageBox.width * 0.3, stageBox.y + stageBox.height * 0.3);
   await page.mouse.click(stageBox.x + stageBox.width * 0.6, stageBox.y + stageBox.height * 0.3);
   await page.mouse.click(stageBox.x + stageBox.width * 0.45, stageBox.y + stageBox.height * 0.6);
   await page.keyboard.press('Enter');

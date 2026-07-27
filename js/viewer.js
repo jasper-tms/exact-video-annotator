@@ -1,11 +1,14 @@
 // The Viewer owns the stage canvas, the world→stage view transform (zoom and
 // pan), the layer stack, and raw pointer handling. Zoom and pan work in every
-// tool (wheel and pinch to zoom, middle-drag to pan; the select tool
-// additionally pans when dragging empty space); all other pointer events are
-// forwarded to a tool delegate installed by main.js.
+// tool (wheel and pinch to zoom, middle-drag to pan; every tool additionally
+// pans when dragging empty space, since starting a new annotation takes a
+// double-click); all other pointer events are forwarded to a tool delegate
+// installed by main.js.
 //
-// A tool can also request a pan explicitly (the select tool's empty-space
-// drag) by calling beginPanFromPointerEvent(event) from its onPointerDown.
+// A tool can also request a pan explicitly (an empty-space drag, or a drag
+// that started on empty space but hasn't moved far enough yet to tell click
+// from drag) by calling beginPanFromPointerEvent(event) from its
+// onPointerDown or onPointerMove.
 
 const MINIMUM_VIEW_SCALE = 0.01;
 const MAXIMUM_VIEW_SCALE = 200;
@@ -289,7 +292,7 @@ export class Viewer extends EventTarget {
   }
 
   /** Start panning with the given pointer (used for middle-drag here, and by
-      the select tool for left-drags that start on empty space). */
+      tools for left-drags that start on empty space). */
   beginPanFromPointerEvent(event) {
     this.#activePan = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
     this.stageCanvas.setPointerCapture(event.pointerId);

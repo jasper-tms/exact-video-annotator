@@ -293,11 +293,13 @@ try {
   check(await page.locator('.plugin-settings h3').innerText() === 'Line fitter',
         "the layer panel shows the plugin's settings");
 
-  // Two clicks finish and fit a line — no Enter, no double-click.
+  // A double-click starts the line at its first vertex; the second (single)
+  // click places the second vertex and — with no Enter needed — finishes and
+  // fits it.
   const stageBox = await page.locator('#stage-canvas').boundingBox();
   const firstClick = { x: stageBox.x + stageBox.width * 0.35, y: stageBox.y + stageBox.height * 0.45 };
   const secondClick = { x: stageBox.x + stageBox.width * 0.65, y: stageBox.y + stageBox.height * 0.5 };
-  await page.mouse.click(firstClick.x, firstClick.y);
+  await page.mouse.dblclick(firstClick.x, firstClick.y);
   await page.mouse.click(secondClick.x, secondClick.y);
 
   const lineFacts = await page.evaluate((clicks) => {
@@ -364,7 +366,7 @@ try {
   /* ---- A polygon on the same layer is fitted segment by segment ---- */
 
   await page.keyboard.press('g');
-  await page.mouse.click(stageBox.x + stageBox.width * 0.3, stageBox.y + stageBox.height * 0.3);
+  await page.mouse.dblclick(stageBox.x + stageBox.width * 0.3, stageBox.y + stageBox.height * 0.3);
   await page.mouse.click(stageBox.x + stageBox.width * 0.6, stageBox.y + stageBox.height * 0.3);
   await page.mouse.click(stageBox.x + stageBox.width * 0.45, stageBox.y + stageBox.height * 0.6);
   await page.keyboard.press('Enter');
