@@ -360,6 +360,15 @@ button:focus:not(:focus-visible) { outline: none; }
   text-overflow: ellipsis;
 }
 
+/* The clock marking the primary video's tab when several videos are open. */
+.layer-tab .layer-tab-primary-clock {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+}
+
+.layer-tab .layer-tab-primary-clock svg { display: block; }
+
 .layer-tab .layer-tab-eye {
   border: none;
   background: none;

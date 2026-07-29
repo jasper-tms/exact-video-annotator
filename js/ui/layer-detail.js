@@ -138,13 +138,72 @@ export function initializeLayerDetail(app, containerElement) {
       containerElement.appendChild(fractionalRow);
     }
 
+    /* ---- Video layer: primary/follower link controls ---- */
+
+    if (layer.type === 'video' && app.videoLayers.length >= 2) {
+      if (layer === app.primaryVideoLayer) {
+        const primaryNote = document.createElement('p');
+        primaryNote.className = 'layer-detail-type';
+        primaryNote.textContent = 'Primary video — its clock drives the timeline, '
+          + 'and annotation frame numbers mean its frames. Other videos follow it.';
+        containerElement.appendChild(primaryNote);
+      } else {
+        const linkRow = document.createElement('div');
+        linkRow.className = 'layer-detail-row';
+
+        const modeLabel = document.createElement('label');
+        modeLabel.className = 'layer-detail-transform-field';
+        const modeSelect = document.createElement('select');
+        for (const [value, text] of [
+          ['frame-index', 'frame index'],
+          ['timestamp', 'timestamp'],
+        ]) {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = text;
+          modeSelect.appendChild(option);
+        }
+        modeSelect.value = layer.linkMode;
+        modeSelect.title = 'How this video follows the primary.\n'
+          + 'Frame index: equal frame numbers correspond (plus the offset, in frames) — '
+          + 'right for trigger-synchronized cameras and processed renditions of the same clip.\n'
+          + 'Timestamp: equal playback times correspond (plus the offset, in seconds), through '
+          + "this clip's own frame↔time table — right for independent recordings at "
+          + 'different frame rates.\n'
+          + 'Switching converts the offset so the current alignment is kept.';
+        modeSelect.addEventListener('change', () => app.setVideoLinkMode(layer, modeSelect.value));
+        modeLabel.append('follow the primary by ', modeSelect);
+        linkRow.appendChild(modeLabel);
+
+        const offsetLabel = document.createElement('label');
+        offsetLabel.className = 'layer-detail-transform-field';
+        const offsetUnit = layer.linkMode === 'timestamp' ? 'seconds' : 'frames';
+        const offsetInput = document.createElement('input');
+        offsetInput.type = 'number';
+        offsetInput.step = layer.linkMode === 'timestamp' ? '0.001' : '1';
+        offsetInput.value = String(layer.temporalOffset);
+        offsetInput.title = layer.linkMode === 'timestamp'
+          ? "Added to the primary's time to find this video's matching time."
+          : "Added to the primary's frame number to find this video's matching frame.";
+        offsetInput.addEventListener('keydown', (event) => event.stopPropagation());
+        offsetInput.addEventListener('change', () => {
+          const value = Number(offsetInput.value);
+          if (Number.isFinite(value)) app.setVideoTemporalOffset(layer, value);
+        });
+        offsetLabel.append(`offset (${offsetUnit}) `, offsetInput);
+        linkRow.appendChild(offsetLabel);
+
+        containerElement.appendChild(linkRow);
+      }
+    }
+
     /* ---- Video layer: playback facts ---- */
 
-    if (layer.type === 'video' && app.engine) {
+    if (layer.type === 'video' && layer.engine) {
       const facts = document.createElement('dl');
       facts.className = 'layer-detail-facts';
-      const information = app.videoInformation ?? {};
-      const engine = app.engine;
+      const information = layer.videoInformation ?? {};
+      const engine = layer.engine;
       // While the index is still being built, the frame count and the duration
       // describe the part of the clip indexed so far, so they are labelled as
       // the floor they are rather than presented as totals.

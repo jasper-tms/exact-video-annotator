@@ -100,7 +100,8 @@
         <!-- Containers with no central index (WebM/MKV, fragmented MP4, Ogg)
              are indexed by a full pass over the file, which is the one part of
              opening a clip whose cost grows with its length. This reports that
-             pass, and stays up while the clip plays if the index is still
+             pass — one line per video, since several clips can be indexing at
+             once — and stays up while a clip plays if its index is still
              growing underneath it. -->
         <div id="indexing-status" hidden></div>
       </div>
@@ -117,14 +118,12 @@
     <div id="annotations-table-container" class="panel"></div>
   </section>
 
-  <!-- The engine paints into these; they are kept offscreen and composited
-       onto the stage canvas by the video layer. The container must have a
-       real size (the engine sizes its canvas backing store from its parent),
-       so it is positioned far offscreen rather than display: none. -->
-  <div id="video-host" aria-hidden="true">
-    <canvas id="video-engine-canvas"></canvas>
-    <video id="video-engine-element" muted playsinline></video>
-  </div>
+  <!-- Each video engine paints into its own canvas + <video> pair, created
+       dynamically inside a per-video host <div> here and composited onto the
+       stage canvas by that video's layer. The hosts must have a real size
+       (the engine sizes its canvas backing store from its parent), so this
+       container is positioned far offscreen rather than display: none. -->
+  <div id="video-host" aria-hidden="true"></div>
 
   <div id="toast-container" role="status" aria-live="polite"></div>
 

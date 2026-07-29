@@ -36,7 +36,7 @@ function scratchContextOfSize(width, height) {
  *   cross-origin video the browser refuses to let the page read back).
  */
 export function readFrameLuminancePatch(app, boundsInVideoPixels, marginPixels) {
-  const engine = app.engine;
+  const engine = videoLayerOf(app).engine;
   const element = engine?.displayElement;
   if (!element) throw new Error('no video frame is on screen');
 
@@ -121,10 +121,16 @@ export function createLuminanceSampler(patch) {
 
 /* ---------- Layer-local ↔ video-pixel coordinates ---------- */
 
+/** The video a fit reads its pixels from: the TOPMOST VISIBLE video layer —
+    the one whose picture is actually in front of the user — falling back to
+    the topmost video when every video is hidden. Both the pixels read and the
+    layer-local ↔ video-pixel conversions below go through this same layer, so
+    a fit is always against the image it appears on top of. */
 function videoLayerOf(app) {
-  const videoLayer = app.viewer.layers.find((layer) => layer.type === 'video');
-  if (!videoLayer) throw new Error('no video is open, so there is nothing to fit to');
-  return videoLayer;
+  const videoLayers = app.viewer.layers.filter((layer) => layer.type === 'video');
+  if (videoLayers.length === 0) throw new Error('no video is open, so there is nothing to fit to');
+  return [...videoLayers].reverse().find((layer) => layer.visible && layer.opacity > 0)
+    ?? videoLayers[videoLayers.length - 1];
 }
 
 /** Layer-local point → the upright source video's pixel grid. */

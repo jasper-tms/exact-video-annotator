@@ -31,6 +31,16 @@ const EYE_HIDDEN_SVG = `
     <line x1="4" y1="20" x2="20" y2="4"></line>
   </svg>`;
 
+// Marks the PRIMARY video's tab when several videos are open: the clip whose
+// clock every other video follows (and whose frames annotation frame numbers
+// mean).
+const CLOCK_PRIMARY_SVG = `
+  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="9"></circle>
+    <polyline points="12 6.5 12 12 15.5 14"></polyline>
+  </svg>`;
+
 export function initializeLayerTabs(app, containerElement) {
   containerElement.innerHTML = `
     <button type="button" class="layer-tabs-scroll-button" data-scroll="-1" title="Scroll tabs left">◀</button>
@@ -154,11 +164,31 @@ export function initializeLayerTabs(app, containerElement) {
     window.addEventListener('pointerdown', dismiss, true);
   });
 
-  /* ---------- Delete the selected layer ---------- */
+  /* ---------- Delete (or close) the selected layer ---------- */
 
   deleteButton.addEventListener('click', () => {
     const layer = app.selectedLayer;
-    if (!layer || layer.type === 'video') return;
+    if (!layer) return;
+    if (layer.type === 'video') {
+      // Closing a video never touches annotations — the only thing worth a
+      // warning is closing the PRIMARY while other videos remain, which
+      // re-keys the timeline: annotation frame numbers then mean the next
+      // video's frames.
+      const isPrimary = layer === app.primaryVideoLayer;
+      const otherVideos = app.videoLayers.filter((candidate) => candidate !== layer);
+      const hasAnnotations = app.annotationDocument.layers
+        .some((documentLayer) => documentLayer.items.length > 0);
+      if (isPrimary && otherVideos.length > 0 && hasAnnotations) {
+        const nextPrimary = otherVideos[0];
+        const warning = `⚠️ Close the primary video "${layer.name}"?\n\n`
+          + `"${nextPrimary.name}" becomes the primary, and annotation frame `
+          + 'numbers will then refer to ITS frames.\n\n'
+          + '(This cannot be undone — though the video can be re-opened.)';
+        if (!window.confirm(warning)) return;
+      }
+      app.closeVideoLayer(layer.id);
+      return;
+    }
     const itemCount = Array.isArray(layer.items) ? layer.items.length : 0;
     if (itemCount > 0) {
       const warning = `⚠️ DELETE the layer "${layer.name}" and the `
@@ -171,11 +201,12 @@ export function initializeLayerTabs(app, containerElement) {
 
   function updateDeleteButton() {
     const layer = app.selectedLayer;
-    const deletable = layer && layer.type !== 'video';
-    deleteButton.disabled = !deletable;
-    deleteButton.title = deletable
-      ? `Delete the layer "${layer.name}"`
-      : 'Select an annotation layer to delete it (the video layer cannot be deleted)';
+    deleteButton.disabled = !layer;
+    deleteButton.title = !layer
+      ? 'Select a layer to delete it'
+      : layer.type === 'video'
+        ? `Close the video "${layer.name}"`
+        : `Delete the layer "${layer.name}"`;
   }
 
   /* ---------- Drag a tab sideways to re-order the layer stack ---------- */
@@ -365,6 +396,17 @@ export function initializeLayerTabs(app, containerElement) {
     tab.className = 'layer-tab';
     if (isSelected) tab.classList.add('active');
     tab.title = `Layer "${layer.name}"\nClick to select, double-click to rename, drag to re-order`;
+
+    // With several videos open, the primary's tab carries a clock: it is the
+    // video whose clock the others follow, and whose frames annotation frame
+    // numbers mean. With one video (or none) the marker would only be noise.
+    if (layer === app.primaryVideoLayer && app.videoLayers.length >= 2) {
+      const clockElement = document.createElement('span');
+      clockElement.className = 'layer-tab-primary-clock';
+      clockElement.innerHTML = CLOCK_PRIMARY_SVG;
+      clockElement.title = 'Primary video: drives the timeline; other videos follow it';
+      tab.appendChild(clockElement);
+    }
 
     const nameElement = document.createElement('span');
     nameElement.className = 'layer-tab-name';

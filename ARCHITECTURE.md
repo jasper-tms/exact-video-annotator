@@ -5,7 +5,9 @@ on [exact-video-engine.js](https://github.com/jasper-tms/exact-video-engine.js).
 Multiple layers share one canvas: media layers (video, image) and annotation
 layers (Coordinates — points/lines/polylines, Segmentation, Frames — temporal
 events), each with visibility, opacity, z-order, and a scale/offset transform.
-No server, no build step: plain ES modules served statically.
+Several videos can be open at once, each as its own layer with its own engine —
+one is the primary, the rest follow it (see "Multiple videos" under "Video
+pipeline"). No server, no build step: plain ES modules served statically.
 
 ## Coding conventions (binding for all contributors)
 
@@ -305,7 +307,20 @@ Tools mutate only through `app.undoHistory.execute(...)`.
 ### `js/main.js` — the `app` object (passed to tools and UI initializers)
 
 ```js
-app.viewer; app.engine;              // engine may be null before a video loads
+app.viewer;
+app.engine;                          // the PRIMARY video's engine — null before
+                                     // any video loads; everything transport-
+                                     // and frame-related reads this alias
+app.primaryVideoLayer;               // the VideoLayer whose engine that is
+app.videoLayers;                     // every open video's layer, stack order
+app.synchronizeFollowerVideos();     // seek followers to match the primary
+app.setVideoLinkMode(videoLayer, mode);        // 'frame-index' | 'timestamp';
+                                     // converts the offset so the current
+                                     // alignment is preserved
+app.setVideoTemporalOffset(videoLayer, value); // frames or seconds, per mode
+app.closeVideoLayer(layerId);        // destroy engine + host, remove layer;
+                                     // closing the primary promotes the next
+                                     // video (not undoable)
 app.annotationDocument; app.undoHistory;
 app.activeLayer;                     // the annotation layer new items go into
 app.activeClassId;                   // class assigned to newly created items
@@ -338,9 +353,11 @@ app.synchronizeDocumentLayerOrder(); // document layer order ← viewer stack
 app.addKeyHandler(handler);          // handler(event) → true if handled; runs
                                      // after tool onKeyDown (event-hotkeys)
 app.isTypingTarget(event);           // true when focus is in a text input
-app.videoInformation;                // { name, sizeBytes, numberOfFrames, ... } | null
+app.videoInformation;                // the PRIMARY video's facts: { name,
+                                     // sizeBytes, numberOfFrames, ... } | null;
                                      // rebuilt on every index event, so its
-                                     // counts follow a growing index
+                                     // counts follow a growing index (each
+                                     // VideoLayer holds its own copy)
 // app extends EventTarget; events: 'document-changed', 'frame-changed',
 // 'selection-changed', 'layers-changed', 'tool-changed', 'video-loaded',
 // 'playback-changed', 'index-changed'
@@ -361,11 +378,18 @@ app events; they never poll.
   sideways to re-order the stack; each tab carries an eye icon (right of the
   name and type badge) toggling visibility; ＋ adds an annotation layer — its
   menu's second page, **Plugins ›**, adds a plugin layer — and ✕ deletes the
-  selected one (confirming when it holds annotations). A plugin layer's badge
+  selected one (confirming when it holds annotations). A video layer's ✕
+  closes that video instead (via `app.closeVideoLayer`; confirming only when
+  closing the primary would re-key existing annotations to the next video's
+  frames). When several videos are open, the primary's tab carries a small
+  clock icon. A plugin layer's badge
   names its plugin rather than its storage type.
 - `js/ui/layer-detail.js` — settings for the selected layer (visibility,
-  opacity, scale/offset transform; playback facts for the video layer; a
-  plugin's own settings, built by the plugin).
+  opacity, scale/offset transform; playback facts for a video layer — its own
+  engine's, not necessarily the primary's; a plugin's own settings, built by
+  the plugin). With several videos open, a follower video's panel adds the
+  link controls ("follow the primary by" frame index or timestamp, plus the
+  offset in frames or seconds), and the primary's says it is the primary.
 - `js/ui/annotations-table.js` — items of the selected layer by default, or of
   every annotation layer when "Show all annotations" (top right of the panel)
   is checked; sortable; click a row to select + jump to its frame; per-row
@@ -427,7 +451,9 @@ layer.refitItem(app, itemId);                    // → true if geometry changed
 `js/plugins/frame-pixels.js` is the shared way to read the pixels of the frame
 on screen (a luminance patch of the engine's display element, plus
 layer-local ↔ video-pixel conversions), for plugins whose logic looks at the
-image. Its sampler honors the coordinate convention the video layer draws
+image. With several videos open it reads the **topmost visible** video layer —
+the picture actually in front of the user — using that same layer for both the
+pixels and the coordinate conversions. Its sampler honors the coordinate convention the video layer draws
 with: **integers sit at pixel corners** (pixel `k` spans `[k, k + 1)`, its
 center is `k + 0.5`), so a fit lands where the feature is *drawn* — the border
 between two pixel rows is an exact integer, the center of a pixel-aligned
@@ -532,22 +558,64 @@ briefly instead, acknowledging the press.
 ## Video pipeline
 
 The engine is loaded from pinned jsDelivr script tags (mp4box first), exactly
-as its README prescribes. `VideoLayer` hosts the engine's canvas + `<video>`
-element inside a hidden, correctly sized container (the engine sizes its canvas
-backing store from its parent), and its `draw` paints
+as its README prescribes. Each `VideoLayer` owns one engine and hosts that
+engine's canvas + `<video>` element inside its own hidden, correctly sized
+container (a per-video `<div>` created inside `#video-host`; the engine sizes
+its canvas backing store from its parent), and its `draw` paints
 `engine.displayElement` onto the stage — identical code for both engine tiers,
 rotation already applied. The main animation loop calls `engine.update(now)`
-every tick and repaints while playing or when anything is dirty.
+on every open engine every tick and repaints while playing or when anything is
+dirty (including any engine's `presentedFrame` changing — a follower's seek
+landing must reach the canvas too).
 
 Large files work lazily end to end: `File`/`Blob` sources are read by byte
 range on demand (the engine's `FileRangeReader`), the container index is a few
 range reads for MP4, and decode memory is byte-budgeted around the playhead.
 
-A fatal mid-stream decode error (see engine README) rebuilds with
-`createBestEngine(source, { prefer: 'native' })` at the same playhead — except
-when the error carries `detail.incomplete`, which is an index that stopped
-early rather than a dead decoder. Those frames keep playing and the native tier
-would only re-scan the same container, so that case only warns.
+A fatal mid-stream decode error (see engine README) rebuilds that one video
+with `createBestEngine(source, { prefer: 'native' })` at the same playhead and
+swaps the new engine into the existing layer (`videoLayer.replaceEngine`) —
+except when the error carries `detail.incomplete`, which is an index that
+stopped early rather than a dead decoder. Those frames keep playing and the
+native tier would only re-scan the same container, so that case only warns.
+
+### Multiple videos: one primary, seek-following followers
+
+Loading a video never replaces one already open: it becomes a new video layer
+stacked directly above the topmost video (videos sit together beneath the
+annotation layers). Re-dropping an already-open clip opens another layer of it
+— two copies at different temporal offsets is a legitimate way to compare
+moments of one clip.
+
+- **One video is the primary** (`app.primaryVideoLayer`): the first one
+  loaded. Its engine drives the transport bar, `app.currentFrame`,
+  `renderState.frame`, annotation frame indices, and the autosave key —
+  `app.engine` is an alias for it, so everything that predates multiple
+  videos keeps meaning what it always meant. Closing the primary promotes
+  the next remaining video (bottom of the stack first); annotation frame
+  numbers then mean THAT video's frames.
+- **Other videos are followers**, seeked to the frame matching the primary
+  per their link settings (`videoLayer.linkMode`, `videoLayer.temporalOffset`
+  — session-only state, never written into the document):
+  - `'frame-index'` (the default): follower frame = primary frame + offset in
+    frames. Right when the files correspond frame for frame regardless of
+    what their timestamps claim — trigger-synchronized camera rigs, processed
+    renditions of the same clip.
+  - `'timestamp'`: follower frame = `frameAtTime(primary time + offset in
+    seconds)`, through the follower engine's own frame↔time table — never an
+    assumed frame rate. Right for independent recordings of the same scene at
+    different frame rates.
+  Switching modes converts the offset so the current alignment is preserved
+  (`app.setVideoLinkMode`).
+- **Continuous playback plays only the primary** — synchronized multi-engine
+  playback drifts, and seek-following is exact for stepping and scrubbing,
+  which is how annotation actually happens. Followers catch up on every
+  discrete frame change while paused and on each pause (including the
+  playhead reaching the end of the clip, which the animation loop announces
+  as a `'playback-changed'` since the engine pauses itself silently).
+
+Spatial alignment is the layer transform that every layer already has;
+per-video visibility and opacity likewise come free from the layer system.
 
 ### An index that is still being built
 
@@ -580,16 +648,24 @@ What the UI does with that:
   `'frame-changed'` goes quiet.
 - `#indexing-status` reports the pass itself from `onProgress`
   (`{fraction, framesFound, etaMs}`), from the first read until the index
-  settles.
+  settles — one line per video, attributed by name, since several clips can
+  be indexing at once. Each load carries an identifier
+  (`videoLayer.loadIdentifier`) so a video closed mid-index silences the pass
+  still reading its file.
 - `videoInformation.frameIndexState` travels into the export, so annotations
   saved mid-pass are not recorded against a frame count that was only a floor.
 
 ## Persistence
 
 - Export/import: a single JSON file (`<video-name>.annotations.json`).
-- Autosave: the serialized document under `localStorage` keyed by video
-  name + size, saved (debounced) on every `'document-changed'`; offered for
-  restore when the same video is reopened.
+- Autosave: the serialized document under `localStorage` keyed by the
+  **primary** video's name + size, saved (debounced) on every
+  `'document-changed'`; offered for restore when the same video is reopened
+  as the primary (never when it arrives as a follower).
+- Follower videos and their link settings are session-only viewing aids: the
+  document's `video` provenance block stays keyed to the primary, so
+  version-1 files stay valid. Recording followers in the export would be a
+  deliberate schema change (the format rejects unknown schemas).
 
 ## Deploy
 

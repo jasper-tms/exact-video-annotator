@@ -54,9 +54,11 @@ const INDEX_EVENT_THROTTLE_MILLISECONDS = 200;
 
 class Application extends EventTarget {
   viewer = null;
-  engine = null;
-  videoSource = null;        // File/Blob or URL string, kept for decode recovery
-  videoInformation = null;   // { name, sizeBytes, numberOfFrames, frameRate, ... }
+  // The video whose engine drives the transport bar, the meaning of every
+  // annotation frame index, and the autosave key. The first video loaded;
+  // closing it promotes the next remaining video. Other videos are FOLLOWERS,
+  // seeked to match it per their link settings (see synchronizeFollowerVideos).
+  primaryVideoLayer = null;
   annotationDocument = createEmptyDocument();
   undoHistory = new UndoHistory();
   selection = null;
@@ -114,6 +116,121 @@ class Application extends EventTarget {
     this.setSelection(null);
     this.undoHistory.execute(command);
     return true;
+  }
+
+  /* ---------- Videos ---------- */
+
+  get videoLayers() {
+    return this.viewer.layers.filter((layer) => layer.type === 'video');
+  }
+
+  /** The primary video's engine, or null before any video loads. Everything
+      that predates multiple videos (transport, seeking, autosave) reads this
+      alias and keeps meaning exactly what it always meant. */
+  get engine() { return this.primaryVideoLayer?.engine ?? null; }
+
+  /** The primary video's facts (see videoInformationFromEngine), or null. */
+  get videoInformation() { return this.primaryVideoLayer?.videoInformation ?? null; }
+
+  /** The frame a follower video should be sitting on right now, per its link
+      settings. 'frame-index' pairs equal frame numbers (plus an offset in
+      frames); 'timestamp' pairs equal presentation times (plus an offset in
+      seconds), through the follower's own frame↔time table — never an assumed
+      frame rate. Clamped to the follower's indexed range, which while its
+      index is still growing is a floor that rises.
+
+      The snap below exists because a timestamp offset routinely points at an
+      EXACT frame boundary: both playheads sit on frame start times, so the
+      offset a mode switch converts (follower start − primary start) lands the
+      lookup right on the follower frame's own start, where "largest frame at
+      or below t" would read one rounding error — a ten-thousandth of the gap
+      — as the PREVIOUS frame. Nudging by a tolerance far below any real
+      frame duration is immune to that; the engine's own frameOfPresentedTime
+      does the same, for the same reason. */
+  static #FOLLOWER_TIMESTAMP_SNAP_SECONDS = 1e-4;
+
+  followerTargetFrame(videoLayer) {
+    const primaryEngine = this.engine;
+    const followerEngine = videoLayer.engine;
+    const targetFrame = videoLayer.linkMode === 'timestamp'
+      ? followerEngine.frameAtTime(primaryEngine.currentTime + videoLayer.temporalOffset
+        + Application.#FOLLOWER_TIMESTAMP_SNAP_SECONDS)
+      : primaryEngine.currentFrame + Math.round(videoLayer.temporalOffset);
+    const lastFrame = Math.max(0, (followerEngine.numFrames ?? 1) - 1);
+    return Math.min(lastFrame, Math.max(0, targetFrame));
+  }
+
+  /** Seek every follower video to its frame matching the primary's. Called on
+      each discrete frame change and on pause — never per tick of continuous
+      playback, which only the primary plays (synchronized multi-engine
+      playback drifts; seek-following is exact for stepping and scrubbing,
+      which is how annotation actually happens). */
+  synchronizeFollowerVideos() {
+    if (!this.primaryVideoLayer) return;
+    for (const videoLayer of this.videoLayers) {
+      if (videoLayer === this.primaryVideoLayer) continue;
+      const targetFrame = this.followerTargetFrame(videoLayer);
+      if (videoLayer.engine.currentFrame !== targetFrame) {
+        videoLayer.engine.seekToFrame(targetFrame);
+        this.viewer.requestRender();
+      }
+    }
+  }
+
+  /** Switch a follower's link mode, converting its offset so the CURRENT
+      correspondence is preserved (the follower does not jump; only how the
+      link behaves as the primary moves away from here changes). */
+  setVideoLinkMode(videoLayer, linkMode) {
+    if (linkMode === videoLayer.linkMode) return;
+    let temporalOffset = 0;
+    if (this.engine && videoLayer !== this.primaryVideoLayer) {
+      temporalOffset = linkMode === 'timestamp'
+        // Trimmed to 0.1 millisecond — far below any real frame duration —
+        // so the panel shows a readable number rather than float debris.
+        ? Number((videoLayer.engine.currentTime - this.engine.currentTime).toFixed(4))
+        : videoLayer.engine.currentFrame - this.engine.currentFrame;
+    }
+    videoLayer.setLinkMode(linkMode, temporalOffset);
+    this.synchronizeFollowerVideos();
+  }
+
+  setVideoTemporalOffset(videoLayer, temporalOffset) {
+    videoLayer.setTemporalOffset(videoLayer.linkMode === 'timestamp'
+      ? temporalOffset : Math.round(temporalOffset));
+    this.synchronizeFollowerVideos();
+  }
+
+  /** Close a video: destroy its engine, remove its offscreen host and its
+      layer. Closing the primary promotes the next remaining video (bottom of
+      the stack first) — annotation frame indices then mean THAT video's
+      frames, and the autosave key follows it. Not undoable: an engine cannot
+      be revived, only reloaded. */
+  closeVideoLayer(layerId) {
+    const videoLayer = this.videoLayers.find((layer) => layer.id === layerId);
+    if (!videoLayer) return;
+    const wasPrimary = videoLayer === this.primaryVideoLayer;
+    releaseVideoLoad(videoLayer);
+    videoLayer.engine.destroy();
+    videoLayer.hostElement.remove();
+    this.viewer.removeLayer(videoLayer);
+    if (this.activeLayerId === layerId) this.activeLayerId = null;
+    if (wasPrimary) {
+      const promotedLayer = this.videoLayers[0] ?? null;
+      this.primaryVideoLayer = promotedLayer;
+      // The promoted video stops being a follower, so its link settings no
+      // longer mean anything; reset them for if it is ever demoted again.
+      promotedLayer?.setLinkMode('frame-index', 0);
+      this.invalidateSeekTarget();
+    }
+    this.synchronizeFollowerVideos();
+    updateDropHint();
+    this.dispatchEvent(new CustomEvent('layers-changed'));
+    // The transport and panels re-read app.engine on these, whether it is now
+    // a promoted video's engine or null.
+    this.dispatchEvent(new CustomEvent('video-loaded'));
+    this.dispatchEvent(new CustomEvent('frame-changed'));
+    this.dispatchEvent(new CustomEvent('index-changed'));
+    this.viewer.requestRender();
   }
 
   /* ---------- Playback ---------- */
@@ -415,6 +532,9 @@ class Application extends EventTarget {
     if (!this.videoInformation) return;
     clearTimeout(this.#autosaveTimer);
     this.#autosaveTimer = setTimeout(() => {
+      // The primary video (whose name + size key the autosave) can be closed
+      // between scheduling and firing.
+      if (!this.videoInformation) return;
       saveAutosave(autosaveKey(this.videoInformation), this.annotationDocument, this.videoInformation);
     }, AUTOSAVE_DEBOUNCE_MILLISECONDS);
   }
@@ -456,8 +576,6 @@ window.exactVideoAnnotator = app;   // console access for debugging
 const stageCanvas = document.getElementById('stage-canvas');
 const stageContainer = document.getElementById('stage-container');
 const videoHost = document.getElementById('video-host');
-const videoEngineCanvas = document.getElementById('video-engine-canvas');
-const videoEngineElement = document.getElementById('video-engine-element');
 const dropHint = document.getElementById('drop-hint');
 const indexingStatus = document.getElementById('indexing-status');
 const hoveredPixelLabel = document.getElementById('hovered-pixel-label');
@@ -515,22 +633,44 @@ app.setActiveTool('pan');
 
 /* ---------- Video loading ---------- */
 
+/** Whether the drop hint invites a first video: shown only while none is open. */
+function updateDropHint() {
+  dropHint.classList.toggle('hidden', app.videoLayers.length > 0);
+}
+
+/** Each engine presents into its own canvas + <video> pair, held by a
+    per-video host <div> inside the offscreen #video-host container (the
+    engine sizes its canvas backing store from its parent, so each host gets
+    a real size — set by VideoLayer to the video's native resolution). */
+function createEngineHost() {
+  const hostElement = document.createElement('div');
+  hostElement.className = 'video-engine-host';
+  const engineCanvas = document.createElement('canvas');
+  const engineVideoElement = document.createElement('video');
+  engineVideoElement.muted = true;
+  engineVideoElement.playsInline = true;
+  hostElement.append(engineCanvas, engineVideoElement);
+  videoHost.appendChild(hostElement);
+  return { hostElement, engineCanvas, engineVideoElement };
+}
+
+/** Load a video as a NEW layer on top of any videos already open. The first
+    video loaded becomes the primary (drives the transport and the meaning of
+    annotation frame indices); later ones become followers seeked to match it.
+    Re-dropping a clip that is already open simply opens another layer of it —
+    two copies of one clip at different temporal offsets is a legitimate way
+    to compare moments. */
 async function loadVideoSource(source, { name, sizeBytes }) {
+  // Ties this load's indexing progress to its own status line, and lets a
+  // video closed mid-index silence the pass still reading its file
+  // (destroying an engine does not stop an index pass already underway).
+  const loadIdentifier = ++mostRecentLoadIdentifier;
+  activeLoadIdentifiers.add(loadIdentifier);
+  const { hostElement, engineCanvas, engineVideoElement } = createEngineHost();
   try {
-    if (app.engine) {
-      app.engine.destroy();
-      const oldVideoLayer = app.viewer.layers.find((layer) => layer.type === 'video');
-      if (oldVideoLayer) app.viewer.removeLayer(oldVideoLayer);
-      app.engine = null;
-    }
-    app.videoSource = source;
-    // Destroying an engine does not stop an index pass already reading the
-    // file, so a clip opened while another was still indexing would otherwise
-    // keep hearing the old pass's progress. Only the newest load may write.
-    const loadIdentifier = ++mostRecentLoadIdentifier;
-    showIndexingStatus({ fraction: 0, framesFound: 0, etaMs: 0 });
+    showIndexingStatus(loadIdentifier, name, { fraction: 0, framesFound: 0, etaMs: 0 });
     const engine = await createBestEngine(source, {
-      canvas: videoEngineCanvas, video: videoEngineElement,
+      canvas: engineCanvas, video: engineVideoElement,
       // We read and display exact source-pixel values for annotation, never a
       // smoothed approximation of them — the engine defaults to smoothing on
       // (right for a typical video player, wrong for us).
@@ -544,13 +684,17 @@ async function loadVideoSource(source, { name, sizeBytes }) {
       // engine README's "Playing while the index is still being built".
       playWhileIndexing: true,
       onProgress: (progress) => {
-        if (loadIdentifier === mostRecentLoadIdentifier) showIndexingStatus(progress);
+        if (activeLoadIdentifiers.has(loadIdentifier)) {
+          showIndexingStatus(loadIdentifier, name, progress);
+        }
       },
     });
-    attachEngine(engine, { name, sizeBytes });
+    attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier });
   } catch (error) {
-    hideIndexingStatus();
-    reportVideoLoadFailure(error);
+    activeLoadIdentifiers.delete(loadIdentifier);
+    clearIndexingStatus(loadIdentifier);
+    hostElement.remove();
+    reportVideoLoadFailure(error, { introduction: `Could not open ${name}:` });
   }
 }
 
@@ -581,8 +725,15 @@ function reportVideoLoadFailure(error, { introduction } = {}) {
 
 /* ---------- Indexing progress ---------- */
 
-// Counts loads so a superseded one can tell it is no longer the current video.
+// Numbers loads, so each video's indexing progress writes its own status line
+// and a video closed mid-index can silence the pass still reading its file.
 let mostRecentLoadIdentifier = 0;
+const activeLoadIdentifiers = new Set();
+
+// One status line per video whose index pass is still running, keyed by load
+// identifier — two clips indexing at once would otherwise fight over a single
+// line. Each is attributed to its video by name.
+const indexingStatusLines = new Map();
 
 function formatIndexingEta(milliseconds) {
   // etaMs is 0 at the very start and at the end, where it means "no estimate"
@@ -593,17 +744,34 @@ function formatIndexingEta(milliseconds) {
   return ` (~${Math.round(seconds / 60)} min left)`;
 }
 
-function showIndexingStatus(progress) {
+function showIndexingStatus(loadIdentifier, name, progress) {
+  let line = indexingStatusLines.get(loadIdentifier);
+  if (!line) {
+    line = document.createElement('div');
+    indexingStatusLines.set(loadIdentifier, line);
+    indexingStatus.appendChild(line);
+    indexingStatus.hidden = false;
+  }
   const percent = Math.round((progress.fraction ?? 0) * 100);
   const frames = progress.framesFound ?? 0;
-  indexingStatus.hidden = false;
-  indexingStatus.textContent =
-    `Indexing… ${percent}% · ${frames.toLocaleString()} frames so far${formatIndexingEta(progress.etaMs)}`;
+  line.textContent =
+    `${name}: indexing… ${percent}% · ${frames.toLocaleString()} frames so far${formatIndexingEta(progress.etaMs)}`;
 }
 
-function hideIndexingStatus() {
-  indexingStatus.hidden = true;
-  indexingStatus.textContent = '';
+function clearIndexingStatus(loadIdentifier) {
+  const line = indexingStatusLines.get(loadIdentifier);
+  if (!line) return;
+  indexingStatusLines.delete(loadIdentifier);
+  line.remove();
+  if (indexingStatusLines.size === 0) indexingStatus.hidden = true;
+}
+
+/** Forget a closed video's load: its indexing status line comes down and any
+    index pass still reading its file loses the right to write one. */
+function releaseVideoLoad(videoLayer) {
+  if (videoLayer.loadIdentifier === null) return;
+  activeLoadIdentifiers.delete(videoLayer.loadIdentifier);
+  clearIndexingStatus(videoLayer.loadIdentifier);
 }
 
 /** The video's facts as the engine currently knows them. While the index is
@@ -630,11 +798,18 @@ function videoInformationFromEngine(engine, { name, sizeBytes }) {
   };
 }
 
-function attachEngine(engine, { name, sizeBytes }) {
-  app.engine = engine;
-  app.videoInformation = videoInformationFromEngine(engine, { name, sizeBytes });
-  if (engine.frameIndexState !== 'growing') hideIndexingStatus();
+/** Whether this engine still speaks for this layer: the layer is still open
+    (in the viewer) and the engine has not been replaced by decode recovery.
+    Every listener wired by wireEngineEvents guards on it, since a destroyed
+    engine's index pass and throttled dispatches can outlive both. */
+function engineIsCurrent(videoLayer, engine) {
+  return videoLayer.engine === engine && app.viewer.layers.includes(videoLayer);
+}
 
+/** Wire one engine's index and error events to its video layer. Called for a
+    freshly loaded engine and again for a replacement engine after decode
+    recovery. */
+function wireEngineEvents(videoLayer, engine) {
   // The index publishes certified prefixes as it goes; each one moves the frame
   // count, the duration and the scrubber's geometry, so refresh the facts and
   // tell the panels. Publishes can arrive faster than a DOM rebuild is worth,
@@ -643,9 +818,8 @@ function attachEngine(engine, { name, sizeBytes }) {
   let lastIndexDispatchMilliseconds = 0;
   let pendingIndexDispatch = null;
   const refreshIndexFacts = ({ immediate }) => {
-    // A throttled dispatch can outlive the video it belongs to.
-    if (app.engine !== engine) return;
-    app.videoInformation = videoInformationFromEngine(engine, { name, sizeBytes });
+    if (!engineIsCurrent(videoLayer, engine)) return;
+    videoLayer.videoInformation = videoInformationFromEngine(engine, videoLayer.videoInformation);
     clearTimeout(pendingIndexDispatch);
     const sinceLast = performance.now() - lastIndexDispatchMilliseconds;
     if (!immediate && sinceLast < INDEX_EVENT_THROTTLE_MILLISECONDS) {
@@ -654,15 +828,18 @@ function attachEngine(engine, { name, sizeBytes }) {
       return;
     }
     lastIndexDispatchMilliseconds = performance.now();
+    // A follower pinned at the end of its growing index may be able to reach
+    // its target frame now that more of its clip is indexed.
+    if (videoLayer !== app.primaryVideoLayer) app.synchronizeFollowerVideos();
     app.dispatchEvent(new CustomEvent('index-changed'));
   };
 
   // Complete and truncated are both ends of the pass: nothing more is coming,
-  // so the progress badge goes away and the panels get the final numbers now
+  // so the progress line goes away and the panels get the final numbers now
   // rather than at the end of a throttle window.
   const settleIndex = () => {
-    if (app.engine !== engine) return;
-    hideIndexingStatus();
+    if (!engineIsCurrent(videoLayer, engine)) return;
+    clearIndexingStatus(videoLayer.loadIdentifier);
     refreshIndexFacts({ immediate: true });
   };
 
@@ -671,37 +848,65 @@ function attachEngine(engine, { name, sizeBytes }) {
   engine.addEventListener('indextruncated', settleIndex);
 
   engine.addEventListener('errormessage', (event) => {
+    if (!engineIsCurrent(videoLayer, engine)) return;
     const detail = event.detail ?? {};
     if (!detail.message) return;
+    const videoName = videoLayer.videoInformation?.name ?? videoLayer.name;
     // An index that stopped early is flagged fatal too, but it is not a dead
     // decoder: the frames already published stay exact and keep playing, and
     // rebuilding on the native tier would only re-scan the same container —
     // which that tier refuses a partial result from anyway. Say so and keep
     // the engine we have.
     if (detail.incomplete) {
-      app.showToast(detail.message, { kind: 'warning' });
+      app.showToast(`${videoName}: ${detail.message}`, { kind: 'warning' });
       return;
     }
-    if (detail.fatal) recoverFromFatalDecode();
-    else app.showToast(detail.message, { kind: 'warning' });
+    if (detail.fatal) recoverFromFatalDecode(videoLayer);
+    else app.showToast(`${videoName}: ${detail.message}`, { kind: 'warning' });
   });
+}
 
-  const videoLayer = new VideoLayer(engine, videoHost);
-  app.viewer.addLayer(videoLayer, 0);
+function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier }) {
+  const videoLayer = new VideoLayer(engine, hostElement, { name });
+  videoLayer.videoSource = source;
+  videoLayer.loadIdentifier = loadIdentifier;
+  videoLayer.videoInformation = videoInformationFromEngine(engine, { name, sizeBytes });
+  if (engine.frameIndexState !== 'growing') clearIndexingStatus(loadIdentifier);
 
-  dropHint.classList.add('hidden');
-  app.viewer.fitToContent();
+  // The new video stacks directly above the topmost video already open —
+  // videos sit together beneath the annotation layers — and the first one
+  // starts the stack at the bottom.
+  const videoLayerIndexes = app.viewer.layers
+    .map((layer, index) => (layer.type === 'video' ? index : -1))
+    .filter((index) => index !== -1);
+  const insertionIndex = videoLayerIndexes.length > 0
+    ? videoLayerIndexes[videoLayerIndexes.length - 1] + 1 : 0;
+  app.viewer.addLayer(videoLayer, insertionIndex);
+  wireEngineEvents(videoLayer, engine);
 
-  // Offer any autosaved annotations for this exact video (name + size).
-  const key = autosaveKey(app.videoInformation);
-  const autosaved = loadAutosave(key);
-  if (autosaved && autosaved.document.layers.some((layer) => layer.items.length > 0)) {
-    app.replaceDocument(autosaved.document);
-    app.showToast(`Restored autosaved annotations (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
+  const becomesPrimary = app.primaryVideoLayer === null;
+  if (becomesPrimary) {
+    app.primaryVideoLayer = videoLayer;
+    app.viewer.fitToContent();
+
+    // Offer any autosaved annotations for this exact video (name + size).
+    // Only the primary: the document is keyed to its timeline, and a follower
+    // arriving later must not replace annotations already in progress.
+    const key = autosaveKey(app.videoInformation);
+    const autosaved = loadAutosave(key);
+    if (autosaved && autosaved.document.layers.some((layer) => layer.items.length > 0)) {
+      app.replaceDocument(autosaved.document);
+      app.showToast(`Restored autosaved annotations (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
+    }
+  } else {
+    // A follower starts out on the frame matching the primary's playhead.
+    app.synchronizeFollowerVideos();
   }
+  updateDropHint();
 
   if (engine.frameIndexIsExact === false) {
-    app.showToast('This clip could not be indexed — frame numbers are approximate.', { kind: 'warning' });
+    app.showToast(`${name}: this clip could not be indexed — frame numbers are approximate.`,
+      { kind: 'warning' });
   }
 
   // A freshly loaded video starts out as the selected layer, so its tab
@@ -714,50 +919,73 @@ function attachEngine(engine, { name, sizeBytes }) {
 }
 
 /** WebKit can pass load-time checks then kill the decoder mid-stream (see the
-    engine README): rebuild on the native tier at the same playhead. */
-async function recoverFromFatalDecode() {
-  const frameBeforeFailure = app.currentFrame;
-  const information = app.videoInformation;
-  app.showToast('The video decoder failed mid-stream; switching to the fallback player…', { kind: 'warning' });
+    engine README): rebuild that one video on the native tier at the same
+    playhead, keeping the layer itself (id, tab, transform, link settings). */
+async function recoverFromFatalDecode(videoLayer) {
+  const frameBeforeFailure = videoLayer.engine.currentFrame;
+  const videoName = videoLayer.videoInformation?.name ?? videoLayer.name;
+  app.showToast(`${videoName}: the video decoder failed mid-stream; switching to the fallback player…`,
+    { kind: 'warning' });
   try {
-    app.engine.destroy();
-    const oldVideoLayer = app.viewer.layers.find((layer) => layer.type === 'video');
-    if (oldVideoLayer) app.viewer.removeLayer(oldVideoLayer);
-    const engine = await createBestEngine(app.videoSource, {
-      canvas: videoEngineCanvas, video: videoEngineElement, prefer: 'native',
+    videoLayer.engine.destroy();
+    const engine = await createBestEngine(videoLayer.videoSource, {
+      canvas: videoLayer.hostElement.querySelector('canvas'),
+      video: videoLayer.hostElement.querySelector('video'),
+      prefer: 'native',
       imageSmoothingEnabled: false,
     });
-    attachEngine(engine, information);
+    if (!app.viewer.layers.includes(videoLayer)) {   // closed while rebuilding
+      engine.destroy();
+      return;
+    }
+    videoLayer.replaceEngine(engine);
+    videoLayer.videoInformation = videoInformationFromEngine(engine, videoLayer.videoInformation);
+    wireEngineEvents(videoLayer, engine);
     engine.seekToFrame(frameBeforeFailure);
+    if (videoLayer === app.primaryVideoLayer) {
+      app.dispatchEvent(new CustomEvent('video-loaded'));
+      app.dispatchEvent(new CustomEvent('frame-changed'));
+      app.dispatchEvent(new CustomEvent('index-changed'));
+    }
   } catch (error) {
-    reportVideoLoadFailure(error, { introduction: 'The fallback player also failed.' });
+    reportVideoLoadFailure(error, { introduction: `${videoName}: the fallback player also failed.` });
   }
 }
 
 /* ---------- Animation loop ---------- */
 
 let lastReportedFrame = -1;
-let lastReportedPresentedFrame = -1;
-let lastReportedWaitingForIndex = false;
 let lastReportedSeekPending = false;
+let lastReportedPaused = true;
 
 function animationTick(now) {
   const engine = app.engine;
-  engine?.update(now);
+  for (const videoLayer of app.videoLayers) {
+    videoLayer.engine.update(now);
+    // The frame actually painted on screen can lag behind currentFrame: on the
+    // WebCodecs tier currentFrame lands the instant a seek is requested, before
+    // the target frame is necessarily decoded. Repaint off presentedFrame too,
+    // so a seek that stalls mid-decode — the primary's or a follower's still
+    // catching up — gets its canvas caught up once the stall clears, instead
+    // of sitting on the previous frame until some unrelated action (a pan, a
+    // hotkey) requests a render for its own reasons.
+    if (videoLayer.engine.presentedFrame !== videoLayer.lastReportedPresentedFrame) {
+      videoLayer.lastReportedPresentedFrame = videoLayer.engine.presentedFrame;
+      app.viewer.requestRender();
+    }
+    // Playback pinned at the last indexed frame is the one state nothing else
+    // announces: the frame stops changing, so 'frame-changed' goes quiet, and
+    // the engine is neither paused nor at the end of the clip. (Watched per
+    // engine: the transport chip reads the primary's flag off this event.)
+    if (!!videoLayer.engine.waitingForIndex !== !!videoLayer.lastReportedWaitingForIndex) {
+      videoLayer.lastReportedWaitingForIndex = !!videoLayer.engine.waitingForIndex;
+      app.dispatchEvent(new CustomEvent('index-changed'));
+    }
+  }
   if (engine) {
     if (engine.currentFrame !== lastReportedFrame) {
       lastReportedFrame = engine.currentFrame;
       app.dispatchEvent(new CustomEvent('frame-changed'));
-      app.viewer.requestRender();
-    }
-    // The frame actually painted on screen can lag behind currentFrame: on the
-    // WebCodecs tier currentFrame lands the instant a seek is requested, before
-    // the target frame is necessarily decoded. Repaint off presentedFrame too,
-    // so a seek that stalls mid-decode still gets its canvas caught up once the
-    // stall clears, instead of sitting on the previous frame until some
-    // unrelated action (a pan, a hotkey) requests a render for its own reasons.
-    if (engine.presentedFrame !== lastReportedPresentedFrame) {
-      lastReportedPresentedFrame = engine.presentedFrame;
       app.viewer.requestRender();
     }
     if (!engine.paused) app.invalidateSeekTarget();
@@ -765,12 +993,14 @@ function animationTick(now) {
       lastReportedSeekPending = app.isSeekPending;
       app.updateSeekPendingDisplay();
     }
-    // Playback pinned at the last indexed frame is the one state nothing else
-    // announces: the frame stops changing, so 'frame-changed' goes quiet, and
-    // the engine is neither paused nor at the end of the clip.
-    if (engine.waitingForIndex !== lastReportedWaitingForIndex) {
-      lastReportedWaitingForIndex = !!engine.waitingForIndex;
-      app.dispatchEvent(new CustomEvent('index-changed'));
+    // Playback that ends on its own — the playhead reaching the end of the
+    // clip — pauses the engine without anyone calling togglePlayback, so the
+    // pause would otherwise go unannounced (the play button would stay in its
+    // playing state, and follower videos would never take their catch-up
+    // seek). Announcing a pause twice is harmless; missing one is not.
+    if (engine.paused !== lastReportedPaused) {
+      lastReportedPaused = engine.paused;
+      app.dispatchEvent(new CustomEvent('playback-changed'));
     }
     if (!engine.paused) app.viewer.requestRender();
   }
@@ -781,10 +1011,24 @@ function animationTick(now) {
     hover: app.hover,
     document: app.annotationDocument,
     isSeekPendingDisplay: app.isSeekPendingDisplay,
+    primaryVideoLayer: app.primaryVideoLayer,
   });
   requestAnimationFrame(animationTick);
 }
 requestAnimationFrame(animationTick);
+
+/* ---------- Follower videos trail the primary's playhead ----------
+   On each discrete frame change while paused (a step, a scrub tick, a
+   table-row jump) and on every pause, each follower is seeked to its matching
+   frame. Continuous playback plays only the primary — synchronized
+   multi-engine playback drifts, and followers catching up on pause is exact. */
+
+app.addEventListener('frame-changed', () => {
+  if (app.engine?.paused) app.synchronizeFollowerVideos();
+});
+app.addEventListener('playback-changed', () => {
+  if (app.engine?.paused) app.synchronizeFollowerVideos();
+});
 
 /* ---------- Undo/redo buttons ---------- */
 
