@@ -550,8 +550,33 @@ async function loadVideoSource(source, { name, sizeBytes }) {
     attachEngine(engine, { name, sizeBytes });
   } catch (error) {
     hideIndexingStatus();
-    app.showToast(`Could not open the video: ${error.message ?? error}`, { kind: 'error' });
+    reportVideoLoadFailure(error);
   }
+}
+
+/** A load refusal arrives from the engine (v2.4+) as an UnplayableClipError: a
+    message composed to be shown to a person, plus structured fields — reason,
+    codec, nativeErrorMessage and friends — meant for the program and the
+    console, not the toast (see the engine README). The message explains itself
+    and runs a few sentences; for an undecodable codec it ends with the ffmpeg
+    re-encode command that fixes it. So it gets a sticky toast the user
+    dismisses when done reading, rather than one racing an eight-second timer.
+    Anything else thrown (including everything from pre-2.4 engines) still has
+    only a message never written for users, which keeps the old lead-in. */
+function reportVideoLoadFailure(error, { introduction } = {}) {
+  console.error('Video failed to load.', error);
+  if (error?.name !== 'UnplayableClipError') {
+    app.showToast(`${introduction ?? 'Could not open the video:'} ${error?.message ?? error}`,
+      { kind: 'error' });
+    return;
+  }
+  // The engine prefixes messages with the throwing function's name
+  // ("createBestEngine: this clip…") for console readers; a toast reads better
+  // without it, recapitalized.
+  const composedMessage = String(error.message).replace(/^\w+: /, '');
+  const displayMessage = composedMessage.charAt(0).toUpperCase() + composedMessage.slice(1);
+  app.showToast(introduction ? `${introduction} ${displayMessage}` : displayMessage,
+    { kind: 'error', sticky: true });
 }
 
 /* ---------- Indexing progress ---------- */
@@ -705,7 +730,7 @@ async function recoverFromFatalDecode() {
     attachEngine(engine, information);
     engine.seekToFrame(frameBeforeFailure);
   } catch (error) {
-    app.showToast(`Fallback player also failed: ${error.message ?? error}`, { kind: 'error' });
+    reportVideoLoadFailure(error, { introduction: 'The fallback player also failed.' });
   }
 }
 
