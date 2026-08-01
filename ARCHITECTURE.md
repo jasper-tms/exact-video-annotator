@@ -339,6 +339,14 @@ app.markDocumentChanged();           // dispatches 'document-changed' + autosave
 app.hover;                           // set by tools while hovering an existing
                                      // annotation; same shape as selection
 app.togglePlayback(); app.stepFrame(delta);
+app.startPlayback(); app.pausePlayback();      // unified play/pause: a single
+                                     // engine's own play()/pause(), or the
+                                     // app-driven synchronized loop when it applies
+app.isPlaying;                       // playhead advancing either way (read this,
+                                     // not engine.paused — a synced play leaves
+                                     // every engine's own paused flag true)
+app.isSyncedPlaying;                 // the synchronized loop is running
+app.shouldUseSyncedPlayback();       // >1 video and all on the WebCodecs tier
 app.annotationLayers;                // view layers of type coordinates/segmentation/frames
 app.setActiveLayer(layerId);
 app.addAnnotationLayer(type, { pluginId });  // undoable; returns the new view
@@ -626,12 +634,34 @@ its incoming video becomes the sole primary, so it stays at 100%.
     different frame rates.
   Switching modes converts the offset so the current alignment is preserved
   (`app.setVideoLinkMode`).
-- **Continuous playback plays only the primary** — synchronized multi-engine
-  playback drifts, and seek-following is exact for stepping and scrubbing,
-  which is how annotation actually happens. Followers catch up on every
-  discrete frame change while paused and on each pause (including the
-  playhead reaching the end of the clip, which the animation loop announces
-  as a `'playback-changed'` since the engine pauses itself silently).
+- **Continuous playback is synchronized across every video**, and stays
+  frame-exact rather than drifting. Instead of any engine playing on its own
+  clock (which would drift, since each engine keeps its own), the app owns one
+  master clock and, every animation tick, seeks *every* engine — the primary
+  included, never `engine.play()` — to the frame matching that clock, then
+  paints only once **all** of them have their target frame decoded (the
+  barrier). So every composite that reaches the canvas shows the correct frame
+  from every video at the same instant. This is only feasible because a
+  forward-by-one `seekToFrame` is cheap on the WebCodecs tier — it reuses the
+  warm decode pipeline and read-ahead cache rather than re-seeking — which the
+  engine's `sync-benchmark` test pins (four 1080p engines sustain real time
+  with ~1 tick per frame). The whole loop lives in `app.driveSyncedPlayback`,
+  driven from the animation tick while `app.isSyncedPlaying`; play/pause go
+  through `app.startPlayback`/`pausePlayback` so the transport is unchanged.
+  - When the decoders cannot quite keep up, a global preference
+    (`js/synced-playback-preference.js`, Settings ▸ "Multi-video playback")
+    decides what gives, both keeping every painted composite exact:
+    `'realtime'` (the default) holds the wall clock and skips frames from view;
+    `'every-frame'` advances only once every engine is ready, slowing below real
+    time. The pacing is captured at play start, so changing it mid-play takes
+    effect on the next play.
+  - Synchronized playback applies only with **more than one video, all on the
+    WebCodecs tier** (`app.shouldUseSyncedPlayback`). A single video, or any
+    follower on the native `<video>` tier (where a forward seek is a real,
+    non-cheap element seek), falls back to the primary playing on its own clock
+    with followers catching up on each discrete frame change while paused and on
+    each pause — including the playhead reaching the end of the clip, which the
+    animation loop announces as a `'playback-changed'`.
 
 Spatial alignment is the layer transform that every layer already has;
 per-video visibility and opacity likewise come free from the layer system.

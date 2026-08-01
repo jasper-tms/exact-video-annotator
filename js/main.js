@@ -12,6 +12,7 @@ import {
   createEmptyDocument, documentToJson, documentFromJson, newId,
   autosaveKey, saveAutosave, loadAutosave,
 } from './document.js';
+import { getSyncedPlaybackPacing } from './synced-playback-preference.js';
 import { panTool } from './tools/pan-tool.js';
 import { findPlugin } from './plugins/registry.js';
 import { refitSelectedItem } from './plugins/refit.js';
@@ -82,6 +83,17 @@ class Application extends EventTarget {
   #scrubDragActive = false;
   #seekPendingDisplayTimer = null;
   #isSeekPendingDisplay = false;
+  // Synchronized multi-video playback: with more than one video open, the app
+  // drives every engine from one master clock (never engine.play()) and only
+  // paints once all of them have their target frame. See startSyncedPlayback /
+  // driveSyncedPlayback and ARCHITECTURE.md's "Multiple videos" section. These
+  // are session-only, like the followers' own link settings.
+  isSyncedPlaying = false;
+  #syncedPacing = 'realtime';         // captured at play start from the preference
+  #syncedPlayStartWall = null;        // performance.now() at the first driven tick
+  #syncedPlayStartTime = null;        // primary time (seconds) at that first tick
+  #everyFrameTarget = 0;              // next frame to show in 'every-frame' pacing
+  #lastPaintedFrame = -1;             // primary frame of the last painted composite
 
   /* ---------- Coordinates ---------- */
 
@@ -334,19 +346,136 @@ class Application extends EventTarget {
     this.viewer.requestRender();
   }
 
+  /** True whenever the playhead is advancing, whether via a single engine's
+      own play() or the app-driven synchronized loop. The transport button and
+      every "pause first" caller read this rather than engine.paused, since a
+      synchronized play leaves each engine's own `paused` true throughout. */
+  get isPlaying() {
+    return this.isSyncedPlaying || (this.engine != null && !this.engine.paused);
+  }
+
+  /** Synchronized playback applies when more than one video is open and every
+      one is on the WebCodecs tier (where a forward-by-one seek is cheap, so the
+      master-clock loop stays smooth — proven by the engine's sync benchmark).
+      With a single video, or any follower on the native tier, playback stays
+      the primary's own play() and followers keep catching up on pause. */
+  shouldUseSyncedPlayback() {
+    return this.videoLayers.length > 1
+      && this.videoLayers.every((layer) => layer.engine.tier === 'webcodecs');
+  }
+
   togglePlayback() {
     if (!this.engine) return;
-    if (this.engine.paused) this.engine.play();
+    if (this.isPlaying) this.pausePlayback();
+    else this.startPlayback();
+  }
+
+  startPlayback() {
+    if (!this.engine || this.isPlaying) return;
+    if (this.shouldUseSyncedPlayback()) this.startSyncedPlayback();
+    else this.engine.play();
+    this.dispatchEvent(new CustomEvent('playback-changed'));
+  }
+
+  pausePlayback() {
+    if (!this.engine || !this.isPlaying) return;
+    if (this.isSyncedPlaying) this.stopSyncedPlayback();
     else this.engine.pause();
     this.dispatchEvent(new CustomEvent('playback-changed'));
   }
 
-  stepFrame(delta) {
-    if (!this.engine) return;
-    if (!this.engine.paused) {
-      this.engine.pause();
+  /** Begin driving every engine from one master clock. The clock's zero point
+      is fixed on the first driven tick (when a `now` timestamp is in hand), not
+      here, so the first frame is not charged the gap between this call and the
+      next animation frame. The pacing preference is captured now so it stays
+      consistent for the whole run even if the setting is changed mid-playback. */
+  startSyncedPlayback() {
+    if (this.isSyncedPlaying) return;
+    this.isSyncedPlaying = true;
+    this.#syncedPacing = getSyncedPlaybackPacing();
+    this.#syncedPlayStartWall = null;
+    this.#syncedPlayStartTime = null;
+    this.#everyFrameTarget = this.engine?.currentFrame ?? 0;
+    this.#lastPaintedFrame = -1;
+    // A synchronized play supersedes any pending discrete seek, exactly as a
+    // single engine's play() does (see invalidateSeekTarget).
+    this.invalidateSeekTarget();
+  }
+
+  stopSyncedPlayback() {
+    if (!this.isSyncedPlaying) return;
+    this.isSyncedPlaying = false;
+    this.#syncedPlayStartWall = null;
+    this.#syncedPlayStartTime = null;
+    // Settle the followers on the frame the primary stopped on, so a following
+    // step or scrub starts from a consistent composite.
+    this.synchronizeFollowerVideos();
+  }
+
+  /** One tick of synchronized playback, called from the animation loop while
+      `isSyncedPlaying`. Advances a master clock, seeks every engine (the primary
+      included — never engine.play()) to the frame matching that clock, and
+      paints only once EVERY engine has its target frame decoded (the barrier),
+      so every composite that reaches the canvas is frame-exact across all
+      videos. See ARCHITECTURE.md's "Multiple videos" section. */
+  driveSyncedPlayback(now) {
+    const primary = this.engine;
+    if (!primary) { this.stopSyncedPlayback(); return; }
+    const lastFrame = Math.max(0, (primary.numFrames ?? 1) - 1);
+
+    if (this.#syncedPlayStartWall === null) {
+      this.#syncedPlayStartWall = now;
+      this.#syncedPlayStartTime = primary.currentTime;
+    }
+
+    // The primary's target for this instant. 'every-frame' walks one frame per
+    // all-ready cycle (so nothing is ever skipped); 'realtime' maps elapsed
+    // wall-clock time through the primary's own frame↔time table.
+    let primaryTarget;
+    if (this.#syncedPacing === 'every-frame') {
+      primaryTarget = Math.min(lastFrame, this.#everyFrameTarget);
+    } else {
+      const masterTime = this.#syncedPlayStartTime + (now - this.#syncedPlayStartWall) / 1000;
+      primaryTarget = Math.min(lastFrame, primary.frameAtTime(masterTime));
+    }
+
+    // Aim every engine at its frame for this instant. Followers go through the
+    // same link settings that stepping and scrubbing use (followerTargetFrame
+    // reads the primary's currentTime/currentFrame, which the seek below sets).
+    primary.seekToFrame(primaryTarget);
+    for (const videoLayer of this.videoLayers) {
+      if (videoLayer === this.primaryVideoLayer) continue;
+      videoLayer.engine.seekToFrame(this.followerTargetFrame(videoLayer));
+    }
+
+    const targetFor = (videoLayer) => videoLayer === this.primaryVideoLayer
+      ? primaryTarget : this.followerTargetFrame(videoLayer);
+    const allReady = this.videoLayers.every(
+      (videoLayer) => videoLayer.engine.presentedFrame === targetFor(videoLayer));
+
+    if (allReady) {
+      if (primaryTarget !== this.#lastPaintedFrame) {
+        this.#lastPaintedFrame = primaryTarget;
+        this.dispatchEvent(new CustomEvent('frame-changed'));
+      }
+      this.viewer.requestRender();
+      if (this.#syncedPacing === 'every-frame') this.#everyFrameTarget = primaryTarget + 1;
+    }
+
+    // The clip ends when its last frame has been shown. ('every-frame' bumps
+    // its target past lastFrame only after painting it; 'realtime' clamps there.)
+    const reachedEnd = allReady && (this.#syncedPacing === 'every-frame'
+      ? this.#everyFrameTarget > lastFrame
+      : primaryTarget >= lastFrame);
+    if (reachedEnd) {
+      this.stopSyncedPlayback();
       this.dispatchEvent(new CustomEvent('playback-changed'));
     }
+  }
+
+  stepFrame(delta) {
+    if (!this.engine) return;
+    if (this.isPlaying) this.pausePlayback();
     this.seekToFrame(this.currentFrame + delta);
   }
 
@@ -1025,7 +1154,11 @@ function animationTick(now) {
     // hotkey) requests a render for its own reasons.
     if (videoLayer.engine.presentedFrame !== videoLayer.lastReportedPresentedFrame) {
       videoLayer.lastReportedPresentedFrame = videoLayer.engine.presentedFrame;
-      app.viewer.requestRender();
+      // During synchronized playback the composite must reach the canvas only
+      // once EVERY engine has its target frame; a single follower's seek landing
+      // must not paint a half-updated frame. driveSyncedPlayback owns that
+      // barrier-gated repaint, so suppress the per-engine one while it runs.
+      if (!app.isSyncedPlaying) app.viewer.requestRender();
     }
     // Playback pinned at the last indexed frame is the one state nothing else
     // announces: the frame stops changing, so 'frame-changed' goes quiet, and
@@ -1036,7 +1169,12 @@ function animationTick(now) {
       app.dispatchEvent(new CustomEvent('index-changed'));
     }
   }
-  if (engine) {
+  if (app.isSyncedPlaying) {
+    // The app-driven master clock owns seeking every engine, the barrier, the
+    // gated repaint, and the frame-changed/playback-changed it dispatches — so
+    // the single-engine bookkeeping below is skipped while it runs.
+    app.driveSyncedPlayback(now);
+  } else if (engine) {
     if (engine.currentFrame !== lastReportedFrame) {
       lastReportedFrame = engine.currentFrame;
       app.dispatchEvent(new CustomEvent('frame-changed'));
@@ -1074,14 +1212,17 @@ requestAnimationFrame(animationTick);
 /* ---------- Follower videos trail the primary's playhead ----------
    On each discrete frame change while paused (a step, a scrub tick, a
    table-row jump) and on every pause, each follower is seeked to its matching
-   frame. Continuous playback plays only the primary — synchronized
-   multi-engine playback drifts, and followers catching up on pause is exact. */
+   frame. Synchronized playback (more than one WebCodecs video) instead drives
+   every follower itself, tick by tick, from driveSyncedPlayback — so these
+   catch-up seeks stay out of its way while it runs. A single video, or a
+   follower on the native tier, still plays only the primary and the followers
+   catch up here on each discrete change and on pause. */
 
 app.addEventListener('frame-changed', () => {
-  if (app.engine?.paused) app.synchronizeFollowerVideos();
+  if (app.engine?.paused && !app.isSyncedPlaying) app.synchronizeFollowerVideos();
 });
 app.addEventListener('playback-changed', () => {
-  if (app.engine?.paused) app.synchronizeFollowerVideos();
+  if (app.engine?.paused && !app.isSyncedPlaying) app.synchronizeFollowerVideos();
 });
 
 /* ---------- Undo/redo buttons ---------- */

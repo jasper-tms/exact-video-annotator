@@ -61,9 +61,9 @@ export function initializeTransport(app, containerElement) {
   // every intermediate tick would be noise, not signal.
   scrubber.addEventListener('pointerdown', () => {
     app.setScrubDragActive(true);
-    if (app.engine && !app.engine.paused) {
+    if (app.isPlaying) {
       scrubbingWasPlaying = true;
-      app.engine.pause();
+      app.pausePlayback();
     }
   });
   scrubber.addEventListener('input', () => {
@@ -73,7 +73,7 @@ export function initializeTransport(app, containerElement) {
     app.setScrubDragActive(false);
     if (scrubbingWasPlaying) {
       scrubbingWasPlaying = false;
-      app.engine?.play();
+      app.startPlayback();
       updateControls();
     }
   });
@@ -233,7 +233,9 @@ export function initializeTransport(app, containerElement) {
       control.disabled = !hasVideo;
     }
     if (!hasVideo) return;
-    playButton.classList.toggle('is-playing', !engine.paused);
+    // isPlaying, not engine.paused: a synchronized play advances the videos
+    // while every engine's own paused flag stays true (see app.isPlaying).
+    playButton.classList.toggle('is-playing', app.isPlaying);
     updateIndexDisplays();
   }
 

@@ -6,6 +6,7 @@
 
 import { isPixelGridEnabled, setPixelGridEnabled } from '../pixel-grid.js';
 import { getSecondVideoBehavior, setSecondVideoBehavior } from '../second-video-preference.js';
+import { getSyncedPlaybackPacing, setSyncedPlaybackPacing } from '../synced-playback-preference.js';
 
 export function initializeSettingsModal(app, triggerButtonElement) {
   const dialogElement = document.createElement('dialog');
@@ -94,6 +95,32 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   triggerButtonElement.addEventListener('click', () => {
     secondVideoSelect.value = getSecondVideoBehavior();
   });
+
+  /* ---- Synchronized playback pacing ---- */
+
+  const syncedPlaybackRow = document.createElement('div');
+  syncedPlaybackRow.className = 'settings-row';
+  const syncedPlaybackLabel = document.createElement('label');
+  syncedPlaybackLabel.htmlFor = 'synced-playback-select';
+  syncedPlaybackLabel.textContent = 'Multi-video playback:';
+  const syncedPlaybackSelect = document.createElement('select');
+  syncedPlaybackSelect.id = 'synced-playback-select';
+  syncedPlaybackSelect.title =
+    'When several videos play in sync and the decoders cannot quite keep up, '
+    + 'whether to skip frames to hold real-time speed or slow down to show every frame';
+  for (const [value, text] of [
+    ['realtime', 'Keep real-time speed'], ['every-frame', 'Show every frame']]) {
+    const optionElement = document.createElement('option');
+    optionElement.value = value;
+    optionElement.textContent = text;
+    syncedPlaybackSelect.appendChild(optionElement);
+  }
+  syncedPlaybackSelect.value = getSyncedPlaybackPacing();
+  syncedPlaybackSelect.addEventListener('change', () => {
+    setSyncedPlaybackPacing(syncedPlaybackSelect.value);
+  });
+  syncedPlaybackRow.append(syncedPlaybackLabel, syncedPlaybackSelect);
+  dialogElement.appendChild(syncedPlaybackRow);
 
   /* ---- Pixel grid visibility ---- */
 
