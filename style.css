@@ -164,6 +164,42 @@ button:focus:not(:focus-visible) { outline: none; }
   margin-left: auto;
 }
 
+/* ---------- Second-video prompt ---------- */
+
+.second-video-question {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.second-video-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.second-video-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.second-video-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.second-video-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ---------- First screenful: tool rail + canvas + transport + tabs ---------- */
 
 #viewport-section {

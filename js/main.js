@@ -26,6 +26,8 @@ import { initializeAnnotationsTable } from './ui/annotations-table.js';
 import { initializeClassManager } from './ui/class-manager.js';
 import { initializeToasts } from './ui/toasts.js';
 import { initializeSettingsModal } from './ui/settings-modal.js';
+import { getSecondVideoBehavior, setSecondVideoBehavior } from './second-video-preference.js';
+import { promptForSecondVideoChoice } from './ui/second-video-prompt.js';
 import { drawPixelGrid } from './pixel-grid.js';
 
 const ANNOTATION_LAYER_CONSTRUCTORS = {
@@ -660,7 +662,7 @@ function createEngineHost() {
     Re-dropping a clip that is already open simply opens another layer of it —
     two copies of one clip at different temporal offsets is a legitimate way
     to compare moments. */
-async function loadVideoSource(source, { name, sizeBytes }) {
+async function loadVideoSource(source, { name, sizeBytes, replaceVideoLayer = null }) {
   // Ties this load's indexing progress to its own status line, and lets a
   // video closed mid-index silence the pass still reading its file
   // (destroying an engine does not stop an index pass already underway).
@@ -689,13 +691,38 @@ async function loadVideoSource(source, { name, sizeBytes }) {
         }
       },
     });
-    attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier });
+    attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier, replaceVideoLayer });
   } catch (error) {
     activeLoadIdentifiers.delete(loadIdentifier);
     clearIndexingStatus(loadIdentifier);
     hostElement.remove();
     reportVideoLoadFailure(error, { introduction: `Could not open ${name}:` });
   }
+}
+
+/** Decide how a video the user just dropped or opened should join the
+    workspace, then load it. With no video open it is simply the first video.
+    With two or more already open, a new video always makes a new layer — there
+    is no single video to replace. With exactly one open, the "Second video"
+    setting decides: 'new-layer' (stack it), 'replace' (swap out that one
+    video), or 'prompt' (ask each time, offering to remember the answer). A
+    canceled prompt loads nothing. */
+async function loadVideoIntoWorkspace(source, meta) {
+  const openVideoLayers = app.videoLayers;
+  if (openVideoLayers.length !== 1) {
+    loadVideoSource(source, meta);
+    return;
+  }
+  let behavior = getSecondVideoBehavior();
+  if (behavior === 'prompt') {
+    const answer = await promptForSecondVideoChoice();
+    if (!answer) return;
+    behavior = answer.choice;
+    if (answer.save) setSecondVideoBehavior(behavior);
+  }
+  loadVideoSource(source, behavior === 'replace'
+    ? { ...meta, replaceVideoLayer: openVideoLayers[0] }
+    : meta);
 }
 
 /** A load refusal arrives from the engine (v2.4+) as an UnplayableClipError: a
@@ -866,7 +893,7 @@ function wireEngineEvents(videoLayer, engine) {
   });
 }
 
-function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier }) {
+function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier, replaceVideoLayer = null }) {
   const videoLayer = new VideoLayer(engine, hostElement, { name });
   videoLayer.videoSource = source;
   videoLayer.loadIdentifier = loadIdentifier;
@@ -899,6 +926,19 @@ function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdenti
       app.showToast(`Restored autosaved annotations (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
     }
   } else {
+    // A new video stacked over one or more already open — a genuine "new
+    // layer", not the transient follower a replace stages (that one is about
+    // to become the sole primary, so its opacity is left alone). Dim it to 50%
+    // so the videos beneath show through it, and the first time a second video
+    // joins, drop the primary from a full 100% to 50% too so neither wholly
+    // hides the other. A primary the user has already dialed to some other
+    // opacity is left as they set it; a third-or-later video only dims itself.
+    if (!replaceVideoLayer) {
+      videoLayer.setOpacity(0.5);
+      if (app.videoLayers.length === 2 && app.primaryVideoLayer.opacity === 1) {
+        app.primaryVideoLayer.setOpacity(0.5);
+      }
+    }
     // A follower starts out on the frame matching the primary's playhead.
     app.synchronizeFollowerVideos();
   }
@@ -916,6 +956,20 @@ function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdenti
 
   app.dispatchEvent(new CustomEvent('video-loaded'));
   app.dispatchEvent(new CustomEvent('frame-changed'));
+
+  // "Replace" was chosen: the new video arrived as a follower stacked above the
+  // one it replaces (becomesPrimary was false while that one was still open, so
+  // the current annotations were deliberately left untouched — no autosave
+  // restore ran). Closing the replaced video now promotes this one to primary
+  // (see closeVideoLayer) and refits the view to it. Done last, and only after
+  // loadVideoSource has certified the new engine, so a failed load never tears
+  // down the existing video.
+  if (replaceVideoLayer && replaceVideoLayer !== videoLayer
+      && app.videoLayers.includes(replaceVideoLayer)) {
+    app.closeVideoLayer(replaceVideoLayer.id);
+    app.setActiveLayer(videoLayer.id);
+    app.viewer.fitToContent();
+  }
 }
 
 /** WebKit can pass load-time checks then kill the decoder mid-stream (see the
@@ -1231,7 +1285,7 @@ const videoFileInput = document.getElementById('video-file-input');
 document.getElementById('open-video-button').addEventListener('click', () => videoFileInput.click());
 videoFileInput.addEventListener('change', () => {
   const file = videoFileInput.files?.[0];
-  if (file) loadVideoSource(file, { name: file.name, sizeBytes: file.size });
+  if (file) loadVideoIntoWorkspace(file, { name: file.name, sizeBytes: file.size });
   videoFileInput.value = '';
 });
 
@@ -1282,7 +1336,7 @@ stageContainer.addEventListener('drop', async (event) => {
   const file = event.dataTransfer?.files?.[0];
   if (!file) return;
   if (file.name.toLowerCase().endsWith('.json')) await importAnnotationsFile(file);
-  else loadVideoSource(file, { name: file.name, sizeBytes: file.size });
+  else loadVideoIntoWorkspace(file, { name: file.name, sizeBytes: file.size });
 });
 
 /* ---------- Buttons: no lingering focus ring after a mouse click ----------

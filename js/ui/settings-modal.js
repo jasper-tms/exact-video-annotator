@@ -5,6 +5,7 @@
 // Built once, as a native <dialog>, and reused for every open.
 
 import { isPixelGridEnabled, setPixelGridEnabled } from '../pixel-grid.js';
+import { getSecondVideoBehavior, setSecondVideoBehavior } from '../second-video-preference.js';
 
 export function initializeSettingsModal(app, triggerButtonElement) {
   const dialogElement = document.createElement('dialog');
@@ -63,6 +64,36 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   app.addEventListener('document-changed', reflectIntegerCoordinateSelect);
   app.addEventListener('layers-changed', reflectIntegerCoordinateSelect);
   reflectIntegerCoordinateSelect();
+
+  /* ---- Second video behavior ---- */
+
+  const secondVideoRow = document.createElement('div');
+  secondVideoRow.className = 'settings-row';
+  const secondVideoLabel = document.createElement('label');
+  secondVideoLabel.htmlFor = 'second-video-select';
+  secondVideoLabel.textContent = 'Second video:';
+  const secondVideoSelect = document.createElement('select');
+  secondVideoSelect.id = 'second-video-select';
+  secondVideoSelect.title =
+    'What to do when a second video is loaded while one is already open';
+  for (const [value, text] of [['prompt', 'Prompt'], ['replace', 'Replace'], ['new-layer', 'New layer']]) {
+    const optionElement = document.createElement('option');
+    optionElement.value = value;
+    optionElement.textContent = text;
+    secondVideoSelect.appendChild(optionElement);
+  }
+  secondVideoSelect.value = getSecondVideoBehavior();
+  secondVideoSelect.addEventListener('change', () => {
+    setSecondVideoBehavior(secondVideoSelect.value);
+  });
+  secondVideoRow.append(secondVideoLabel, secondVideoSelect);
+  dialogElement.appendChild(secondVideoRow);
+
+  // The prompt dialog can persist a fresh choice while this modal is closed;
+  // re-read it each time Settings opens so the select is never stale.
+  triggerButtonElement.addEventListener('click', () => {
+    secondVideoSelect.value = getSecondVideoBehavior();
+  });
 
   /* ---- Pixel grid visibility ---- */
 

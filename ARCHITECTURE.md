@@ -581,11 +581,30 @@ native tier would only re-scan the same container, so that case only warns.
 
 ### Multiple videos: one primary, seek-following followers
 
-Loading a video never replaces one already open: it becomes a new video layer
-stacked directly above the topmost video (videos sit together beneath the
-annotation layers). Re-dropping an already-open clip opens another layer of it
-— two copies at different temporal offsets is a legitimate way to compare
-moments of one clip.
+A newly dropped or opened video (`loadVideoIntoWorkspace`) usually becomes a
+new video layer stacked directly above the topmost video (videos sit together
+beneath the annotation layers). Re-dropping an already-open clip opens another
+layer of it — two copies at different temporal offsets is a legitimate way to
+compare moments of one clip.
+
+The exception is the **"Second video" setting** (Settings modal, a global
+`localStorage` preference — `js/second-video-preference.js`), which governs the
+one case where a single video is already open and another is loaded: `'prompt'`
+(default) asks each time via a small dialog (`js/ui/second-video-prompt.js`,
+with an optional "save my choice"), `'replace'` swaps out the current video,
+and `'new-layer'` stacks it. With no video open the drop is simply the first
+video; with two or more already open it always makes a new layer, regardless of
+the setting (there is no single video to replace). Replace loads the new clip as
+a follower, then closes the video it replaces — which promotes the newcomer to
+primary (`app.closeVideoLayer`) and refits the view. The annotation document is
+left untouched by a replace: its frame indices now describe the new video's
+frames, matching how promoting a video on close already behaves.
+
+A video added as a **new layer** loads at 50% opacity so the videos beneath
+show through it, and the first time a second video joins, the primary drops
+from a full 100% to 50% too (a primary already at some other opacity is left as
+the user set it; a third-or-later video only dims itself). Replace skips this —
+its incoming video becomes the sole primary, so it stays at 100%.
 
 - **One video is the primary** (`app.primaryVideoLayer`): the first one
   loaded. Its engine drives the transport bar, `app.currentFrame`,
