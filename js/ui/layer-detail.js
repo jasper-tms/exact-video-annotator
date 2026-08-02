@@ -155,8 +155,8 @@ export function initializeLayerDetail(app, containerElement) {
         modeLabel.className = 'layer-detail-transform-field';
         const modeSelect = document.createElement('select');
         for (const [value, text] of [
-          ['frame-index', 'frame index'],
           ['timestamp', 'timestamp'],
+          ['frame-index', 'frame index'],
         ]) {
           const option = document.createElement('option');
           option.value = value;
@@ -165,12 +165,12 @@ export function initializeLayerDetail(app, containerElement) {
         }
         modeSelect.value = layer.linkMode;
         modeSelect.title = 'How this video follows the primary.\n'
+          + 'Timestamp (the default): equal playback times correspond (plus the offset, '
+          + "in seconds), through this clip's own frame↔time table — right for independent "
+          + 'recordings at different frame rates.\n'
           + 'Frame index: equal frame numbers correspond (plus the offset, in frames) — '
           + 'right for trigger-synchronized cameras and processed renditions of the same clip.\n'
-          + 'Timestamp: equal playback times correspond (plus the offset, in seconds), through '
-          + "this clip's own frame↔time table — right for independent recordings at "
-          + 'different frame rates.\n'
-          + 'Switching converts the offset so the current alignment is kept.';
+          + 'Switching keeps the offset already in the box.';
         modeSelect.addEventListener('change', () => app.setVideoLinkMode(layer, modeSelect.value));
         modeLabel.append('follow the primary by ', modeSelect);
         linkRow.appendChild(modeLabel);

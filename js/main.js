@@ -92,7 +92,6 @@ class Application extends EventTarget {
   #syncedPacing = 'realtime';         // captured at play start from the preference
   #syncedPlayStartWall = null;        // performance.now() at the first driven tick
   #syncedPlayStartTime = null;        // primary time (seconds) at that first tick
-  #everyFrameTarget = 0;              // next frame to show in 'every-frame' pacing
   #lastPaintedFrame = -1;             // primary frame of the last painted composite
 
   /* ---------- Coordinates ---------- */
@@ -148,30 +147,85 @@ class Application extends EventTarget {
 
   /** The frame a follower video should be sitting on right now, per its link
       settings. 'frame-index' pairs equal frame numbers (plus an offset in
-      frames); 'timestamp' pairs equal presentation times (plus an offset in
-      seconds), through the follower's own frame↔time table — never an assumed
+      frames); 'timestamp' pairs the NEAREST presentation times (plus an offset
+      in seconds), through the follower's own frame↔time table — never an assumed
       frame rate. Clamped to the follower's indexed range, which while its
       index is still growing is a floor that rises.
 
-      The snap below exists because a timestamp offset routinely points at an
-      EXACT frame boundary: both playheads sit on frame start times, so the
-      offset a mode switch converts (follower start − primary start) lands the
-      lookup right on the follower frame's own start, where "largest frame at
-      or below t" would read one rounding error — a ten-thousandth of the gap
-      — as the PREVIOUS frame. Nudging by a tolerance far below any real
-      frame duration is immune to that; the engine's own frameOfPresentedTime
-      does the same, for the same reason. */
-  static #FOLLOWER_TIMESTAMP_SNAP_SECONDS = 1e-4;
+      Nearest, not "largest frame at or below t": the engine's `frameAtTime` is a
+      floor, and flooring a timestamp correspondence is not stable across a
+      primary swap. When two clips' frame boundaries don't line up, following A
+      from B lands on B's frame at or before A's time, so an A→B→A swap floors on
+      each leg and walks one frame backward every round trip. Shifting the lookup
+      by half a frame turns the floor into round-to-nearest, which round-trips
+      exactly (and also lands an exact frame boundary on its own frame, the float-
+      error case the old ten-thousandth-of-a-frame snap guarded by hand). */
+  #followerHalfFrame(engine) {
+    return engine.numFrames > 0 ? engine.duration / engine.numFrames / 2 : 0;
+  }
 
   followerTargetFrame(videoLayer) {
     const primaryEngine = this.engine;
     const followerEngine = videoLayer.engine;
     const targetFrame = videoLayer.linkMode === 'timestamp'
       ? followerEngine.frameAtTime(primaryEngine.currentTime + videoLayer.temporalOffset
-        + Application.#FOLLOWER_TIMESTAMP_SNAP_SECONDS)
+        + this.#followerHalfFrame(followerEngine))
       : primaryEngine.currentFrame + Math.round(videoLayer.temporalOffset);
     const lastFrame = Math.max(0, (followerEngine.numFrames ?? 1) - 1);
     return Math.min(lastFrame, Math.max(0, targetFrame));
+  }
+
+  /** Put one follower on the frame matching the primary right now, per its link
+      settings, and return the frame it was aimed at — or -1 when the primary's
+      position falls outside this follower's own content, where it has no frame.
+      There it is marked `inVoid` (VideoLayer.draw then paints only a grey
+      placement outline) and -1 is returned, which the synchronized-playback
+      barrier treats as ready-with-nothing-to-decode.
+
+      A follower is out of content three ways, all "no frame here":
+      - Past its last frame — the shared timeline runs beyond this shorter
+        video's duration. A composition fact the app owns: the engine has no
+        past-the-end, clamping currentTime to [0, duration], so this is caught
+        by time before touching the engine.
+      - Before its first frame — a negative-enough offset. Caught by time too.
+      - Inside a leading empty edit's void — a real region of the media the
+        engine knows. frameAtTime clamps up into it and cannot reveal it, so
+        probe: set the playhead to the raw target time and read currentFrame,
+        which is -1 there. (In frame-index mode there is no such void, only the
+        two out-of-range ends.)
+
+      Within content it seeks to the exact matching frame — the nearest frame,
+      via followerTargetFrame's half-frame rounding — rather than leaving the
+      playhead on the raw time. */
+  applyFollowerTarget(videoLayer) {
+    const followerEngine = videoLayer.engine;
+    const lastFrame = Math.max(0, (followerEngine.numFrames ?? 1) - 1);
+    let inVoid;
+    if (videoLayer.linkMode === 'timestamp') {
+      const targetTime = this.engine.currentTime + videoLayer.temporalOffset;
+      // The void's edges get the same half-frame tolerance followerTargetFrame
+      // rounds by: a target within half a frame of the first (or past the last)
+      // frame rounds to that frame instead of flipping to the void. Two clips
+      // whose frame boundaries don't line up otherwise show the void over a
+      // fraction of a frame — an overlay's frame at 2.9996 s against a clip whose
+      // first frame is at 3.000 s reads 0.4 ms "before the first frame" and,
+      // without the tolerance, draws the void there. Beyond half a frame it is a
+      // genuine gap.
+      const halfFrame = this.#followerHalfFrame(followerEngine);
+      inVoid = targetTime < -halfFrame || targetTime >= followerEngine.duration + halfFrame;
+      if (!inVoid) {
+        followerEngine.currentTime = targetTime + halfFrame;
+        inVoid = followerEngine.currentFrame === -1;
+      }
+    } else {
+      const rawFrame = this.engine.currentFrame + Math.round(videoLayer.temporalOffset);
+      inVoid = rawFrame < 0 || rawFrame > lastFrame;
+    }
+    videoLayer.inVoid = inVoid;
+    if (inVoid) return -1;
+    const targetFrame = this.followerTargetFrame(videoLayer);
+    followerEngine.seekToFrame(targetFrame);
+    return targetFrame;
   }
 
   /** Seek every follower video to its frame matching the primary's. Called on
@@ -183,27 +237,29 @@ class Application extends EventTarget {
     if (!this.primaryVideoLayer) return;
     for (const videoLayer of this.videoLayers) {
       if (videoLayer === this.primaryVideoLayer) continue;
-      const targetFrame = this.followerTargetFrame(videoLayer);
-      if (videoLayer.engine.currentFrame !== targetFrame) {
-        videoLayer.engine.seekToFrame(targetFrame);
+      const beforeFrame = videoLayer.engine.currentFrame;
+      const beforeVoid = videoLayer.inVoid;
+      this.applyFollowerTarget(videoLayer);
+      // The picture changes both when the frame moves and when the follower
+      // crosses into or out of a void (past-the-end leaves currentFrame put but
+      // swaps the picture for the outline), so a repaint keys off either.
+      if (videoLayer.engine.currentFrame !== beforeFrame || videoLayer.inVoid !== beforeVoid) {
         this.viewer.requestRender();
       }
     }
   }
 
-  /** Switch a follower's link mode, converting its offset so the CURRENT
-      correspondence is preserved (the follower does not jump; only how the
-      link behaves as the primary moves away from here changes). */
+  /** Switch a follower's link mode, keeping whatever offset is already in the
+      box — 0 unless the user has typed one this session. It deliberately does
+      NOT compute an alignment-preserving offset: injecting a number into the
+      box on a mode toggle was surprising, and the common case aligns the two
+      videos at offset 0 anyway. The only adjustment is the unit's integer
+      constraint: a frame offset must be whole, so a fractional value carried
+      over from timestamp mode is rounded. */
   setVideoLinkMode(videoLayer, linkMode) {
     if (linkMode === videoLayer.linkMode) return;
-    let temporalOffset = 0;
-    if (this.engine && videoLayer !== this.primaryVideoLayer) {
-      temporalOffset = linkMode === 'timestamp'
-        // Trimmed to 0.1 millisecond — far below any real frame duration —
-        // so the panel shows a readable number rather than float debris.
-        ? Number((videoLayer.engine.currentTime - this.engine.currentTime).toFixed(4))
-        : videoLayer.engine.currentFrame - this.engine.currentFrame;
-    }
+    const temporalOffset = linkMode === 'timestamp'
+      ? videoLayer.temporalOffset : Math.round(videoLayer.temporalOffset);
     videoLayer.setLinkMode(linkMode, temporalOffset);
     this.synchronizeFollowerVideos();
   }
@@ -232,8 +288,9 @@ class Application extends EventTarget {
       const promotedLayer = this.videoLayers[0] ?? null;
       this.primaryVideoLayer = promotedLayer;
       // The promoted video stops being a follower, so its link settings no
-      // longer mean anything; reset them for if it is ever demoted again.
-      promotedLayer?.setLinkMode('frame-index', 0);
+      // longer mean anything; reset them to the default for if it is ever
+      // demoted back to a follower.
+      promotedLayer?.setLinkMode('timestamp', 0);
       this.invalidateSeekTarget();
     }
     this.synchronizeFollowerVideos();
@@ -241,6 +298,70 @@ class Application extends EventTarget {
     this.dispatchEvent(new CustomEvent('layers-changed'));
     // The transport and panels re-read app.engine on these, whether it is now
     // a promoted video's engine or null.
+    this.dispatchEvent(new CustomEvent('video-loaded'));
+    this.dispatchEvent(new CustomEvent('frame-changed'));
+    this.dispatchEvent(new CustomEvent('index-changed'));
+    this.viewer.requestRender();
+  }
+
+  /** Re-evaluate which video owns the clock after a layer reorder: the leftmost
+      video layer (bottom of the stack, `videoLayers[0]`) is always the primary,
+      so dragging a video tab to the far left promotes it. Called after every
+      reorder; a no-op unless the leftmost video actually changed.
+
+      Promotion preserves alignment, changing nothing but link offsets. The old
+      primary, which had no follower offset, becomes a follower in the promoted
+      video's link mode with its offset NEGATED — the exact inverse relationship,
+      so the two videos' relative timing is unchanged. Any further followers have
+      the promoted video's offset subtracted out (same unit), or, if their mode
+      differs from the promoted video's, their offset re-derived from where they
+      currently sit — either way their alignment to the scene is preserved. The
+      promoted video's own link settings, meaningless while it is primary, reset
+      to the default. Annotations are untouched: their frame numbers now read
+      against the new primary, exactly as closing the old primary already does. */
+  reconcilePrimaryWithLayerOrder() {
+    const newPrimary = this.videoLayers[0] ?? null;
+    const oldPrimary = this.primaryVideoLayer;
+    if (!newPrimary || newPrimary === oldPrimary) return;
+
+    const promotedMode = newPrimary.linkMode;
+    const promotedOffset = newPrimary.temporalOffset;
+    // The promoted video stops being a follower, so it stops being a void: a
+    // primary always shows a real frame. If it was sitting outside its own frame
+    // range — a follower parked in its leading void (currentFrame -1) or past its
+    // end — snap its playhead onto the nearest real frame so the video now
+    // driving the timeline has a valid position. The offsets derived below then
+    // read this snapped position, and the closing requestRender repaints it.
+    newPrimary.inVoid = false;
+    const lastFrame = Math.max(0, (newPrimary.engine.numFrames ?? 1) - 1);
+    const primaryFrame = newPrimary.engine.currentFrame;
+    if (primaryFrame < 0 || primaryFrame > lastFrame) {
+      newPrimary.engine.seekToFrame(Math.min(lastFrame, Math.max(0, primaryFrame)));
+    }
+    for (const videoLayer of this.videoLayers) {
+      if (videoLayer === newPrimary) continue;
+      if (videoLayer === oldPrimary) {
+        videoLayer.setLinkMode(promotedMode, promotedMode === 'timestamp'
+          ? -promotedOffset : -Math.round(promotedOffset));
+      } else if (videoLayer.linkMode === promotedMode) {
+        videoLayer.setTemporalOffset(videoLayer.temporalOffset - promotedOffset);
+      } else {
+        videoLayer.setTemporalOffset(videoLayer.linkMode === 'timestamp'
+          ? Number((videoLayer.engine.currentTime - newPrimary.engine.currentTime).toFixed(4))
+          : videoLayer.engine.currentFrame - newPrimary.engine.currentFrame);
+      }
+    }
+    newPrimary.setLinkMode('timestamp', 0);
+    this.primaryVideoLayer = newPrimary;
+    this.invalidateSeekTarget();
+    // If this happened mid synchronized playback, the master clock was anchored
+    // on the old primary's time; drop the anchor so the next tick re-anchors on
+    // the new primary and playback carries on without a jump.
+    this.#syncedPlayStartWall = null;
+    this.#syncedPlayStartTime = null;
+    this.synchronizeFollowerVideos();
+    this.dispatchEvent(new CustomEvent('layers-changed'));
+    // The transport and panels re-read app.engine/videoInformation on these.
     this.dispatchEvent(new CustomEvent('video-loaded'));
     this.dispatchEvent(new CustomEvent('frame-changed'));
     this.dispatchEvent(new CustomEvent('index-changed'));
@@ -395,8 +516,9 @@ class Application extends EventTarget {
     this.#syncedPacing = getSyncedPlaybackPacing();
     this.#syncedPlayStartWall = null;
     this.#syncedPlayStartTime = null;
-    this.#everyFrameTarget = this.engine?.currentFrame ?? 0;
-    this.#lastPaintedFrame = -1;
+    // One before the starting frame, so 'every-frame' pacing (which advances at
+    // most one past the last painted) can reach the frame play began on.
+    this.#lastPaintedFrame = (this.engine?.currentFrame ?? 0) - 1;
     // A synchronized play supersedes any pending discrete seek, exactly as a
     // single engine's play() does (see invalidateSeekTarget).
     this.invalidateSeekTarget();
@@ -428,30 +550,40 @@ class Application extends EventTarget {
       this.#syncedPlayStartTime = primary.currentTime;
     }
 
-    // The primary's target for this instant. 'every-frame' walks one frame per
-    // all-ready cycle (so nothing is ever skipped); 'realtime' maps elapsed
-    // wall-clock time through the primary's own frame↔time table.
-    let primaryTarget;
-    if (this.#syncedPacing === 'every-frame') {
-      primaryTarget = Math.min(lastFrame, this.#everyFrameTarget);
-    } else {
-      const masterTime = this.#syncedPlayStartTime + (now - this.#syncedPlayStartWall) / 1000;
-      primaryTarget = Math.min(lastFrame, primary.frameAtTime(masterTime));
-    }
+    // The primary's target for this instant. Both pacings track the same master
+    // clock — elapsed wall-clock time mapped through the primary's own frame↔time
+    // table — so neither ever runs faster than real time. They differ only when
+    // the decoders cannot keep up: 'realtime' takes wherever the clock has
+    // reached, skipping the frames in between; 'every-frame' advances at most one
+    // frame past the last painted, so nothing is skipped and playback instead
+    // falls behind real time until the decoders recover. When they do keep up the
+    // two are identical — every frame, at real time.
+    const masterTime = this.#syncedPlayStartTime + (now - this.#syncedPlayStartWall) / 1000;
+    const realtimeFrame = Math.min(lastFrame, primary.frameAtTime(masterTime));
+    const primaryTarget = this.#syncedPacing === 'every-frame'
+      ? Math.min(realtimeFrame, this.#lastPaintedFrame + 1)
+      : realtimeFrame;
 
     // Aim every engine at its frame for this instant. Followers go through the
-    // same link settings that stepping and scrubbing use (followerTargetFrame
-    // reads the primary's currentTime/currentFrame, which the seek below sets).
+    // same link settings that stepping and scrubbing use (applyFollowerTarget
+    // reads the primary's currentTime/currentFrame, which the seek below sets),
+    // and a follower with no frame for this instant is aimed at -1 (a void),
+    // which the barrier below counts as ready with nothing to decode.
     primary.seekToFrame(primaryTarget);
+    const followerTargets = new Map();
     for (const videoLayer of this.videoLayers) {
       if (videoLayer === this.primaryVideoLayer) continue;
-      videoLayer.engine.seekToFrame(this.followerTargetFrame(videoLayer));
+      followerTargets.set(videoLayer, this.applyFollowerTarget(videoLayer));
     }
 
     const targetFor = (videoLayer) => videoLayer === this.primaryVideoLayer
-      ? primaryTarget : this.followerTargetFrame(videoLayer);
-    const allReady = this.videoLayers.every(
-      (videoLayer) => videoLayer.engine.presentedFrame === targetFor(videoLayer));
+      ? primaryTarget : followerTargets.get(videoLayer);
+    const allReady = this.videoLayers.every((videoLayer) => {
+      const target = targetFor(videoLayer);
+      // A void follower (-1) has no frame to decode — it is ready the instant it
+      // is aimed, and its outline is app-drawn, so it never gates the barrier.
+      return target === -1 || videoLayer.engine.presentedFrame === target;
+    });
 
     if (allReady) {
       if (primaryTarget !== this.#lastPaintedFrame) {
@@ -459,17 +591,21 @@ class Application extends EventTarget {
         this.dispatchEvent(new CustomEvent('frame-changed'));
       }
       this.viewer.requestRender();
-      if (this.#syncedPacing === 'every-frame') this.#everyFrameTarget = primaryTarget + 1;
     }
 
-    // The clip ends when its last frame has been shown. ('every-frame' bumps
-    // its target past lastFrame only after painting it; 'realtime' clamps there.)
-    const reachedEnd = allReady && (this.#syncedPacing === 'every-frame'
-      ? this.#everyFrameTarget > lastFrame
-      : primaryTarget >= lastFrame);
-    if (reachedEnd) {
-      this.stopSyncedPlayback();
-      this.dispatchEvent(new CustomEvent('playback-changed'));
+    // The clip ends once its last frame has been painted. In 'every-frame' the
+    // one-past-last-painted cap holds the target at lastFrame until it is shown,
+    // so this reads the same in both pacings.
+    if (allReady && primaryTarget >= lastFrame) {
+      // Loop back to the start rather than stopping, matching a single video's
+      // own playback (the engine's `loop` defaults on and wraps to frame 0).
+      // Re-anchor the master clock at frame 0 so the next tick restarts there;
+      // the primary is seeked there now so the re-anchor reads frame 0's time.
+      // #lastPaintedFrame stays at lastFrame; next tick's realtimeFrame is 0,
+      // which caps 'every-frame' back to 0, so the wrap shows frame 0 next.
+      primary.seekToFrame(0);
+      this.#syncedPlayStartWall = null;
+      this.#syncedPlayStartTime = null;
     }
   }
 
@@ -1057,15 +1193,15 @@ function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdenti
   } else {
     // A new video stacked over one or more already open — a genuine "new
     // layer", not the transient follower a replace stages (that one is about
-    // to become the sole primary, so its opacity is left alone). Dim it to 50%
+    // to become the sole primary, so its opacity is left alone). Dim it to 75%
     // so the videos beneath show through it, and the first time a second video
-    // joins, drop the primary from a full 100% to 50% too so neither wholly
+    // joins, drop the primary from a full 100% to 75% too so neither wholly
     // hides the other. A primary the user has already dialed to some other
     // opacity is left as they set it; a third-or-later video only dims itself.
     if (!replaceVideoLayer) {
-      videoLayer.setOpacity(0.5);
+      videoLayer.setOpacity(0.75);
       if (app.videoLayers.length === 2 && app.primaryVideoLayer.opacity === 1) {
-        app.primaryVideoLayer.setOpacity(0.5);
+        app.primaryVideoLayer.setOpacity(0.75);
       }
     }
     // A follower starts out on the frame matching the primary's playhead.

@@ -353,6 +353,9 @@ export function initializeLayerTabs(app, containerElement) {
     const newIndex = [...strip.querySelectorAll('.layer-tab')].indexOf(tabElement);
     app.viewer.moveLayerToIndex(layer, newIndex);
     app.synchronizeDocumentLayerOrder();
+    // The leftmost video owns the clock; a reorder that moves a different video
+    // to the front promotes it (a no-op otherwise).
+    app.reconcilePrimaryWithLayerOrder();
   }
   window.addEventListener('pointerup', endTabDrag);
   window.addEventListener('pointercancel', endTabDrag);

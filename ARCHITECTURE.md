@@ -608,32 +608,64 @@ primary (`app.closeVideoLayer`) and refits the view. The annotation document is
 left untouched by a replace: its frame indices now describe the new video's
 frames, matching how promoting a video on close already behaves.
 
-A video added as a **new layer** loads at 50% opacity so the videos beneath
+A video added as a **new layer** loads at 75% opacity so the videos beneath
 show through it, and the first time a second video joins, the primary drops
-from a full 100% to 50% too (a primary already at some other opacity is left as
+from a full 100% to 75% too (a primary already at some other opacity is left as
 the user set it; a third-or-later video only dims itself). Replace skips this —
 its incoming video becomes the sole primary, so it stays at 100%.
 
-- **One video is the primary** (`app.primaryVideoLayer`): the first one
-  loaded. Its engine drives the transport bar, `app.currentFrame`,
-  `renderState.frame`, annotation frame indices, and the autosave key —
-  `app.engine` is an alias for it, so everything that predates multiple
-  videos keeps meaning what it always meant. Closing the primary promotes
-  the next remaining video (bottom of the stack first); annotation frame
-  numbers then mean THAT video's frames.
+**Video layers paint in reverse stack order** (`viewer.renderIfNeeded`): the
+leftmost video tab — the primary — paints last among the videos, so it sits on
+*top* of the others rather than beneath them, and promoting a video (dragging it
+leftmost) brings it to the front. Only the videos reverse; every non-video layer
+keeps its position, so annotation layers still draw over all footage. This is
+the one place a layer's paint depth differs from its stack index — for videos
+alone, leftmost is topmost, the opposite of the leftmost-is-bottom rule the tabs
+otherwise follow.
+
+- **One video is the primary** (`app.primaryVideoLayer`): the **leftmost video
+  layer** (bottom of the stack, `videoLayers[0]`). Its engine drives the
+  transport bar, `app.currentFrame`, `renderState.frame`, annotation frame
+  indices, and the autosave key — `app.engine` is an alias for it, so
+  everything that predates multiple videos keeps meaning what it always meant.
+  Dragging a different video's tab to the far left promotes it
+  (`app.reconcilePrimaryWithLayerOrder`, called after every reorder), and
+  closing the primary promotes the next remaining video — either way annotation
+  frame numbers then mean THAT video's frames. A reorder promotion changes
+  nothing but link offsets: the old primary becomes a follower in the promoted
+  video's mode with its offset negated (the exact inverse, so relative timing
+  holds), and any further followers have the promoted offset subtracted out, so
+  every video's alignment is preserved across the switch.
 - **Other videos are followers**, seeked to the frame matching the primary
   per their link settings (`videoLayer.linkMode`, `videoLayer.temporalOffset`
   — session-only state, never written into the document):
-  - `'frame-index'` (the default): follower frame = primary frame + offset in
-    frames. Right when the files correspond frame for frame regardless of
-    what their timestamps claim — trigger-synchronized camera rigs, processed
-    renditions of the same clip.
-  - `'timestamp'`: follower frame = `frameAtTime(primary time + offset in
-    seconds)`, through the follower engine's own frame↔time table — never an
-    assumed frame rate. Right for independent recordings of the same scene at
-    different frame rates.
-  Switching modes converts the offset so the current alignment is preserved
-  (`app.setVideoLinkMode`).
+  - `'timestamp'` (the default): follower frame = `frameAtTime(primary time +
+    offset in seconds)`, through the follower engine's own frame↔time table —
+    never an assumed frame rate. Right for independent recordings of the same
+    scene at different frame rates.
+  - `'frame-index'`: follower frame = primary frame + offset in frames. Right
+    when the files correspond frame for frame regardless of what their
+    timestamps claim — trigger-synchronized camera rigs, processed renditions
+    of the same clip.
+  When the shared timeline asks a follower for a position it has no frame for —
+  **before its first frame**, **past its last**, or inside a **leading empty
+  edit's void** — the follower is marked `inVoid` and its layer paints no
+  picture, only a thin grey outline of where the video sits, so the videos
+  beneath show through while the follower's presence stays visible
+  (`app.applyFollowerTarget`, `VideoLayer.draw`). Past-the-end is a composition
+  fact the app owns (the engine has no past-the-end, clamping `currentTime` to
+  `[0, duration]`); a leading empty edit is one the engine knows, reporting
+  `currentFrame` −1, which the app probes by time since `frameAtTime` clamps up
+  into the void and cannot reveal it. So `inVoid`, set by the app, is the one
+  source of truth across all three, not the engine's −1 alone. The void's edges
+  carry a **half-frame tolerance** (half the follower's average frame duration):
+  a target within half a frame of the first or last frame rounds to that frame —
+  the same nearest-frame rounding a seek uses — rather than flipping to the void
+  over a fraction of a frame, which two clips whose frame boundaries don't line
+  up would otherwise do at every boundary crossing.
+  Switching modes keeps whatever offset is already in the box (0 unless the
+  user has typed one), rounding it to a whole frame for frame-index mode; it
+  does not compute an alignment-preserving offset (`app.setVideoLinkMode`).
 - **Continuous playback is synchronized across every video**, and stays
   frame-exact rather than drifting. Instead of any engine playing on its own
   clock (which would drift, since each engine keeps its own), the app owns one
@@ -648,13 +680,19 @@ its incoming video becomes the sole primary, so it stays at 100%.
   with ~1 tick per frame). The whole loop lives in `app.driveSyncedPlayback`,
   driven from the animation tick while `app.isSyncedPlaying`; play/pause go
   through `app.startPlayback`/`pausePlayback` so the transport is unchanged.
-  - When the decoders cannot quite keep up, a global preference
-    (`js/synced-playback-preference.js`, Settings ▸ "Multi-video playback")
-    decides what gives, both keeping every painted composite exact:
-    `'realtime'` (the default) holds the wall clock and skips frames from view;
-    `'every-frame'` advances only once every engine is ready, slowing below real
-    time. The pacing is captured at play start, so changing it mid-play takes
-    effect on the next play.
+  On reaching the last frame it loops back to frame 0 (re-anchoring the master
+  clock) rather than stopping, matching a single video, whose engine's `loop`
+  defaults on.
+  - Both pacings track the same real-time master clock, so neither ever runs
+    faster than real time — the setting only decides what gives **when the
+    decoders cannot keep up**, a global preference
+    (`js/synced-playback-preference.js`, Settings ▸ "Multi-video playback"),
+    both keeping every painted composite exact. `'realtime'` (the default) takes
+    wherever the clock has reached and skips the frames in between; `'every-frame'`
+    caps its target at one past the last painted, so nothing is skipped and
+    playback instead falls behind real time until the decoders recover. When they
+    do keep up the two are identical: every frame, at real time. The pacing is
+    captured at play start, so changing it mid-play takes effect on the next play.
   - Synchronized playback applies only with **more than one video, all on the
     WebCodecs tier** (`app.shouldUseSyncedPlayback`). A single video, or any
     follower on the native `<video>` tier (where a forward seek is a real,

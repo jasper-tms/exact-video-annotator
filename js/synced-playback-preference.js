@@ -1,11 +1,13 @@
 // How synchronized multi-video playback should behave when the decoders cannot
-// quite keep up with real time. Every painted composite is frame-exact either
-// way — this only decides what gives under load:
+// quite keep up with real time. Both pacings track the same real-time clock, so
+// neither ever runs faster than real time, and every painted composite is
+// frame-exact either way — this only decides what gives under load:
 //   'realtime'    — keep the wall clock; if an engine is briefly behind, hold
 //                   the last exact composite and let the clock move on, so some
 //                   frames are skipped from view to stay at real-time speed.
-//   'every-frame' — never skip a frame; advance only once every engine has the
-//                   next frame, so playback slows below real time when it must.
+//   'every-frame' — never skip a frame; advance at most one frame past the last
+//                   painted, so playback slows below real time when it must and
+//                   catches every frame, but never gets ahead of real time.
 // A global preference, not per-document, so it lives in localStorage alongside
 // the other cross-application settings (see second-video-preference.js).
 

@@ -33,18 +33,30 @@ export class VideoLayer extends Layer {
     this.loadIdentifier = null;     // ties indexing progress and toasts to this video
 
     // How this video follows the primary when it is not the primary itself:
+    //   'timestamp'   (the default) — follower frame = frameAtTime(primary time
+    //     + temporalOffset (seconds)), through this engine's own frame↔time
+    //     table. Right for independent recordings of the same scene, even at
+    //     different frame rates — the common case, so it leads.
     //   'frame-index' — follower frame = primary frame + temporalOffset (frames).
     //     Right when the files correspond frame for frame regardless of what
     //     their timestamps claim (trigger-synchronized camera rigs, processed
     //     renditions of the same clip).
-    //   'timestamp'   — follower frame = frameAtTime(primary time + temporalOffset
-    //     (seconds)), through this engine's own frame↔time table. Right for
-    //     independent recordings of the same scene at different frame rates.
-    // temporalOffset's unit follows the mode; switching modes converts the
-    // value so the current correspondence is preserved (see
-    // app.setVideoLinkMode). Session-only: never written into the document.
-    this.linkMode = 'frame-index';
+    // temporalOffset's unit follows the mode. Switching modes keeps whatever
+    // value is in the box (0 unless the user has typed one) rather than
+    // computing an alignment-preserving offset — see app.setVideoLinkMode.
+    // Session-only: never written into the document.
+    this.linkMode = 'timestamp';
     this.temporalOffset = 0;
+
+    // Session-only render flag: true when the shared timeline is asking this
+    // follower for a position it has no frame for — before its first frame,
+    // past its last, or inside a leading empty edit's void. draw() then paints
+    // just a grey placement outline instead of a picture. Set by
+    // app.applyFollowerTarget; always false for the primary and a single video.
+    // Past-the-end has no engine sentinel (the engine clamps to [0, duration]),
+    // so this app-owned flag is the single source of truth, covering every
+    // out-of-content case uniformly rather than reading the engine's -1.
+    this.inVoid = false;
   }
 
   setLinkMode(linkMode, temporalOffset) {
@@ -70,6 +82,21 @@ export class VideoLayer extends Layer {
 
   draw(context, renderState) {
     const { engine } = this;
+    const integerCoordinateOffset = renderState.document?.integerCoordinateOffset ?? 0;
+    // No frame for this position — a follower before its first frame, past its
+    // last, or in a leading empty edit's void (see app.applyFollowerTarget).
+    // Show no picture (a native <video> would render the void black, which
+    // drawing would composite onto the stage), but trace a thin grey outline
+    // around where the video sits so it is clear the video is present, just
+    // without a frame at this time. Sizing the stroke by pixelsPerLocalUnit
+    // keeps it ~1 CSS pixel wide at any zoom.
+    if (this.inVoid) {
+      context.lineWidth = 1 / (renderState.pixelsPerLocalUnit || 1);
+      context.strokeStyle = 'rgba(140, 140, 140, 0.8)';
+      context.strokeRect(-integerCoordinateOffset, -integerCoordinateOffset,
+        engine.videoWidth, engine.videoHeight);
+      return;
+    }
     const element = engine.displayElement;
     if (!element) return;
     // Draw the element's full content into the upright pixel rectangle.
@@ -97,8 +124,7 @@ export class VideoLayer extends Layer {
     // Integer (x, y) names a pixel's top-left corner by default (offset 0); an
     // offset of 0.5 instead names its center, which draws the image shifted up
     // and left by half a pixel so that convention holds without touching any
-    // stored annotation coordinates.
-    const integerCoordinateOffset = renderState.document?.integerCoordinateOffset ?? 0;
+    // stored annotation coordinates (integerCoordinateOffset, read above).
     context.drawImage(element, -integerCoordinateOffset, -integerCoordinateOffset,
       engine.videoWidth, engine.videoHeight);
   }

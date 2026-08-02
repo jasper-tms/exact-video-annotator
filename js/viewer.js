@@ -197,7 +197,17 @@ export class Viewer extends EventTarget {
     context.fillStyle = this.backgroundColor;
     context.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 
-    for (const layer of this.layers) {
+    // Video layers paint in reverse stack order: the leftmost video tab (the
+    // primary — videoLayers[0]) paints last among the videos, so it sits on top
+    // of the other videos rather than beneath them. Every non-video layer keeps
+    // its position, so annotations still draw over all footage. Each video slot
+    // is filled from the reversed video list; nothing else moves.
+    const reversedVideoLayers = this.layers.filter((layer) => layer.type === 'video').reverse();
+    let nextReversedVideo = 0;
+    const paintOrder = this.layers.map((layer) =>
+      layer.type === 'video' ? reversedVideoLayers[nextReversedVideo++] : layer);
+
+    for (const layer of paintOrder) {
       if (!layer.visible || layer.opacity === 0) continue;
       const layerTransform = this.stageTransformForLayer(layer);
       context.save();
