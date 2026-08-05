@@ -114,9 +114,10 @@ try {
   check(engineFacts.numberOfFrames > 0, 'video loaded with a frame count');
   check(engineFacts.frameIndexIsExact !== false, 'frame indices are exact for the MP4 fixture');
   check(engineFacts.layerTypes[0] === 'video', 'video layer sits at the bottom of the stack');
-  check(engineFacts.layerTypes.includes('points')
-     && engineFacts.layerTypes.includes('shapes')
-     && engineFacts.layerTypes.includes('events'), 'default annotation layers exist');
+  // The default annotation layers are 'coordinates' (points and polylines share
+  // it, distinguished by each item's `kind`) and 'frames' (temporal events).
+  check(engineFacts.layerTypes.includes('coordinates')
+     && engineFacts.layerTypes.includes('frames'), 'default annotation layers exist');
 
   // ---- Frame stepping (ArrowRight twice → frame 2) ----
   await page.keyboard.press('ArrowRight');
@@ -139,15 +140,21 @@ try {
   // single click only selects or pans) ----
   const stageBox = await page.locator('#stage-canvas').boundingBox();
   await page.mouse.dblclick(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
+  // A point lives in the 'coordinates' layer as a single-vertex item (kind
+  // 'point'); coordinates are held in a `vertices` array, not flat x/y.
   const pointFacts = await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
-    const pointsLayer = application.annotationDocument.layers.find((layer) => layer.type === 'points');
-    return { itemCount: pointsLayer.items.length, item: pointsLayer.items[0] ?? null };
+    const coordinatesLayer =
+      application.annotationDocument.layers.find((layer) => layer.type === 'coordinates');
+    const point = coordinatesLayer.items.find((item) => item.kind === 'point') ?? null;
+    return { itemCount: coordinatesLayer.items.length, item: point };
   });
   check(pointFacts.itemCount === 1, 'point tool created one point');
   check(pointFacts.item?.frame === 2, 'point is bound to the current frame (2)');
-  check(Number.isFinite(pointFacts.item?.x) && Number.isFinite(pointFacts.item?.y),
-        'point has finite source-pixel coordinates');
+  check(Array.isArray(pointFacts.item?.vertices) && pointFacts.item.vertices.length === 1
+        && Number.isFinite(pointFacts.item.vertices[0][0])
+        && Number.isFinite(pointFacts.item.vertices[0][1]),
+        'point has one finite source-pixel vertex');
 
   // ---- Drag the point with the same tool (there is no separate select tool) ----
   const stageCenterX = stageBox.x + stageBox.width / 2;
@@ -156,17 +163,20 @@ try {
   await page.mouse.down();
   await page.mouse.move(stageCenterX + 40, stageCenterY + 25, { steps: 5 });
   await page.mouse.up();
-  const readFirstPoint = () => page.evaluate(() => {
+  const readFirstPointVertex = () => page.evaluate(() => {
     const application = window.exactVideoAnnotator;
-    const pointsLayer = application.annotationDocument.layers.find((layer) => layer.type === 'points');
-    return { ...pointsLayer.items[0] };
+    const coordinatesLayer =
+      application.annotationDocument.layers.find((layer) => layer.type === 'coordinates');
+    const point = coordinatesLayer.items.find((item) => item.kind === 'point');
+    return [...point.vertices[0]];
   });
-  const movedPoint = await readFirstPoint();
-  check(movedPoint.x !== pointFacts.item.x || movedPoint.y !== pointFacts.item.y,
+  const originalVertex = pointFacts.item.vertices[0];
+  const movedVertex = await readFirstPointVertex();
+  check(movedVertex[0] !== originalVertex[0] || movedVertex[1] !== originalVertex[1],
         'dragging an existing point with the point tool moves it');
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
-  const restoredPoint = await readFirstPoint();
-  check(restoredPoint.x === pointFacts.item.x && restoredPoint.y === pointFacts.item.y,
+  const restoredVertex = await readFirstPointVertex();
+  check(restoredVertex[0] === originalVertex[0] && restoredVertex[1] === originalVertex[1],
         'undo restores the dragged point');
 
   // ---- Draw a closed triangle with the polyline tool (a double-click places
@@ -180,12 +190,16 @@ try {
   await page.mouse.click(stageBox.x + stageBox.width * 0.6, stageBox.y + stageBox.height * 0.3);
   await page.mouse.click(stageBox.x + stageBox.width * 0.45, stageBox.y + stageBox.height * 0.6);
   await page.mouse.click(triangleFirstVertex.x, triangleFirstVertex.y);
+  // The polyline lands in the same 'coordinates' layer as the point, told apart
+  // by kind — so that layer now holds two items.
   const polygonFacts = await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
-    const shapesLayer = application.annotationDocument.layers.find((layer) => layer.type === 'shapes');
-    return { itemCount: shapesLayer.items.length, item: shapesLayer.items[0] ?? null };
+    const coordinatesLayer =
+      application.annotationDocument.layers.find((layer) => layer.type === 'coordinates');
+    const polyline = coordinatesLayer.items.find((item) => item.kind === 'polyline') ?? null;
+    return { itemCount: coordinatesLayer.items.length, item: polyline };
   });
-  check(polygonFacts.itemCount === 1, 'polyline tool created one shape');
+  check(polygonFacts.itemCount === 2, 'polyline tool added a second coordinates item');
   check(polygonFacts.item?.kind === 'polyline' && polygonFacts.item?.vertices.length === 4,
         'closing near the first vertex creates a 4-vertex closed polyline');
 
@@ -202,34 +216,38 @@ try {
   await page.keyboard.press('e');
   const eventFacts = await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
-    const eventsLayer = application.annotationDocument.layers.find((layer) => layer.type === 'events');
-    return { itemCount: eventsLayer.items.length, item: eventsLayer.items[0] ?? null };
+    const framesLayer = application.annotationDocument.layers.find((layer) => layer.type === 'frames');
+    return { itemCount: framesLayer.items.length, item: framesLayer.items[0] ?? null };
   });
   check(eventFacts.itemCount === 1, 'event hotkey created one event');
   check(eventFacts.item?.startFrame === 2 && eventFacts.item?.endFrame === 2,
         'point event bound to the current frame');
 
-  // ---- Undo unwinds the event, polyline, then point ----
-  for (let undoCount = 0; undoCount < 3; undoCount++) {
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
-  }
-  const afterUndo = await page.evaluate(() => {
-    const application = window.exactVideoAnnotator;
-    return application.annotationDocument.layers
-      .map((layer) => layer.items.length)
-      .reduce((total, count) => total + count, 0);
-  });
-  check(afterUndo === 0, 'three undos removed all three annotations');
-
-  // ---- Redo restores them ----
-  for (let redoCount = 0; redoCount < 3; redoCount++) {
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+Shift+z');
-  }
-  const afterRedo = await page.evaluate(() =>
+  // ---- Undo unwinds every command, then redo restores them ----
+  // Three annotations are on screen (a point, a closed polyline, and an event),
+  // but they took more than three commands to make: a polyline commits one
+  // command per vertex ('Add polyline' then an 'Extend polyline' each), so drive
+  // undo/redo off the history's own canUndo/canRedo rather than a fixed count.
+  const totalItems = () => page.evaluate(() =>
     window.exactVideoAnnotator.annotationDocument.layers
       .map((layer) => layer.items.length)
       .reduce((total, count) => total + count, 0));
-  check(afterRedo === 3, 'three redos restored all three annotations');
+  const undoKey = process.platform === 'darwin' ? 'Meta+z' : 'Control+z';
+  const redoKey = process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+Shift+z';
+  check(await totalItems() === 3, 'point, polyline, and event are all present');
+
+  const HISTORY_STEP_LIMIT = 50;  // guards against an undo that never empties
+  for (let step = 0; step < HISTORY_STEP_LIMIT
+       && await page.evaluate(() => window.exactVideoAnnotator.undoHistory.canUndo); step++) {
+    await page.keyboard.press(undoKey);
+  }
+  check(await totalItems() === 0, 'undoing the whole history removes every annotation');
+
+  for (let step = 0; step < HISTORY_STEP_LIMIT
+       && await page.evaluate(() => window.exactVideoAnnotator.undoHistory.canRedo); step++) {
+    await page.keyboard.press(redoKey);
+  }
+  check(await totalItems() === 3, 'redoing the whole history restores all three annotations');
 
   // ---- v toggles the selected layer's visibility ----
   await page.keyboard.press('v');
@@ -258,20 +276,12 @@ try {
         'export/import round-trip preserves all items');
 
   // ---- Zoom and pan leave annotations anchored to source pixels ----
-  const anchorBefore = await page.evaluate(() => {
-    const application = window.exactVideoAnnotator;
-    const pointsLayer = application.annotationDocument.layers.find((layer) => layer.type === 'points');
-    return { ...pointsLayer.items[0] };
-  });
+  const anchorBefore = await readFirstPointVertex();
   await page.mouse.move(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
   await page.mouse.wheel(0, -400);   // zoom in
   await page.mouse.wheel(0, 200);    // zoom out a bit
-  const anchorAfter = await page.evaluate(() => {
-    const application = window.exactVideoAnnotator;
-    const pointsLayer = application.annotationDocument.layers.find((layer) => layer.type === 'points');
-    return { ...pointsLayer.items[0] };
-  });
-  check(anchorBefore.x === anchorAfter.x && anchorBefore.y === anchorAfter.y,
+  const anchorAfter = await readFirstPointVertex();
+  check(anchorBefore[0] === anchorAfter[0] && anchorBefore[1] === anchorAfter[1],
         'zooming does not disturb stored annotation coordinates');
 
   // ---- Playback runs ----

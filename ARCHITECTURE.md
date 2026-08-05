@@ -313,6 +313,9 @@ app.engine;                          // the PRIMARY video's engine — null befo
                                      // and frame-related reads this alias
 app.primaryVideoLayer;               // the VideoLayer whose engine that is
 app.videoLayers;                     // every open video's layer, stack order
+app.visibleVideoLayers;              // those actually contributing pixels (visible
+                                     // && opacity > 0); playback-mode selection
+                                     // reads this so a hidden video does no work
 app.synchronizeFollowerVideos();     // seek followers to match the primary
 app.setVideoLinkMode(videoLayer, mode);        // 'frame-index' | 'timestamp';
                                      // converts the offset so the current
@@ -334,6 +337,9 @@ app.deleteSelection();               // delete selected vertex/item; Delete key
 app.localFromWorld(layer, worldPoint); app.worldFromLocal(layer, localPoint);
 app.seekToFrame(frameIndex);         // clamps, delegates to engine
 app.currentFrame;                    // engine.currentFrame or 0
+app.syncedPaintedFrame;              // last frame actually PAINTED during synced
+                                     // playback; render overlays off this, not
+                                     // currentFrame, which runs ahead under load
 app.showToast(message, { kind } = {});   // kind: 'info' | 'warning' | 'error'
 app.markDocumentChanged();           // dispatches 'document-changed' + autosave
 app.hover;                           // set by tools while hovering an existing
@@ -346,7 +352,8 @@ app.isPlaying;                       // playhead advancing either way (read this
                                      // not engine.paused — a synced play leaves
                                      // every engine's own paused flag true)
 app.isSyncedPlaying;                 // the synchronized loop is running
-app.shouldUseSyncedPlayback();       // >1 video and all on the WebCodecs tier
+app.shouldUseSyncedPlayback();       // >1 VISIBLE video, all visible on WebCodecs
+                                     // tier; else the single-video fast path
 app.annotationLayers;                // view layers of type coordinates/segmentation/frames
 app.setActiveLayer(layerId);
 app.addAnnotationLayer(type, { pluginId });  // undoable; returns the new view
@@ -669,37 +676,65 @@ otherwise follow.
 - **Continuous playback is synchronized across every video**, and stays
   frame-exact rather than drifting. Instead of any engine playing on its own
   clock (which would drift, since each engine keeps its own), the app owns one
-  master clock and, every animation tick, seeks *every* engine — the primary
-  included, never `engine.play()` — to the frame matching that clock, then
-  paints only once **all** of them have their target frame decoded (the
-  barrier). So every composite that reaches the canvas shows the correct frame
-  from every video at the same instant. This is only feasible because a
+  master clock and drives every engine — the primary included, never
+  `engine.play()` — through it. The loop aims all engines at **one** target
+  frame, waits until **all** of them have decoded it (the barrier), paints that
+  cross-video composite, and only *then* reads the master clock to pick the next
+  target. So every composite that reaches the canvas shows the correct frame
+  from every video at the same instant. This is feasible because a
   forward-by-one `seekToFrame` is cheap on the WebCodecs tier — it reuses the
   warm decode pipeline and read-ahead cache rather than re-seeking — which the
-  engine's `sync-benchmark` test pins (four 1080p engines sustain real time
-  with ~1 tick per frame). The whole loop lives in `app.driveSyncedPlayback`,
-  driven from the animation tick while `app.isSyncedPlaying`; play/pause go
-  through `app.startPlayback`/`pausePlayback` so the transport is unchanged.
-  On reaching the last frame it loops back to frame 0 (re-anchoring the master
-  clock) rather than stopping, matching a single video, whose engine's `loop`
-  defaults on.
+  engine's `sync-benchmark` test pins (four 1080p engines sustain real time with
+  ~1 tick per frame). The whole loop lives in `app.driveSyncedPlayback`, driven
+  from the animation tick while `app.isSyncedPlaying`; play/pause go through
+  `app.startPlayback`/`pausePlayback` so the transport is unchanged. On reaching
+  the last frame it loops back to frame 0 (re-anchoring the master clock) rather
+  than stopping, matching a single video, whose engine's `loop` defaults on.
+  - **The in-flight target is held until it lands — never re-aimed mid-decode.**
+    A tick with a target still decoding does nothing and returns, letting the
+    decoders work; it does *not* re-seek to the clock's latest frame. (An earlier
+    version re-aimed at the moving clock frame every tick, so under load no single
+    target ever finished decoding and nothing ever painted — a total stall.) The
+    next target is chosen only once the current one has been painted. A
+    consequence worth knowing: the on-screen interval between frame N and N+1 is
+    governed by how long N+1 took to decode, not by their PTS gap — a transient
+    decode/network stall holds N on screen longer than its true frame duration.
+    The master clock still runs at real 1× throughout, so the app corrects by
+    *dropping*, not by shortening later intervals (see `'realtime'` below).
   - Both pacings track the same real-time master clock, so neither ever runs
     faster than real time — the setting only decides what gives **when the
     decoders cannot keep up**, a global preference
     (`js/synced-playback-preference.js`, Settings ▸ "Multi-video playback"),
-    both keeping every painted composite exact. `'realtime'` (the default) takes
-    wherever the clock has reached and skips the frames in between; `'every-frame'`
-    caps its target at one past the last painted, so nothing is skipped and
-    playback instead falls behind real time until the decoders recover. When they
-    do keep up the two are identical: every frame, at real time. The pacing is
-    captured at play start, so changing it mid-play takes effect on the next play.
-  - Synchronized playback applies only with **more than one video, all on the
-    WebCodecs tier** (`app.shouldUseSyncedPlayback`). A single video, or any
-    follower on the native `<video>` tier (where a forward seek is a real,
-    non-cheap element seek), falls back to the primary playing on its own clock
-    with followers catching up on each discrete frame change while paused and on
-    each pause — including the playhead reaching the end of the clip, which the
-    animation loop announces as a `'playback-changed'`.
+    both keeping every painted composite exact. `'realtime'` (the default) picks
+    the next target as *wherever the clock has now reached*, dropping every frame
+    between the last painted and now — so a long stall is followed by a skip
+    forward that keeps the run at 1× on average (it can never exceed 1×, being
+    clock-bounded, and under persistent overload it paints as fast as the decoders
+    allow while always aiming at the live clock). `'every-frame'` caps the next
+    target at one past the last painted, so nothing is skipped and playback
+    instead falls behind real time until the decoders recover — trading the 1×
+    average for completeness. When the decoders keep up the two are identical:
+    every frame, at real time. The pacing is captured at play start, so changing
+    it mid-play takes effect on the next play.
+  - Because the primary is seeked to the in-flight target (ahead of the painted
+    composite under load), overlays and frame-anchored annotations render off
+    `app.syncedPaintedFrame` (the last frame actually shown), not
+    `app.currentFrame`, while synced playback runs. Pausing likewise settles the
+    primary on `syncedPaintedFrame` — the frame on screen — rather than a target
+    that was aimed at but never shown, so the timeline does not jump forward.
+  - Synchronized playback applies only with **more than one VISIBLE video, all
+    visible ones on the WebCodecs tier** (`app.shouldUseSyncedPlayback`, keyed off
+    `app.visibleVideoLayers`). Hiding all but one video — a loaded-but-hidden
+    second video included — drops back to the single-video fast path: that one
+    visible engine plays on its own clock via `engine.play()` (which drops frames
+    itself to hold real time), so a hidden video never slows the one on screen.
+    `app.#soloPlayLayer` records which engine is driving, since the visible one
+    may be a follower rather than the primary. The same fallback covers a single
+    video and any visible follower on the native `<video>` tier (where a forward
+    seek is a real, non-cheap element seek); followers then catch up on each
+    discrete frame change while paused and on each pause — including the playhead
+    reaching the end of the clip, which the animation loop announces as a
+    `'playback-changed'`.
 
 Spatial alignment is the layer transform that every layer already has;
 per-video visibility and opacity likewise come free from the layer system.
