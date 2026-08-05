@@ -354,6 +354,9 @@ app.isPlaying;                       // playhead advancing either way (read this
 app.isSyncedPlaying;                 // the synchronized loop is running
 app.shouldUseSyncedPlayback();       // >1 VISIBLE video, all visible on WebCodecs
                                      // tier; else the single-video fast path
+app.reconcilePlaybackMode();         // mid-play, switch solo<->synced in place if
+                                     // a visibility/opacity change (or add/remove)
+                                     // changed which mode fits; no-op when paused
 app.annotationLayers;                // view layers of type coordinates/segmentation/frames
 app.setActiveLayer(layerId);
 app.addAnnotationLayer(type, { pluginId });  // undoable; returns the new view
@@ -735,6 +738,14 @@ otherwise follow.
     discrete frame change while paused and on each pause — including the playhead
     reaching the end of the clip, which the animation loop announces as a
     `'playback-changed'`.
+  - The mode is chosen at play start, but a visibility or opacity change (or a
+    video added or removed) mid-play can change which mode fits, so each video
+    layer's `'layer-changed'` and `closeVideoLayer` call `app.reconcilePlaybackMode`,
+    which switches solo↔synced **in place** without stopping playback — showing a
+    hidden second video hands the solo engine off to the synchronized loop
+    (anchored on the primary's current position), and hiding back down to one
+    visible video hands it back to that engine's own `play()` from the last
+    painted frame.
 
 Spatial alignment is the layer transform that every layer already has;
 per-video visibility and opacity likewise come free from the layer system.

@@ -297,6 +297,9 @@ class Application extends EventTarget {
     const videoLayer = this.videoLayers.find((layer) => layer.id === layerId);
     if (!videoLayer) return;
     const wasPrimary = videoLayer === this.primaryVideoLayer;
+    // Drop a solo-play pointer at the engine about to be destroyed before
+    // anything (isPlaying, reconcile) reads it.
+    if (this.#soloPlayLayer === videoLayer) this.#soloPlayLayer = null;
     releaseVideoLoad(videoLayer);
     videoLayer.engine.destroy();
     videoLayer.hostElement.remove();
@@ -312,6 +315,9 @@ class Application extends EventTarget {
       this.invalidateSeekTarget();
     }
     this.synchronizeFollowerVideos();
+    // Removing a video can change which playback mode fits (e.g. synced down to a
+    // single remaining visible video should hand back to native play).
+    this.reconcilePlaybackMode();
     updateDropHint();
     this.dispatchEvent(new CustomEvent('layers-changed'));
     // The transport and panels re-read app.engine on these, whether it is now
@@ -562,6 +568,47 @@ class Application extends EventTarget {
       this.#soloPlayLayer = null;
     }
     this.dispatchEvent(new CustomEvent('playback-changed'));
+  }
+
+  /** Re-evaluate which playback mode fits and switch to it in place if the
+      running one no longer does — called when a video layer's visibility or
+      opacity changes, or a video is added or removed, WHILE playing (the mode is
+      otherwise chosen once, at play start). Carries the playhead across so
+      playback never stops: a second video shown mid solo-play hands off to the
+      synchronized loop (which anchors on the primary's current position); the
+      last visible video left hands back to that one engine's own play(). A no-op
+      when paused — the next startPlayback picks the right mode then. */
+  reconcilePlaybackMode() {
+    if (!this.isPlaying) return;
+    const wantSynced = this.shouldUseSyncedPlayback();
+    if (wantSynced && !this.isSyncedPlaying) {
+      this.#soloPlayLayer?.engine.pause();
+      this.#soloPlayLayer = null;
+      this.startSyncedPlayback();
+      this.dispatchEvent(new CustomEvent('playback-changed'));
+    } else if (!wantSynced && this.isSyncedPlaying) {
+      // stopSyncedPlayback settles the primary on the last painted frame, so the
+      // handoff resumes from what was on screen rather than an unseen target.
+      this.stopSyncedPlayback();
+      const visible = this.visibleVideoLayers;
+      this.#soloPlayLayer = visible.length === 1 ? visible[0] : this.primaryVideoLayer;
+      this.#soloPlayLayer.engine.play();
+      this.dispatchEvent(new CustomEvent('playback-changed'));
+    } else if (!wantSynced && !this.isSyncedPlaying) {
+      // Still solo, but the one visible video may have changed identity (the
+      // playing one hidden, another shown). Move native play onto it.
+      const visible = this.visibleVideoLayers;
+      const desired = visible.length === 1 ? visible[0] : this.primaryVideoLayer;
+      if (desired && desired !== this.#soloPlayLayer) {
+        this.#soloPlayLayer?.engine.pause();
+        this.#soloPlayLayer = desired;
+        desired.engine.play();
+        this.dispatchEvent(new CustomEvent('playback-changed'));
+      }
+    }
+    // wantSynced && isSyncedPlaying needs nothing: the synced loop already drives
+    // every engine through its barrier, so shown videos are already in step and
+    // hidden ones stay driven.
   }
 
   /** Begin driving every engine from one master clock. The clock's zero point
@@ -1259,6 +1306,10 @@ function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdenti
     ? videoLayerIndexes[videoLayerIndexes.length - 1] + 1 : 0;
   app.viewer.addLayer(videoLayer, insertionIndex);
   wireEngineEvents(videoLayer, engine);
+  // A change to this video's visibility or opacity can change which playback mode
+  // fits (showing a hidden second video should turn solo play into synced, and
+  // vice versa), so re-evaluate on every change to the layer while it is playing.
+  videoLayer.addEventListener('layer-changed', () => app.reconcilePlaybackMode());
 
   const becomesPrimary = app.primaryVideoLayer === null;
   if (becomesPrimary) {
