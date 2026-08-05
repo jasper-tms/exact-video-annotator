@@ -5,7 +5,8 @@
 //
 // promptForSecondVideoChoice() resolves to { choice, save } where choice is
 // 'replace' or 'new-layer' and save says whether to persist it to Settings, or
-// to null if the user cancels (or dismisses with Escape / a backdrop click).
+// to null if the user cancels (or dismisses with Escape). A click outside the
+// box (on the backdrop) is ignored.
 
 let dialogElement = null;
 let replaceRadio = null;
@@ -73,12 +74,10 @@ function buildDialog() {
   buttonRow.append(cancelButton, okButton);
   dialogElement.appendChild(buttonRow);
 
-  // Escape (dialog's native 'cancel') and a click on the backdrop both count
-  // as canceling — the load does not happen.
+  // Escape (the dialog's native 'cancel') counts as canceling — the load does
+  // not happen. A click on the backdrop is deliberately ignored so the box can
+  // only be dismissed via Cancel/OK or Escape/Enter.
   dialogElement.addEventListener('cancel', (event) => { event.preventDefault(); settle(null); });
-  dialogElement.addEventListener('click', (event) => {
-    if (event.target === dialogElement) settle(null);
-  });
 
   document.body.appendChild(dialogElement);
 }
