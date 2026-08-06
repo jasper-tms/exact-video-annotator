@@ -1290,6 +1290,19 @@ function wireEngineEvents(videoLayer, engine) {
 }
 
 function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier, replaceVideoLayer = null }) {
+  // A replace swaps out the single open video. The incoming engine is already
+  // certified (loadVideoSource threw before reaching here if the load failed),
+  // so close the outgoing video now and let this one load along the very same
+  // path a fresh first video takes — primary from the start, fitted to the
+  // view, its engine sitting on its own frame 0 — rather than staging it as a
+  // follower that inherits the outgoing video's playhead. The one fresh-load
+  // step a replace skips is the autosave restore below: annotations are keyed
+  // to frame numbers and deliberately left as they are, now reading against the
+  // new video's frames.
+  if (replaceVideoLayer && app.videoLayers.includes(replaceVideoLayer)) {
+    app.closeVideoLayer(replaceVideoLayer.id);
+  }
+
   const videoLayer = new VideoLayer(engine, hostElement, { name });
   videoLayer.videoSource = source;
   videoLayer.loadIdentifier = loadIdentifier;
@@ -1318,26 +1331,28 @@ function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdenti
 
     // Offer any autosaved annotations for this exact video (name + size).
     // Only the primary: the document is keyed to its timeline, and a follower
-    // arriving later must not replace annotations already in progress.
-    const key = autosaveKey(app.videoInformation);
-    const autosaved = loadAutosave(key);
-    if (autosaved && autosaved.document.layers.some((layer) => layer.items.length > 0)) {
-      app.replaceDocument(autosaved.document);
-      app.showToast(`Restored autosaved annotations (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
+    // arriving later must not replace annotations already in progress. A
+    // replace skips this entirely — its annotations stay put and reapply to the
+    // incoming video's frame numbers, rather than being swapped for whatever the
+    // new video last had autosaved.
+    if (!replaceVideoLayer) {
+      const key = autosaveKey(app.videoInformation);
+      const autosaved = loadAutosave(key);
+      if (autosaved && autosaved.document.layers.some((layer) => layer.items.length > 0)) {
+        app.replaceDocument(autosaved.document);
+        app.showToast(`Restored autosaved annotations (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
+      }
     }
   } else {
     // A new video stacked over one or more already open — a genuine "new
-    // layer", not the transient follower a replace stages (that one is about
-    // to become the sole primary, so its opacity is left alone). Dim it to 75%
-    // so the videos beneath show through it, and the first time a second video
-    // joins, drop the primary from a full 100% to 75% too so neither wholly
-    // hides the other. A primary the user has already dialed to some other
-    // opacity is left as they set it; a third-or-later video only dims itself.
-    if (!replaceVideoLayer) {
-      videoLayer.setOpacity(0.75);
-      if (app.videoLayers.length === 2 && app.primaryVideoLayer.opacity === 1) {
-        app.primaryVideoLayer.setOpacity(0.75);
-      }
+    // layer". Dim it to 75% so the videos beneath show through it, and the
+    // first time a second video joins, drop the primary from a full 100% to 75%
+    // too so neither wholly hides the other. A primary the user has already
+    // dialed to some other opacity is left as they set it; a third-or-later
+    // video only dims itself.
+    videoLayer.setOpacity(0.75);
+    if (app.videoLayers.length === 2 && app.primaryVideoLayer.opacity === 1) {
+      app.primaryVideoLayer.setOpacity(0.75);
     }
     // A follower starts out on the frame matching the primary's playhead.
     app.synchronizeFollowerVideos();
@@ -1356,20 +1371,6 @@ function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdenti
 
   app.dispatchEvent(new CustomEvent('video-loaded'));
   app.dispatchEvent(new CustomEvent('frame-changed'));
-
-  // "Replace" was chosen: the new video arrived as a follower stacked above the
-  // one it replaces (becomesPrimary was false while that one was still open, so
-  // the current annotations were deliberately left untouched — no autosave
-  // restore ran). Closing the replaced video now promotes this one to primary
-  // (see closeVideoLayer) and refits the view to it. Done last, and only after
-  // loadVideoSource has certified the new engine, so a failed load never tears
-  // down the existing video.
-  if (replaceVideoLayer && replaceVideoLayer !== videoLayer
-      && app.videoLayers.includes(replaceVideoLayer)) {
-    app.closeVideoLayer(replaceVideoLayer.id);
-    app.setActiveLayer(videoLayer.id);
-    app.viewer.fitToContent();
-  }
 }
 
 /** WebKit can pass load-time checks then kill the decoder mid-stream (see the
