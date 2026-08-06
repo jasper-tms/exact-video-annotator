@@ -1,50 +1,63 @@
 // The little question box shown when a second video is dropped (or opened)
 // while one video is already open and the "Second video" setting is "Prompt".
-// It asks whether to replace the current video or add the new one as a layer,
+// It asks whether to add the new video as a layer or replace the current one,
 // and offers to remember the answer. Built once on first use and reused.
 //
 // promptForSecondVideoChoice() resolves to { choice, save } where choice is
-// 'replace' or 'new-layer' and save says whether to persist it to Settings, or
+// 'new-layer' or 'replace' and save says whether to persist it to Settings, or
 // to null if the user cancels (or dismisses with Escape). A click outside the
-// box (on the backdrop) is ignored.
+// box (on the backdrop) is ignored — a native <dialog> does not light-dismiss.
+//
+// Enter always confirms (OK) and Escape always cancels while the box is open,
+// no matter where focus sits — the OK button can lose focus (e.g. the user
+// clicks the backdrop), so we key off explicit handlers rather than the native
+// form-submission focus dance.
 
 let dialogElement = null;
-let replaceRadio = null;
-let newLayerRadio = null;
+let addLayerButton = null;
+let replaceButton = null;
 let saveCheckbox = null;
 let resolveCurrent = null;
+// The currently highlighted choice: 'new-layer' (default) or 'replace'.
+let currentChoice = 'new-layer';
+
+function selectChoice(choice) {
+  currentChoice = choice;
+  addLayerButton.classList.toggle('selected', choice === 'new-layer');
+  addLayerButton.setAttribute('aria-pressed', String(choice === 'new-layer'));
+  replaceButton.classList.toggle('selected', choice === 'replace');
+  replaceButton.setAttribute('aria-pressed', String(choice === 'replace'));
+}
+
+function confirmChoice() {
+  settle({ choice: currentChoice, save: saveCheckbox.checked });
+}
 
 function buildDialog() {
   dialogElement = document.createElement('dialog');
   dialogElement.className = 'settings-dialog second-video-dialog';
-
-  const heading = document.createElement('h2');
-  heading.textContent = 'Second video';
-  dialogElement.appendChild(heading);
 
   const question = document.createElement('p');
   question.className = 'second-video-question';
   question.textContent = 'A video is already open. What should this one do?';
   dialogElement.appendChild(question);
 
-  // Two mutually exclusive choices, presented as radios so both are visible.
+  // The two mutually exclusive choices, presented as a side-by-side pair of
+  // toggle buttons that only set the choice. Add layer sits on the left because
+  // it is the default.
   const choices = document.createElement('div');
   choices.className = 'second-video-choices';
-  const makeChoice = (value, text, checked) => {
-    const label = document.createElement('label');
-    label.className = 'second-video-choice';
-    const radio = document.createElement('input');
-    radio.type = 'radio';
-    radio.name = 'second-video-choice';
-    radio.value = value;
-    radio.checked = checked;
-    label.append(radio, ' ', text);
-    choices.appendChild(label);
-    return radio;
+  const makeChoice = (value, text) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'second-video-choice';
+    button.textContent = text;
+    button.addEventListener('click', () => selectChoice(value));
+    choices.appendChild(button);
+    return button;
   };
-  // New layer is the non-destructive default (it keeps the current video).
-  replaceRadio = makeChoice('replace', 'Replace the current video', false);
-  newLayerRadio = makeChoice('new-layer', 'Add as a new layer', true);
+  addLayerButton = makeChoice('new-layer', 'Add layer');
+  replaceButton = makeChoice('replace', 'Replace');
   dialogElement.appendChild(choices);
 
   const saveLabel = document.createElement('label');
@@ -64,20 +77,24 @@ function buildDialog() {
   okButton.type = 'button';
   okButton.className = 'second-video-ok';
   okButton.textContent = 'OK';
-  // Take initial focus so Enter confirms the default choice, rather than
-  // showModal() landing focus on the first (unchecked) radio.
+  // Take initial focus so the OK button reads as the primary action.
   okButton.autofocus = true;
-  okButton.addEventListener('click', () => settle({
-    choice: replaceRadio.checked ? 'replace' : 'new-layer',
-    save: saveCheckbox.checked,
-  }));
+  okButton.addEventListener('click', () => confirmChoice());
   buttonRow.append(cancelButton, okButton);
   dialogElement.appendChild(buttonRow);
 
-  // Escape (the dialog's native 'cancel') counts as canceling — the load does
-  // not happen. A click on the backdrop is deliberately ignored so the box can
-  // only be dismissed via Cancel/OK or Escape/Enter.
+  // Escape (the dialog's native 'cancel') cancels. A backdrop click is
+  // deliberately left unhandled so it does nothing.
   dialogElement.addEventListener('cancel', (event) => { event.preventDefault(); settle(null); });
+  // Enter confirms from anywhere in the box, even when nothing (or a non-OK
+  // control) holds focus — the whole point is that clicking the backdrop must
+  // not disarm Enter.
+  dialogElement.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      confirmChoice();
+    }
+  });
 
   document.body.appendChild(dialogElement);
 }
@@ -96,8 +113,7 @@ export function promptForSecondVideoChoice() {
   if (resolveCurrent) settle(null);
 
   // Reset to the standard defaults each time it opens.
-  newLayerRadio.checked = true;
-  replaceRadio.checked = false;
+  selectChoice('new-layer');
   saveCheckbox.checked = false;
 
   return new Promise((resolve) => {

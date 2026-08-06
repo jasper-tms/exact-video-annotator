@@ -173,16 +173,22 @@ button:focus:not(:focus-visible) { outline: none; }
 
 .second-video-choices {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
+/* Two side-by-side toggle buttons; the highlighted one gets an accent outline. */
 .second-video-choice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  flex: 1 1 0;
+  padding: 12px 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.second-video-choice.selected {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .second-video-save {
