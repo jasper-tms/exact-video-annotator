@@ -31,6 +31,17 @@ import { getSecondVideoBehavior, setSecondVideoBehavior } from './second-video-p
 import { promptForSecondVideoChoice } from './ui/second-video-prompt.js';
 import { drawPixelGrid } from './pixel-grid.js';
 
+// The Cloudflare Pages project is exact-video-annotator.pages.dev, kept as
+// the default identity; examine.video is a custom domain pointed at the same
+// deployment and gets its own display name, matching subdomains too (e.g.
+// www.examine.video).
+const { hostname } = window.location;
+const applicationName = hostname === 'examine.video' || hostname.endsWith('.examine.video')
+  ? 'Video Examiner'
+  : 'exact-video-annotator';
+document.title = applicationName;
+document.getElementById('application-title').textContent = applicationName;
+
 const ANNOTATION_LAYER_CONSTRUCTORS = {
   coordinates: CoordinatesLayer,
   segmentation: SegmentationLayer,
