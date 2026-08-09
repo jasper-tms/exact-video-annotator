@@ -352,8 +352,9 @@ app.isPlaying;                       // playhead advancing either way (read this
                                      // not engine.paused — a synced play leaves
                                      // every engine's own paused flag true)
 app.isSyncedPlaying;                 // the synchronized loop is running
-app.shouldUseSyncedPlayback();       // >1 VISIBLE video, all visible on WebCodecs
-                                     // tier; else the single-video fast path
+app.shouldUseSyncedPlayback();       // >=1 VISIBLE follower (primary shown OR
+                                     // hidden), primary + visible followers all
+                                     // WebCodecs; else the single-video fast path
 app.reconcilePlaybackMode();         // mid-play, switch solo<->synced in place if
                                      // a visibility/opacity change (or add/remove)
                                      // changed which mode fits; no-op when paused
@@ -725,16 +726,37 @@ otherwise follow.
     `app.currentFrame`, while synced playback runs. Pausing likewise settles the
     primary on `syncedPaintedFrame` — the frame on screen — rather than a target
     that was aimed at but never shown, so the timeline does not jump forward.
-  - Synchronized playback applies only with **more than one VISIBLE video, all
-    visible ones on the WebCodecs tier** (`app.shouldUseSyncedPlayback`, keyed off
-    `app.visibleVideoLayers`). Hiding all but one video — a loaded-but-hidden
-    second video included — drops back to the single-video fast path: that one
-    visible engine plays on its own clock via `engine.play()` (which drops frames
-    itself to hold real time), so a hidden video never slows the one on screen.
-    `app.#soloPlayLayer` records which engine is driving, since the visible one
-    may be a follower rather than the primary. The same fallback covers a single
-    video and any visible follower on the native `<video>` tier (where a forward
-    seek is a real, non-cheap element seek); followers then catch up on each
+  - Synchronized playback applies whenever **at least one VISIBLE video is a
+    follower** — the primary shown alongside a follower, or the primary hidden
+    with a follower on screen — with the primary and every visible follower on
+    the WebCodecs tier (`app.shouldUseSyncedPlayback`, keyed off
+    `app.visibleVideoLayers`). It is used for the hidden-primary case because the
+    primary is the app's clock and coordinate authority: its playhead must keep
+    advancing so the frame/time readouts track and a pause settles cleanly, while
+    each visible follower is seeked to match — which a lone follower's own
+    `play()` cannot do (it would advance only the follower, leaving the readouts
+    frozen and snapping the follower back to the primary's stale frame on pause).
+    The primary drives the clock **even while hidden and without decoding a single
+    frame**: its playhead advances through a free `seekToFrame` (currentFrame is a
+    pure `frameAtTime(playhead)` lookup), and the animation loop skips
+    `engine.update(now)` — the call that actually decodes — for any layer not
+    contributing pixels while playing. The synced barrier likewise waits only on
+    the visible layers, so a hidden primary never gates or costs anything.
+  - The single-video fast path covers the case where the **only video on screen is
+    the primary** (any followers hidden): that engine plays on its own clock via
+    `engine.play()` (which drops frames itself to hold real time), and the hidden
+    followers do no work. It also covers a single video, and a visible follower on
+    the native `<video>` tier — a forward seek there is a real, non-cheap element
+    seek, so the synced loop's cheap-seek assumption does not hold and the follower
+    instead plays its own smooth element clock. `app.#soloPlayLayer` records which
+    engine is driving, since on the native tier the visible one may be a follower
+    rather than the primary; `app.soloPlaybackEngine` exposes it so the animation
+    loop reads *its* `paused` (not the never-played primary's) for the end-of-clip
+    pause. When that driver is a follower, `app.trailClockToSoloFollower` moves the
+    hidden primary — the app's clock — onto the frame the follower is showing every
+    tick (a decode-free playhead move, inverting the follower's link), so the
+    frame/time readouts track it and a pause leaves both aligned rather than
+    snapping the follower back to a stale primary frame. Followers catch up on each
     discrete frame change while paused and on each pause — including the playhead
     reaching the end of the clip, which the animation loop announces as a
     `'playback-changed'`.

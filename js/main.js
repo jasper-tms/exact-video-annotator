@@ -515,19 +515,35 @@ class Application extends EventTarget {
     return engine != null && !engine.paused;
   }
 
-  /** Synchronized playback applies when more than one video is VISIBLE and every
-      visible one is on the WebCodecs tier (where a forward-by-one seek is cheap,
-      so the master-clock loop stays smooth — proven by the engine's sync
-      benchmark). With a single video visible — including the case where a second
-      video is loaded but hidden — or any visible follower on the native tier,
-      playback stays a single engine's own play() (which drops frames itself to
-      hold real time) and hidden followers do no work. Keying off visibility, not
-      the loaded count, is what keeps a hidden second video from slowing the one
-      on screen. */
+  /** Synchronized playback applies whenever at least one VISIBLE video is a
+      follower — the primary shown alongside a follower, OR the primary hidden
+      with a follower on screen — and every engine the loop drives (the primary
+      as the master clock, plus each visible follower) is on the WebCodecs tier,
+      where a forward-by-one seek is cheap enough to keep the clock smooth. It
+      exists because the primary is the app's clock and coordinate authority:
+      when a follower is on screen, the primary's playhead must keep advancing
+      (so the frame/time readouts track and a following pause settles cleanly)
+      while each visible follower is seeked to match it — which a lone engine's
+      own play() cannot do. The primary drives the clock even while hidden, but
+      its frames are never decoded (the animation loop skips update() for any
+      layer not contributing pixels), so a hidden primary costs nothing to show.
+
+      When the only video on screen IS the primary (any followers hidden), the
+      cheaper single-engine fast path plays it natively and the hidden followers
+      do no work. A visible follower on the native tier also stays on that path
+      (there is no cheap synced seek there). Keying off visibility, not the
+      loaded count, is what keeps hidden videos from slowing the one on screen. */
   shouldUseSyncedPlayback() {
-    const visible = this.visibleVideoLayers;
-    return visible.length > 1
-      && visible.every((layer) => layer.engine.tier === 'webcodecs');
+    const primary = this.primaryVideoLayer;
+    if (!primary) return false;
+    const visibleFollowers = this.visibleVideoLayers.filter((layer) => layer !== primary);
+    if (visibleFollowers.length === 0) return false;
+    // The primary drives the clock (even while hidden) and every visible
+    // follower is seeked to track it, so those are the engines that must be on
+    // the WebCodecs tier. Hidden followers are neither driven nor waited on, so
+    // their tier is irrelevant.
+    return primary.engine.tier === 'webcodecs'
+      && visibleFollowers.every((layer) => layer.engine.tier === 'webcodecs');
   }
 
   togglePlayback() {
@@ -560,14 +576,54 @@ class Application extends EventTarget {
     } else {
       const soloLayer = this.#soloPlayLayer ?? this.primaryVideoLayer;
       soloLayer.engine.pause();
-      // A follower played on its own has advanced independently of the (hidden)
-      // primary; leave it on the frame it stopped on rather than letting the
-      // pause-time resync yank it back to the primary's position. When the
-      // primary itself was the one playing, the followers do want to catch up —
-      // the animation loop's paused-engine resync handles that.
+      // Clearing the driver hands isPlaying/pausing back to the primary. When a
+      // follower was the one playing (the native fast path — see startPlayback),
+      // trailClockToSoloFollower has kept the primary's playhead on it all along,
+      // so the pause-time resync (playback-changed -> synchronizeFollowerVideos)
+      // lands the follower right where it already is — no yank back to a stale
+      // frame. When the primary itself played, the followers catch up to it then.
       this.#soloPlayLayer = null;
     }
     this.dispatchEvent(new CustomEvent('playback-changed'));
+  }
+
+  /** The engine actually driving the single-video fast path — the one
+      startPlayback called play() on — or null when nothing is (synced playback,
+      or paused). Usually the primary, but on the native tier the visible video
+      playing on its own clock may be a follower, so the animation loop reads its
+      `paused` for the end-of-clip pause rather than assuming the primary's. */
+  get soloPlaybackEngine() { return this.#soloPlayLayer?.engine ?? null; }
+
+  /** Keep the primary — the app's clock and coordinate authority — on the frame
+      the visible follower is currently showing, when that follower is the engine
+      driving playback (the native fast path, where a follower plays its own
+      <video> clock because the WebCodecs-only synced loop cannot). Without this
+      the primary would sit still while the follower advanced, freezing the
+      frame/time readouts and snapping the follower back to the primary's stale
+      frame on pause. Cheap and decode-free: it only moves the hidden primary's
+      playhead (the animation loop never decodes an off-screen layer while
+      playing), and everything primary-anchored — the readouts, the annotation
+      frame, the pause resync — then tracks what is actually on screen. A no-op in
+      every other state (synced playback, or the primary itself driving). */
+  trailClockToSoloFollower() {
+    if (this.isSyncedPlaying) return;
+    const followerLayer = this.#soloPlayLayer;
+    if (!followerLayer || followerLayer === this.primaryVideoLayer) return;
+    const primaryEngine = this.engine;
+    const followerEngine = followerLayer.engine;
+    if (!primaryEngine || !followerEngine) return;
+    // Invert the follower's link to the primary (see followerTargetFrame): a
+    // timestamp link maps through real times, a frame link by integer offset.
+    // The primary is hidden, so its own voids never matter — clamp to its range
+    // and let the readout follow.
+    if (followerLayer.linkMode === 'timestamp') {
+      const primaryTime = followerEngine.currentTime - followerLayer.temporalOffset;
+      primaryEngine.currentTime = Math.max(0, Math.min(primaryEngine.duration, primaryTime));
+    } else {
+      const lastFrame = Math.max(0, (primaryEngine.numFrames ?? 1) - 1);
+      const primaryFrame = followerEngine.currentFrame - Math.round(followerLayer.temporalOffset);
+      primaryEngine.seekToFrame(Math.max(0, Math.min(lastFrame, primaryFrame)));
+    }
   }
 
   /** Re-evaluate which playback mode fits and switch to it in place if the
@@ -669,6 +725,12 @@ class Application extends EventTarget {
       to paint. A void follower (-1) has nothing to decode and is always ready. */
   #syncedBarrierReady() {
     return this.videoLayers.every((videoLayer) => {
+      // Layers not on screen are not decoded during synced playback (the
+      // animation loop skips their update), so they would never "arrive" — and
+      // they paint nothing, so the composite does not need them. This is what
+      // lets the primary drive the clock while hidden: it is excluded here, so
+      // the barrier waits only on the visible follower(s) actually being shown.
+      if (!(videoLayer.visible && videoLayer.opacity > 0)) return true;
       const target = videoLayer === this.primaryVideoLayer
         ? this.#syncedTargetFrame
         : this.#syncedFollowerTargets.get(videoLayer);
@@ -1415,7 +1477,17 @@ let lastReportedPaused = true;
 
 function animationTick(now) {
   const engine = app.engine;
+  // While playing, a video not contributing pixels (hidden or fully
+  // transparent) is not worth decoding — most importantly the primary when it
+  // is hidden but still driving the synced master clock: its playhead advances
+  // through a free seekToFrame (so currentFrame and the readouts follow), and
+  // skipping its update() keeps the engine from decoding frames that will never
+  // be shown. When paused, everything is updated: a hidden layer's playhead is
+  // static then, so update() is a cheap no-op that keeps its index/canvas
+  // bookkeeping fresh.
+  const contributingLayers = app.isPlaying ? new Set(app.visibleVideoLayers) : null;
   for (const videoLayer of app.videoLayers) {
+    if (contributingLayers && !contributingLayers.has(videoLayer)) continue;
     videoLayer.engine.update(now);
     // The frame actually painted on screen can lag behind currentFrame: on the
     // WebCodecs tier currentFrame lands the instant a seek is requested, before
@@ -1447,12 +1519,20 @@ function animationTick(now) {
     // the single-engine bookkeeping below is skipped while it runs.
     app.driveSyncedPlayback(now);
   } else if (engine) {
+    // When a follower is the one playing (native fast path), keep the primary's
+    // clock on it before reading currentFrame, so the readouts track it.
+    app.trailClockToSoloFollower();
     if (engine.currentFrame !== lastReportedFrame) {
       lastReportedFrame = engine.currentFrame;
       app.dispatchEvent(new CustomEvent('frame-changed'));
       app.viewer.requestRender();
     }
-    if (!engine.paused) app.invalidateSeekTarget();
+    // The engine whose own clock is running is the one startPlayback played —
+    // the primary in the ordinary case, but a visible follower on the native
+    // fast path. Its `paused` (not the primary's, which never played there) is
+    // what says whether playback is still going.
+    const drivingEngine = app.soloPlaybackEngine ?? engine;
+    if (!drivingEngine.paused) app.invalidateSeekTarget();
     if (app.isSeekPending !== lastReportedSeekPending) {
       lastReportedSeekPending = app.isSeekPending;
       app.updateSeekPendingDisplay();
@@ -1462,11 +1542,11 @@ function animationTick(now) {
     // pause would otherwise go unannounced (the play button would stay in its
     // playing state, and follower videos would never take their catch-up
     // seek). Announcing a pause twice is harmless; missing one is not.
-    if (engine.paused !== lastReportedPaused) {
-      lastReportedPaused = engine.paused;
+    if (drivingEngine.paused !== lastReportedPaused) {
+      lastReportedPaused = drivingEngine.paused;
       app.dispatchEvent(new CustomEvent('playback-changed'));
     }
-    if (!engine.paused) app.viewer.requestRender();
+    if (!drivingEngine.paused) app.viewer.requestRender();
   }
   app.viewer.renderIfNeeded({
     // While synced playback runs, the primary is seeked to the in-flight target
