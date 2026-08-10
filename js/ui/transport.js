@@ -2,6 +2,8 @@
 // a numeric frame input, and a readout. Everything is denominated in integer
 // frame indices; times shown are derived from the engine, never the reverse.
 
+import { isLoadedFramesHighlightEnabled } from '../loaded-frames-highlight-preference.js';
+
 // Transport-button glyphs, as inline SVG rather than Unicode text characters.
 // A font glyph is centered by its line box, not its ink, so a swapped-in
 // character (the play triangle versus the pause bars, in particular) can
@@ -233,7 +235,9 @@ export function initializeTransport(app, containerElement) {
   // buffered range, so the resident window is visible as it slides and grows
   // during playback and read-ahead. Only the WebCodecs tier has an addressable
   // frame cache — the native <video> fallback does not — so the strip stays off
-  // there. This copies the exact-video-engine demo's cache strip.
+  // there. This copies the exact-video-engine demo's cache strip. Off unless
+  // the "Highlight loaded frames on timeline" setting is on (default off) —
+  // read live each tick, so toggling it takes effect on the next frame.
 
   // The gradient last written to --cached-segments, so the per-frame repaint
   // below is a string compare in the common (unchanged) case.
@@ -266,7 +270,7 @@ export function initializeTransport(app, containerElement) {
   function updateCacheStrip() {
     const engine = app.engine;
     let gradient = 'none';
-    if (engine && engine.tier === 'webcodecs') {
+    if (isLoadedFramesHighlightEnabled() && engine && engine.tier === 'webcodecs') {
       const denominator = Math.max(1, Number(scrubber.max));
       const percent = (frame) => Math.max(0, Math.min(100, (frame / denominator) * 100));
       const format = (value) => value.toFixed(2);

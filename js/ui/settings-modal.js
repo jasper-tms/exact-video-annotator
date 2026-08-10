@@ -7,6 +7,8 @@
 import { isPixelGridEnabled, setPixelGridEnabled } from '../pixel-grid.js';
 import { getSecondVideoBehavior, setSecondVideoBehavior } from '../second-video-preference.js';
 import { getSyncedPlaybackPacing, setSyncedPlaybackPacing } from '../synced-playback-preference.js';
+import { isLoadedFramesHighlightEnabled, setLoadedFramesHighlightEnabled }
+  from '../loaded-frames-highlight-preference.js';
 
 export function initializeSettingsModal(app, triggerButtonElement) {
   const dialogElement = document.createElement('dialog');
@@ -137,6 +139,24 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   pixelGridLabel.append(pixelGridCheckbox, ' Show pixel grid when zoomed in');
   pixelGridRow.appendChild(pixelGridLabel);
   dialogElement.appendChild(pixelGridRow);
+
+  /* ---- Loaded-frames timeline highlight ---- */
+
+  const loadedFramesRow = document.createElement('div');
+  loadedFramesRow.className = 'settings-row';
+  const loadedFramesLabel = document.createElement('label');
+  loadedFramesLabel.title =
+    'Shade the scrubber where frames are currently held decoded in memory — '
+    + 'the range that seeks to instantly. Only meaningful on the WebCodecs engine.';
+  const loadedFramesCheckbox = document.createElement('input');
+  loadedFramesCheckbox.type = 'checkbox';
+  loadedFramesCheckbox.checked = isLoadedFramesHighlightEnabled();
+  loadedFramesCheckbox.addEventListener('change', () => {
+    setLoadedFramesHighlightEnabled(loadedFramesCheckbox.checked);
+  });
+  loadedFramesLabel.append(loadedFramesCheckbox, ' Highlight loaded frames on timeline');
+  loadedFramesRow.appendChild(loadedFramesLabel);
+  dialogElement.appendChild(loadedFramesRow);
 
   /* ---- Close ---- */
 
