@@ -14,6 +14,10 @@
      whose index is still being built. */
   --scrubber-indexed: #6b6d7a;
   --scrubber-unindexed: #34353d;
+  /* Frames the engine is holding decoded in memory, shaded over the indexed
+     track the way a video player shows its buffered range — a bluish grey that
+     reads as "already in hand" against the plain indexed grey. */
+  --scrubber-cached: #8b93b5;
   --toolbar-height: 44px;
 }
 
@@ -693,6 +697,11 @@ button:focus:not(:focus-visible) { outline: none; }
   --scrubber-track: linear-gradient(to right,
     var(--scrubber-indexed) 0 var(--indexed-fraction),
     var(--scrubber-unindexed) var(--indexed-fraction) 100%);
+  /* The resident-frame shading, layered over the base track. Set every tick
+     from the engine's decode cache by js/ui/transport.js (a gradient of
+     --scrubber-cached bands with transparent gaps that let the base show
+     through); 'none' when there is nothing cached or on the native tier. */
+  --cached-segments: none;
   flex: 1 1 auto;
   min-width: 60px;
   appearance: none;
@@ -704,13 +713,13 @@ button:focus:not(:focus-visible) { outline: none; }
 #transport-container .transport-scrubber::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 3px;
-  background: var(--scrubber-track);
+  background: var(--cached-segments), var(--scrubber-track);
 }
 
 #transport-container .transport-scrubber::-moz-range-track {
   height: 6px;
   border-radius: 3px;
-  background: var(--scrubber-track);
+  background: var(--cached-segments), var(--scrubber-track);
 }
 
 #transport-container .transport-scrubber::-webkit-slider-thumb {

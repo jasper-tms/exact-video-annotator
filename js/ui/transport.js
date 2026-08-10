@@ -226,6 +226,82 @@ export function initializeTransport(app, containerElement) {
     updateFrameDisplays();
   }
 
+  // ---- Cached-frame shading -------------------------------------------------
+  // The WebCodecs engine keeps recently decoded frames resident in a small
+  // cache (displayIndex -> ImageBitmap); a seek that lands on one is instant.
+  // Shade those frames on the scrubber track the way a video player shows its
+  // buffered range, so the resident window is visible as it slides and grows
+  // during playback and read-ahead. Only the WebCodecs tier has an addressable
+  // frame cache — the native <video> fallback does not — so the strip stays off
+  // there. This copies the exact-video-engine demo's cache strip.
+
+  // The gradient last written to --cached-segments, so the per-frame repaint
+  // below is a string compare in the common (unchanged) case.
+  let lastCacheGradient = 'none';
+
+  /** The engine's resident frame indices collapsed into contiguous
+      [start, end] ranges — the segments the strip shades. */
+  function cachedFrameRanges(engine) {
+    const cache = engine._cache;
+    if (!cache || cache.size === 0) return [];
+    const keys = [...cache.keys()].sort((a, b) => a - b);
+    const ranges = [];
+    let start = keys[0];
+    let previous = keys[0];
+    for (let i = 1; i < keys.length; i++) {
+      const key = keys[i];
+      if (key === previous + 1) { previous = key; continue; }
+      ranges.push([start, previous]);
+      start = key;
+      previous = key;
+    }
+    ranges.push([start, previous]);
+    return ranges;
+  }
+
+  /** Repaint the cached-segments layer from the primary engine's decode cache.
+      Positions share the scrubber's own 0..max coordinate system, so a cached
+      frame sits exactly under where its thumb would; the gaps are transparent
+      so the indexed/unindexed base track shows through. */
+  function updateCacheStrip() {
+    const engine = app.engine;
+    let gradient = 'none';
+    if (engine && engine.tier === 'webcodecs') {
+      const denominator = Math.max(1, Number(scrubber.max));
+      const percent = (frame) => Math.max(0, Math.min(100, (frame / denominator) * 100));
+      const format = (value) => value.toFixed(2);
+      const ranges = cachedFrameRanges(engine);
+      if (ranges.length) {
+        const parts = [];
+        let at = 0;
+        for (const [start, end] of ranges) {
+          // Widen each range a hair so a lone cached frame is still a visible sliver.
+          const a = Math.max(at, percent(start) - 0.25);
+          const b = Math.max(a, Math.min(100, percent(end) + 0.25));
+          if (a > at) parts.push(`transparent ${format(at)}% ${format(a)}%`);
+          parts.push(`var(--scrubber-cached) ${format(a)}% ${format(b)}%`);
+          at = b;
+        }
+        if (at < 100) parts.push(`transparent ${format(at)}% 100%`);
+        gradient = `linear-gradient(to right, ${parts.join(', ')})`;
+      }
+    }
+    if (gradient !== lastCacheGradient) {
+      lastCacheGradient = gradient;
+      scrubber.style.setProperty('--cached-segments', gradient);
+    }
+  }
+
+  // The cache fills and evicts continuously during playback and background
+  // read-ahead, without a discrete event to hang the repaint on, so drive it
+  // off the animation frame like the demo does — kept cheap by the change
+  // check above, which reduces the steady state to a Map walk and a compare.
+  function repaintCacheStrip() {
+    updateCacheStrip();
+    requestAnimationFrame(repaintCacheStrip);
+  }
+  requestAnimationFrame(repaintCacheStrip);
+
   function updateControls() {
     const engine = app.engine;
     const hasVideo = engine !== null;
