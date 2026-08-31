@@ -6,6 +6,14 @@
 export const DOCUMENT_FORMAT = 'exact-video-annotator';
 export const DOCUMENT_VERSION = 1;
 
+// A short prose note, written into every export, telling a reader who has only
+// the file (and no knowledge of this format) the conventions they cannot
+// recover from the data alone: the [x, y] axis order and how `frame` is
+// indexed. Emitted fresh from this constant on each export, so it can never
+// drift from the code. Kept deliberately terse — it ships in every file.
+export const DOCUMENT_CONVENTIONS =
+  "Vertices are [x, y] pixels (x from left, y from top). 'frame' is a 0-based frame index; null = all frames.";
+
 let nextIdNumber = 1;
 
 /** Unique, collision-resistant id for items, classes, layers. */
@@ -51,6 +59,7 @@ export function documentToJson(annotationDocument, videoInformation = null) {
   return {
     format: DOCUMENT_FORMAT,
     version: DOCUMENT_VERSION,
+    conventions: DOCUMENT_CONVENTIONS,
     video: videoInformation ?? annotationDocument.video ?? null,
     classes: annotationDocument.classes,
     eventTypes: annotationDocument.eventTypes,

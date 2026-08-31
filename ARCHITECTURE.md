@@ -228,6 +228,11 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
 
 ```js
 {
+  // A terse prose note (constant, written on export) stating the conventions a
+  // reader with only the file cannot recover from the data: the [x, y] axis
+  // order and 0-based `frame` indexing. Regenerated on every export from
+  // DOCUMENT_CONVENTIONS, so it never drifts; ignored on read.
+  conventions: "Vertices are [x, y] pixels …",
   video: { name, numberOfFrames, frameRate, frameIndexIsExact,
            durationSeconds, width, height },      // provenance, written on export
   classes: [ { id, name, color } ],               // label registry for spatial items

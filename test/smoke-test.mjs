@@ -268,10 +268,13 @@ try {
     const reparsed = documentModule.documentFromJson(JSON.parse(JSON.stringify(exported)));
     return {
       videoName: exported.video?.name,
+      conventions: exported.conventions,
       itemCounts: reparsed.layers.map((layer) => layer.items.length),
     };
   });
   check(roundTrip.videoName === 'frame_numbered_vfr.mp4', 'export records video provenance');
+  check(typeof roundTrip.conventions === 'string' && roundTrip.conventions.includes('[x, y]'),
+        'export states the coordinate/frame conventions in prose');
   check(roundTrip.itemCounts.reduce((total, count) => total + count, 0) === 3,
         'export/import round-trip preserves all items');
 
