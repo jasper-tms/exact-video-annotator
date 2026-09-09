@@ -229,16 +229,29 @@ export class Viewer extends EventTarget {
     if (this.overlayPainter) {
       const view = this.viewTransform;
       context.save();
-      context.setTransform(
-        devicePixelRatioNow * view.scale, 0, 0, devicePixelRatioNow * view.scale,
-        devicePixelRatioNow * view.offsetX, devicePixelRatioNow * view.offsetY,
-      );
-      this.overlayPainter(context, {
-        ...renderState,
-        pixelsPerLocalUnit: view.scale,
-        devicePixelRatio: devicePixelRatioNow,
-      });
-      context.restore();
+      // A throw in the overlay painter must not blank the canvas (the layers
+      // above are already painted) or kill the render loop — degrade to "no
+      // overlay this frame" and log the failure once so it stays diagnosable
+      // without spamming the console every tick.
+      try {
+        context.setTransform(
+          devicePixelRatioNow * view.scale, 0, 0, devicePixelRatioNow * view.scale,
+          devicePixelRatioNow * view.offsetX, devicePixelRatioNow * view.offsetY,
+        );
+        this.overlayPainter(context, {
+          ...renderState,
+          pixelsPerLocalUnit: view.scale,
+          devicePixelRatio: devicePixelRatioNow,
+        });
+        this.overlayPainterErrorLogged = false;
+      } catch (error) {
+        if (!this.overlayPainterErrorLogged) {
+          console.error('Overlay painter threw; skipping the overlay this frame.', error);
+          this.overlayPainterErrorLogged = true;
+        }
+      } finally {
+        context.restore();
+      }
     }
   }
 
