@@ -50,7 +50,7 @@ function opacityForScale(pixelsPerLocalUnit) {
  * transform's scale (screen pixels per world unit).
  */
 export function drawPixelGrid(context, renderState) {
-  if (!pixelGridEnabled) return;
+  if (!isPixelGridEnabled()) return;
 
   const pixelsPerLocalUnit = renderState.pixelsPerLocalUnit;
   const opacity = opacityForScale(pixelsPerLocalUnit);
