@@ -8,24 +8,28 @@
 //   'every-frame' — never skip a frame; advance at most one frame past the last
 //                   painted, so playback slows below real time when it must and
 //                   catches every frame, but never gets ahead of real time.
-// A global preference, not per-document, so it lives in localStorage alongside
-// the other cross-application settings (see second-video-preference.js).
+// A global preference, not per-document, so it is persisted through the shared
+// preference store (localStorage, and the Firebase backend when signed in)
+// alongside the other cross-application settings (see second-video-preference.js).
 
-const STORAGE_KEY = 'exact-video-annotator.syncedPlaybackPacing';
+import { definePreference } from './sync/preference-store.js';
 
 export const SYNCED_PLAYBACK_PACINGS = ['realtime', 'every-frame'];
 const DEFAULT_PACING = 'realtime';
 
+// Persisted (and synced when signed in) through the shared timestamped
+// preference store; the storage key is unchanged so earlier values migrate.
+const preference = definePreference({
+  key: 'exact-video-annotator.syncedPlaybackPacing',
+  defaultValue: DEFAULT_PACING,
+  coerce: (value) => (SYNCED_PLAYBACK_PACINGS.includes(value) ? value : DEFAULT_PACING),
+});
+
 export function getSyncedPlaybackPacing() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return SYNCED_PLAYBACK_PACINGS.includes(raw) ? raw : DEFAULT_PACING;
-  } catch {
-    return DEFAULT_PACING;
-  }
+  return preference.get();
 }
 
 export function setSyncedPlaybackPacing(pacing) {
   if (!SYNCED_PLAYBACK_PACINGS.includes(pacing)) return;
-  try { localStorage.setItem(STORAGE_KEY, pacing); } catch { /* ignore */ }
+  preference.set(pacing);
 }

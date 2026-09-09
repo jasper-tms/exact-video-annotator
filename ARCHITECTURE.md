@@ -827,6 +827,47 @@ What the UI does with that:
   version-1 files stay valid. Recording followers in the export would be a
   deliberate schema change (the format rejects unknown schemas).
 
+## Accounts and preference sync
+
+An optional account backend (Firebase Auth + Firestore) lets a signed-in user
+carry their global preferences across devices. It is strictly additive: the app
+is fully functional signed out, and only preferences and the installed-plugin
+URL list are ever stored — never video or annotation data, keeping the "no
+server, no upload" promise. The Firebase SDK is loaded lazily as ES modules
+from gstatic, so a blocked CDN or an offline start never breaks the app.
+
+- `js/sync/preference-store.js` — every global preference is defined here and
+  stored as a `{ value, updatedAt }` envelope: in `localStorage` always, and in
+  Firestore while signed in. `definePreference({ key, defaultValue, coerce })`
+  returns `{ get, set, getEnvelope, applyEnvelope, subscribe }`. A pre-timestamp
+  value written by an earlier version is read with `updatedAt: 0`, so a real
+  cloud value wins once and the next local write re-stamps it. Nothing here
+  imports Firebase; the cloud sink is injected by the sync engine.
+- `js/sync/sync-engine.js` — on sign-in, reconciles each preference against the
+  cloud by `updatedAt` (last-write-wins per key, both directions), then attaches
+  a live listener so newer changes from other devices apply. On sign-out it
+  stops; `localStorage` keeps everything. The merge uses the client `Date.now()`,
+  so severe clock skew between devices can pick the wrong winner.
+- `js/sync/firebase.js` — the only module that touches the SDK: Google sign-in,
+  the auth observer, and the `users/{uid}` document (a `preferences` map of
+  envelopes). `js/firebase-config.js` holds the public web config and the pinned
+  SDK version.
+- The existing global preferences (pixel grid, second-video behavior, synced
+  playback, loaded-frames highlight) are defined through the store; their
+  `localStorage` keys are unchanged. `js/sync/installed-plugins-preference.js`
+  adds the plugin URL list (whole-list last-write-wins; loading a plugin from
+  its URL is future work — see [Plugins](#plugins)).
+- `js/ui/account-control.js` — the top bar's right-hand Log in / account control
+  (disabled when no config is present).
+
+Security rules live in `firebase/firestore.rules` (each `users/{uid}` document
+is private to its owner) and deploy with `./deploy-firebase-rules.sh`. The
+Firestore region and other console/setup facts not visible in the code are
+documented in the `exact-video-annotator-firebase` agent skill.
+
+This preference sync is separate from the annotation autosave above, which is
+per-video, local-only, and never synced.
+
 ## Deploy
 
 Cloudflare Pages, build command `bash build.sh`, output directory `dist/`.

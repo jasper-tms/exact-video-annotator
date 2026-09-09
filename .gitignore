@@ -2,3 +2,9 @@ dist/
 node_modules/
 .DS_Store
 TODO*
+
+# Firebase CLI: local cache and debug logs from deploy runs (firebase-tools is
+# pinned in firebase/package.json; its node_modules is covered above).
+.firebase/
+firebase-debug.log
+firestore-debug.log

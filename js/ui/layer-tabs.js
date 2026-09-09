@@ -121,13 +121,11 @@ export function initializeLayerTabs(app, containerElement) {
       () => showPluginOptions(menu));
   }
 
-  /** The ＋ menu's plugin page. */
+  /** The ＋ menu's plugin page: the available plugins at the top, then a
+      separator, then "New…" (which opens Settings and flashes the Plugins list
+      where a plugin URL is added), and "‹ Back" as the very bottom element. */
   function showPluginOptions(menu) {
     menu.replaceChildren();
-    menuOption(menu, '‹ Back', {}, () => showLayerTypeOptions(menu));
-    const separator = document.createElement('div');
-    separator.className = 'layer-tab-add-menu-separator';
-    menu.appendChild(separator);
     for (const plugin of listPlugins()) {
       menuOption(menu, plugin.name, { title: plugin.description }, () => {
         menu.remove();
@@ -136,8 +134,14 @@ export function initializeLayerTabs(app, containerElement) {
         if (plugin.preferredToolId) app.setActiveTool(plugin.preferredToolId);
       });
     }
-    menuOption(menu, 'Upload…', { title: 'Loading your own plugin file is not available yet',
-      disabled: true }, () => {});
+    const separator = document.createElement('div');
+    separator.className = 'layer-tab-add-menu-separator';
+    menu.appendChild(separator);
+    menuOption(menu, 'New…', { title: 'Add a plugin by its URL in Settings' }, () => {
+      menu.remove();
+      app.openSettings?.({ flashPlugins: true });
+    });
+    menuOption(menu, '‹ Back', {}, () => showLayerTypeOptions(menu));
   }
 
   addButton.addEventListener('click', () => {

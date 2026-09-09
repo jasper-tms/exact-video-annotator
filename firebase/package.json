@@ -1,0 +1,8 @@
+{
+  "name": "exact-video-annotator-firebase",
+  "private": true,
+  "description": "Firebase CLI for deploying the Firestore rules (see ../deploy-firebase-rules.sh)",
+  "dependencies": {
+    "firebase-tools": "^15.5.1"
+  }
+}

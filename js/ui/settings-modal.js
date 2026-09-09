@@ -9,6 +9,9 @@ import { getSecondVideoBehavior, setSecondVideoBehavior } from '../second-video-
 import { getSyncedPlaybackPacing, setSyncedPlaybackPacing } from '../synced-playback-preference.js';
 import { isLoadedFramesHighlightEnabled, setLoadedFramesHighlightEnabled }
   from '../loaded-frames-highlight-preference.js';
+import {
+  getInstalledPlugins, addInstalledPlugin, removeInstalledPlugin, subscribeInstalledPlugins,
+} from '../sync/installed-plugins-preference.js';
 
 export function initializeSettingsModal(app, triggerButtonElement) {
   const dialogElement = document.createElement('dialog');
@@ -91,12 +94,9 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   });
   secondVideoRow.append(secondVideoLabel, secondVideoSelect);
   dialogElement.appendChild(secondVideoRow);
-
-  // The prompt dialog can persist a fresh choice while this modal is closed;
-  // re-read it each time Settings opens so the select is never stale.
-  triggerButtonElement.addEventListener('click', () => {
-    secondVideoSelect.value = getSecondVideoBehavior();
-  });
+  // The second-video prompt dialog can persist a fresh choice while this modal
+  // is closed, so openSettings() below re-reads this select every time Settings
+  // opens (from the toolbar button or the ＋ menu) — it is never left stale.
 
   /* ---- Synchronized playback pacing ---- */
 
@@ -158,6 +158,93 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   loadedFramesRow.appendChild(loadedFramesLabel);
   dialogElement.appendChild(loadedFramesRow);
 
+  /* ---- Plugins list ---- */
+
+  // The list of "installed" plugins, by URL. This is the authoritative place a
+  // user adds or removes one; the ＋ menu's Plugins page sends them here (with a
+  // flash on this section) via its "New…" entry. Fetching and running a plugin
+  // from its URL is not wired up yet — for now the list is simply persisted and
+  // synced across devices when signed in.
+  const pluginsSection = document.createElement('div');
+  pluginsSection.className = 'settings-section';
+  pluginsSection.id = 'settings-plugins-section';
+
+  const pluginsHeading = document.createElement('h3');
+  pluginsHeading.className = 'settings-section-heading';
+  pluginsHeading.textContent = 'Plugins';
+  pluginsSection.appendChild(pluginsHeading);
+
+  const pluginsHint = document.createElement('p');
+  pluginsHint.className = 'settings-section-hint';
+  pluginsHint.textContent =
+    'Add a plugin by its URL (typically a GitHub URL). Loading plugins from '
+    + 'their URL is coming soon; for now the list is saved to your account.';
+  pluginsSection.appendChild(pluginsHint);
+
+  const pluginsList = document.createElement('ul');
+  pluginsList.className = 'plugins-url-list';
+  pluginsSection.appendChild(pluginsList);
+
+  function renderPluginsList() {
+    pluginsList.replaceChildren();
+    const urls = getInstalledPlugins();
+    if (urls.length === 0) {
+      const emptyItem = document.createElement('li');
+      emptyItem.className = 'plugins-url-empty';
+      emptyItem.textContent = 'No plugins installed yet.';
+      pluginsList.appendChild(emptyItem);
+      return;
+    }
+    for (const url of urls) {
+      const item = document.createElement('li');
+      item.className = 'plugins-url-item';
+      const urlText = document.createElement('span');
+      urlText.className = 'plugins-url-text';
+      urlText.textContent = url;
+      urlText.title = url;
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'plugins-url-remove';
+      removeButton.textContent = 'Remove';
+      removeButton.title = `Remove ${url}`;
+      removeButton.addEventListener('click', () => removeInstalledPlugin(url));
+      item.append(urlText, removeButton);
+      pluginsList.appendChild(item);
+    }
+  }
+
+  const pluginsAddRow = document.createElement('div');
+  pluginsAddRow.className = 'plugins-url-add-row';
+  const pluginUrlInput = document.createElement('input');
+  pluginUrlInput.type = 'url';
+  pluginUrlInput.className = 'plugins-url-input';
+  pluginUrlInput.placeholder = 'https://…/plugin.js';
+  const pluginAddButton = document.createElement('button');
+  pluginAddButton.type = 'button';
+  pluginAddButton.textContent = 'Add';
+  function submitPluginUrl() {
+    const added = addInstalledPlugin(pluginUrlInput.value);
+    if (added) {
+      pluginUrlInput.value = '';
+    } else if (pluginUrlInput.value.trim()) {
+      app.showToast('That plugin is already in your list.', { kind: 'warning' });
+    }
+    pluginUrlInput.focus();
+  }
+  pluginAddButton.addEventListener('click', submitPluginUrl);
+  pluginUrlInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); submitPluginUrl(); }
+  });
+  pluginsAddRow.append(pluginUrlInput, pluginAddButton);
+  pluginsSection.appendChild(pluginsAddRow);
+
+  dialogElement.appendChild(pluginsSection);
+
+  // Keep the list live: local edits and updates synced from another device both
+  // flow through the preference's subscribe.
+  renderPluginsList();
+  subscribeInstalledPlugins(renderPluginsList);
+
   /* ---- Close ---- */
 
   const closeButton = document.createElement('button');
@@ -174,5 +261,22 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   });
 
   document.body.appendChild(dialogElement);
-  triggerButtonElement.addEventListener('click', () => dialogElement.showModal());
+
+  // The single entry point for opening the modal, exposed on the app so other
+  // surfaces (the ＋ menu's Plugins page "New…" entry) can open it and draw the
+  // eye to a section with a brief flash.
+  function openSettings({ flashPlugins } = {}) {
+    secondVideoSelect.value = getSecondVideoBehavior();
+    renderPluginsList();
+    dialogElement.showModal();
+    if (flashPlugins) {
+      pluginsSection.classList.remove('settings-flash');
+      void pluginsSection.offsetWidth; // reflow so the animation restarts
+      pluginsSection.classList.add('settings-flash');
+      pluginUrlInput.focus();
+    }
+  }
+  app.openSettings = openSettings;
+
+  triggerButtonElement.addEventListener('click', () => openSettings());
 }

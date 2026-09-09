@@ -3,26 +3,27 @@
 // the way a video player shows its buffered range (see js/ui/transport.js).
 // Off by default: it is a diagnostic overlay most viewers do not need, and it
 // only means anything on the WebCodecs tier, which has an addressable frame
-// cache. The preference is global (not per-document), so it lives in
-// localStorage alongside the other cross-application settings.
+// cache. The preference is global (not per-document), so it is persisted
+// through the shared preference store (localStorage, and the Firebase backend
+// when signed in) alongside the other cross-application settings.
 
-const STORAGE_KEY = 'exact-video-annotator.loadedFramesHighlightEnabled';
+import { definePreference } from './sync/preference-store.js';
+import { coerceBoolean } from './sync/coerce-boolean.js';
 
-function loadEnabled() {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-let loadedFramesHighlightEnabled = loadEnabled();
+// Persisted (and synced when signed in) through the shared timestamped
+// preference store; the storage key is unchanged so earlier values migrate.
+// Off by default. The coerce accepts both a real boolean (the new format and
+// synced values) and the "true"/"false" string an earlier version wrote.
+const preference = definePreference({
+  key: 'exact-video-annotator.loadedFramesHighlightEnabled',
+  defaultValue: false,
+  coerce: (value) => coerceBoolean(value, false),
+});
 
 export function isLoadedFramesHighlightEnabled() {
-  return loadedFramesHighlightEnabled;
+  return preference.get();
 }
 
 export function setLoadedFramesHighlightEnabled(enabled) {
-  loadedFramesHighlightEnabled = enabled;
-  try { localStorage.setItem(STORAGE_KEY, String(enabled)); } catch { /* ignore */ }
+  preference.set(Boolean(enabled));
 }

@@ -4,24 +4,30 @@
 // simply loads; with two or more already open, every further video always
 // makes a new layer regardless of this setting (there is no single video to
 // "replace"), so this preference only governs the one-video case. It is a
-// global preference, not per-document, so it lives in localStorage — the same
-// place as the pixel-grid preference.
+// global preference, not per-document, so it is persisted through the shared
+// preference store (localStorage, and the Firebase backend when signed in) —
+// the same place as the pixel-grid preference.
 
-const STORAGE_KEY = 'exact-video-annotator.secondVideoBehavior';
+import { definePreference } from './sync/preference-store.js';
 
 export const SECOND_VIDEO_BEHAVIORS = ['prompt', 'replace', 'new-layer'];
 const DEFAULT_BEHAVIOR = 'prompt';
 
+// Persisted (and, when signed in, synced across devices) through the shared
+// timestamped preference store rather than localStorage directly. The storage
+// key is unchanged, so a value written by an earlier version is picked up and
+// migrated into the new timestamped format on first read.
+const preference = definePreference({
+  key: 'exact-video-annotator.secondVideoBehavior',
+  defaultValue: DEFAULT_BEHAVIOR,
+  coerce: (value) => (SECOND_VIDEO_BEHAVIORS.includes(value) ? value : DEFAULT_BEHAVIOR),
+});
+
 export function getSecondVideoBehavior() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return SECOND_VIDEO_BEHAVIORS.includes(raw) ? raw : DEFAULT_BEHAVIOR;
-  } catch {
-    return DEFAULT_BEHAVIOR;
-  }
+  return preference.get();
 }
 
 export function setSecondVideoBehavior(behavior) {
   if (!SECOND_VIDEO_BEHAVIORS.includes(behavior)) return;
-  try { localStorage.setItem(STORAGE_KEY, behavior); } catch { /* ignore */ }
+  preference.set(behavior);
 }

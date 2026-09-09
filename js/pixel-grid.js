@@ -5,33 +5,33 @@
 // else — is loaded. Invisible until the user has zoomed in enough to
 // actually distinguish individual units, then fades in, capping at a still-
 // subtle maximum opacity. Can be turned off entirely from the settings modal;
-// that preference is global (not per-document), so it's kept in localStorage.
+// that preference is global (not per-document), so it is kept through the
+// shared preference store (localStorage, and the Firebase backend when signed
+// in), not on any document.
+
+import { definePreference } from './sync/preference-store.js';
+import { coerceBoolean } from './sync/coerce-boolean.js';
 
 const FADE_START_PIXELS_PER_UNIT = 4;
 const FADE_END_PIXELS_PER_UNIT = 32;
 const MAXIMUM_OPACITY = 0.15;
 const LINE_WIDTH_SCREEN_PIXELS = 1;
 const GRID_COLOR = '#ffffff';
-const ENABLED_STORAGE_KEY = 'exact-video-annotator.pixelGridEnabled';
-
-function loadEnabled() {
-  try {
-    const raw = localStorage.getItem(ENABLED_STORAGE_KEY);
-    return raw === null ? true : raw === 'true';
-  } catch {
-    return true;
-  }
-}
-
-let pixelGridEnabled = loadEnabled();
+// Enabled-state is persisted (and synced when signed in) through the shared
+// timestamped preference store; the storage key is unchanged so an earlier
+// version's value migrates. On by default.
+const enabledPreference = definePreference({
+  key: 'exact-video-annotator.pixelGridEnabled',
+  defaultValue: true,
+  coerce: (value) => coerceBoolean(value, true),
+});
 
 export function isPixelGridEnabled() {
-  return pixelGridEnabled;
+  return enabledPreference.get();
 }
 
 export function setPixelGridEnabled(enabled) {
-  pixelGridEnabled = enabled;
-  try { localStorage.setItem(ENABLED_STORAGE_KEY, String(enabled)); } catch { /* ignore */ }
+  enabledPreference.set(Boolean(enabled));
 }
 
 /** 0 at and below the start threshold, ramping linearly to MAXIMUM_OPACITY

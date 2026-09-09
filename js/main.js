@@ -27,6 +27,8 @@ import { initializeAnnotationsTable } from './ui/annotations-table.js';
 import { initializeClassManager } from './ui/class-manager.js';
 import { initializeToasts } from './ui/toasts.js';
 import { initializeSettingsModal } from './ui/settings-modal.js';
+import { initializeAccountControl } from './ui/account-control.js';
+import { initializeSync } from './sync/sync-engine.js';
 import { getSecondVideoBehavior, setSecondVideoBehavior } from './second-video-preference.js';
 import { promptForSecondVideoChoice } from './ui/second-video-prompt.js';
 import { drawPixelGrid } from './pixel-grid.js';
@@ -1089,7 +1091,15 @@ initializeLayerDetail(app, document.getElementById('layer-detail-container'));
 initializeClassManager(app, document.getElementById('class-manager-container'));
 initializeAnnotationsTable(app, document.getElementById('annotations-table-container'));
 initializeSettingsModal(app, document.getElementById('settings-button'));
+initializeAccountControl(app, document.getElementById('login-button'));
 initializeEventHotkeys(app);
+
+// Start syncing preferences to the Firebase backend when signed in. Purely
+// additive: it wires itself to auth state and does nothing until the user logs
+// in, and the app stays fully functional signed-out or if the backend is
+// unreachable. Called after the UI is built so that values adopted from the
+// cloud on sign-in reach subscribers that are already listening.
+initializeSync();
 
 // `r` re-fits the selected annotation on a plugin layer that can fit (the line
 // fitter). Registered after the event hotkeys so a user-defined event key named

@@ -13,22 +13,30 @@
   <script src="https://cdn.jsdelivr.net/gh/jasper-tms/exact-video-engine.js@v2.7.1/exact-video-engine.js"></script>
 </head>
 <body>
+  <!-- Three justified groups (a CSS grid keeps the center group centered
+       regardless of how wide the side groups are): the app identity and Open
+       Video on the left, the annotation import/export pair centered, and
+       Settings plus the account control on the right. The vertical rules are
+       the "｜" separators from the layout spec. The live hovered-pixel readout
+       used to sit at the far right here; it now overlays the canvas corner. -->
   <header id="toolbar">
-    <span id="application-title">exact-video-annotator</span>
-    <!-- Everything between the title and the hovered-pixel readout scrolls
-         sideways rather than shrinking when the window is too narrow — the
-         title and the readout are the two things that must always stay put. -->
-    <div id="toolbar-scroll-region">
-      <span class="toolbar-group">
-        <button id="open-video-button" title="Open a video file">Open video</button>
-        <button id="import-annotations-button" title="Import an annotations JSON file">Import</button>
-        <button id="export-annotations-button" title="Export annotations as JSON">Export</button>
-      </span>
-      <span class="toolbar-group">
-        <button id="settings-button" title="Open settings">Settings…</button>
-      </span>
+    <div class="toolbar-side toolbar-left">
+      <span id="application-title">exact-video-annotator</span>
+      <span class="toolbar-separator" aria-hidden="true"></span>
+      <button id="open-video-button" title="Open a video file">Open Video</button>
     </div>
-    <span id="hovered-pixel-label" title="The video pixel under the cursor"></span>
+    <div class="toolbar-side toolbar-center">
+      <button id="import-annotations-button" title="Import an annotations JSON file">Import Annotations</button>
+      <span class="toolbar-separator" aria-hidden="true"></span>
+      <button id="export-annotations-button" title="Export annotations as JSON">Export Annotations</button>
+    </div>
+    <div class="toolbar-side toolbar-right">
+      <button id="settings-button" title="Open settings">Settings…</button>
+      <span class="toolbar-separator" aria-hidden="true"></span>
+      <!-- Signed out: "Log in". Signed in: shows the account email and opens a
+           menu with Log out. Disabled on a build with no Firebase config. -->
+      <button id="login-button" title="Sign in to sync settings across devices">Log in</button>
+    </div>
   </header>
 
   <!-- First screenful: the canvas owns the screen. A slim icon rail on the
@@ -104,6 +112,10 @@
              once — and stays up while a clip plays if its index is still
              growing underneath it. -->
         <div id="indexing-status" hidden></div>
+        <!-- The video pixel under the cursor, bottom-right of the stage so it
+             sits just above the transport's Frame/Time readout. Cleared when
+             the cursor leaves the canvas. -->
+        <div id="hovered-pixel-label" title="The video pixel under the cursor"></div>
       </div>
       <div id="transport-container"></div>
       <div id="layer-tabs-container"></div>
