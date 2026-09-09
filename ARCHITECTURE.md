@@ -101,6 +101,9 @@ when there are too few vertices to be a valid shape at all).
 
 ```js
 layer.id; layer.type;                // 'video' | 'image' | 'coordinates' | 'segmentation' | 'frames'
+layer.isMedia;                       // true for video + image (both extend MediaLayer);
+                                     // insertion, paint order, opacity, the "already
+                                     // loaded" prompt all key off this, not on type
 layer.name; layer.visible; layer.opacity;   // opacity 0..1
 layer.transform;                     // { scale, offsetX, offsetY } local → world
 layer.draw(context, renderState) {}  // context already in local coordinates
@@ -240,7 +243,8 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
                   addHotkey, removeHotkey } ],    // hotkeys are single characters,
                                                   // case-sensitive (may be null)
   // Whether an integer (x, y) names a pixel's top-left corner (0, the
-  // default) or its center (0.5); consulted only by the video layer's draw().
+  // default) or its center (0.5); consulted by the media layers' draw()
+  // (video and image).
   integerCoordinateOffset: 0 | 0.5,
   layers: [
     { id, type: 'coordinates', name, visible, opacity, transform,
@@ -329,6 +333,13 @@ app.setVideoTemporalOffset(videoLayer, value); // frames or seconds, per mode
 app.closeVideoLayer(layerId);        // destroy engine + host, remove layer;
                                      // closing the primary promotes the next
                                      // video (not undoable)
+app.imageLayers;                     // every open still-image layer, stack order
+app.mediaLayers;                     // videos + images (anything drawing a picture)
+app.mediaInformation;                // provenance anchor: videoInformation, else
+                                     // the bottom image's info; keys autosave and
+                                     // fills the export's `video` field
+app.closeImageLayer(layerId);        // remove an image layer, free its bitmap
+app.closeMediaLayer(layerId);        // close media of either kind (dispatches)
 app.annotationDocument; app.undoHistory;
 app.activeLayer;                     // the annotation layer new items go into
 app.activeClassId;                   // class assigned to newly created items
@@ -405,13 +416,14 @@ app events; they never poll.
   selected one (confirming when it holds annotations). A video layer's ✕
   closes that video instead (via `app.closeVideoLayer`; confirming only when
   closing the primary would re-key existing annotations to the next video's
-  frames). When several videos are open, the primary's tab carries a small
-  clock icon. A plugin layer's badge
+  frames), and an image layer's ✕ closes the image (`app.closeImageLayer`, no
+  confirmation — an image holds no annotations). When several videos are open,
+  the primary's tab carries a small clock icon. A plugin layer's badge
   names its plugin rather than its storage type.
 - `js/ui/layer-detail.js` — settings for the selected layer (visibility,
   opacity, scale/offset transform; playback facts for a video layer — its own
-  engine's, not necessarily the primary's; a plugin's own settings, built by
-  the plugin). With several videos open, a follower video's panel adds the
+  engine's, not necessarily the primary's; dimensions for an image layer; a
+  plugin's own settings, built by the plugin). With several videos open, a follower video's panel adds the
   link controls ("follow the primary by" frame index or timestamp, plus the
   offset in frames or seconds), and the primary's says it is the primary.
 - `js/ui/annotations-table.js` — items of the selected layer by default, or of
@@ -603,41 +615,99 @@ except when the error carries `detail.incomplete`, which is an index that
 stopped early rather than a dead decoder. Those frames keep playing and the
 native tier would only re-scan the same container, so that case only warns.
 
+### Media layers: video and image share a base
+
+A **video layer and an image layer are two kinds of `MediaLayer`**
+(`js/layers/media-layer.js`, extending `Layer`), and that shared base is what
+lets the app treat them identically wherever the behavior is really about "a
+picture on the stage" rather than "a clip with a timeline". `MediaLayer` owns
+`mediaSource` (the File/Blob/URL), `mediaInformation` (`{name, sizeBytes,
+width, height, …}` — the same shape both kinds report, so autosave keys, the
+export's `video` field, and the layer-detail panel read it uniformly), the
+`contentBounds()` derived from abstract `sourceWidth`/`sourceHeight`, and the
+`drawSource(...)` helper carrying the two conventions both draws share (the
+`document.integerCoordinateOffset` shift and the zoom-aware smoothing
+threshold). The base marks itself `isMedia` — the rest of the app keys
+insertion, paint precedence, opacity, and the "already loaded" prompt off that,
+not off a specific `type`.
+
+`VideoLayer` (`js/layers/video-layer.js`) adds everything timeline: the engine,
+the offscreen host, and the primary/follower relationship. `ImageLayer`
+(`js/layers/image-layer.js`) adds almost nothing — one decoded `ImageBitmap`,
+drawn on **every** frame (it ignores `renderState.frame`), so an image opened
+beside a video stays on screen wherever the scrubber sits and an image opened
+alone needs no timeline. Formats are whatever the browser decodes natively via
+`createImageBitmap` — PNG, JPEG, WebP, GIF, BMP (`isImageFile` in `main.js`
+routes them; TIFF is deliberately excluded, as no browser decodes it without a
+JavaScript decoder). The bitmap is held fully in memory rather than read lazily
+— images are small next to the byte-range videos. Neither media kind is
+hit-tested, edited, or written into the annotation document; the user re-opens
+the file the way they re-open a video.
+
+The **one asymmetry** is the timeline: only a video has frames and an engine, so
+only a video can be the primary or a follower. An image is never either. This is
+why `primaryVideoLayer` and the whole "Multiple videos" machinery below stay
+video-specific even though stacking, precedence, and opacity generalize.
+
+**Image-only mode** (an image open, no video) has no engine, so `app.engine` is
+null, `app.currentFrame` is 0, and the transport bar shows a disabled "Frame 0"
+— the null-engine guards on `seekToFrame` / `stepFrame` / `togglePlayback` were
+already in place. Annotations still work: frame-agnostic ones are frame-less,
+anchored ones bind to frame 0. Autosave and export provenance follow
+`app.mediaInformation`, which falls back from the primary video to the
+bottom-most image, so a lone image's annotations persist across a refresh and
+its file name is recorded in the export. `offerAutosaveRestore` seeds the
+document from whichever media is opened *first* and never restores over
+annotations already on screen, so opening a video beside an annotated image does
+not clobber it.
+
+### Stacking, precedence, and opacity (all media)
+
+Everything in this subsection is keyed off `isMedia`, so it applies to videos
+and images alike; a video's *timeline* role is the next subsection.
+
+A newly dropped or opened piece of media (`loadMediaIntoWorkspace`, dispatching
+to `loadVideoSource` / `loadImageSource`) usually becomes a new layer stacked
+directly above the topmost media already open (`mediaInsertionIndex` — media sit
+together beneath the annotation layers). Re-dropping an already-open clip opens
+another layer of it — two copies at different temporal offsets is a legitimate
+way to compare moments of one clip.
+
+The exception is the **"Second media" setting** (Settings modal, a global
+`localStorage` preference — `js/second-media-preference.js`), which governs the
+one case where a single piece of media is already open and another is loaded:
+`'prompt'` (default) asks each time via a small dialog
+(`js/ui/second-media-prompt.js`, whose question names the kind already open —
+"A video/image is already loaded" — with an optional "save my choice"),
+`'replace'` swaps out the current media, and `'new-layer'` stacks it. With
+nothing open the drop is simply the first media; with two or more already open
+it always makes a new layer, regardless of the setting (there is no single one
+to replace). Replace closes the outgoing media of **either** kind
+(`app.closeMediaLayer`) before the newcomer joins, and works across kinds (an
+image can replace a video and vice versa). The annotation document is left
+untouched by a replace.
+
+Media added as a **new layer** loads at 75% opacity so the media beneath show
+through it, and the first time a companion joins (exactly two media now) the one
+already open drops from a full 100% to 75% too (`dimJoiningMediaLayer`; a layer
+already at some other opacity is left as the user set it; a third-or-later layer
+only dims itself). The first media of the workspace stays at 100% and fits the
+view; a replace's incoming media loads as that first media.
+
+**Media layers paint in reverse stack order** (`viewer.renderIfNeeded`): the
+leftmost media tab paints last among the media, so it sits on *top* of the
+others rather than beneath them, and dragging a media tab leftmost brings it to
+the front. Only the media reverse; every non-media (annotation) layer keeps its
+position, so annotation layers still draw over all footage. This is the one
+place a layer's paint depth differs from its stack index — for media alone,
+leftmost is topmost, the opposite of the leftmost-is-bottom rule the tabs
+otherwise follow. Because tab order *is* paint order, the leftmost video is by
+definition the frontmost video.
+
 ### Multiple videos: one primary, seek-following followers
 
-A newly dropped or opened video (`loadVideoIntoWorkspace`) usually becomes a
-new video layer stacked directly above the topmost video (videos sit together
-beneath the annotation layers). Re-dropping an already-open clip opens another
-layer of it — two copies at different temporal offsets is a legitimate way to
-compare moments of one clip.
-
-The exception is the **"Second video" setting** (Settings modal, a global
-`localStorage` preference — `js/second-video-preference.js`), which governs the
-one case where a single video is already open and another is loaded: `'prompt'`
-(default) asks each time via a small dialog (`js/ui/second-video-prompt.js`,
-with an optional "save my choice"), `'replace'` swaps out the current video,
-and `'new-layer'` stacks it. With no video open the drop is simply the first
-video; with two or more already open it always makes a new layer, regardless of
-the setting (there is no single video to replace). Replace loads the new clip as
-a follower, then closes the video it replaces — which promotes the newcomer to
-primary (`app.closeVideoLayer`) and refits the view. The annotation document is
-left untouched by a replace: its frame indices now describe the new video's
-frames, matching how promoting a video on close already behaves.
-
-A video added as a **new layer** loads at 75% opacity so the videos beneath
-show through it, and the first time a second video joins, the primary drops
-from a full 100% to 75% too (a primary already at some other opacity is left as
-the user set it; a third-or-later video only dims itself). Replace skips this —
-its incoming video becomes the sole primary, so it stays at 100%.
-
-**Video layers paint in reverse stack order** (`viewer.renderIfNeeded`): the
-leftmost video tab — the primary — paints last among the videos, so it sits on
-*top* of the others rather than beneath them, and promoting a video (dragging it
-leftmost) brings it to the front. Only the videos reverse; every non-video layer
-keeps its position, so annotation layers still draw over all footage. This is
-the one place a layer's paint depth differs from its stack index — for videos
-alone, leftmost is topmost, the opposite of the leftmost-is-bottom rule the tabs
-otherwise follow.
+The timeline is video-only. Among the open videos one is the **primary**, and
+the rest are followers seeked to match it; images take no part in this.
 
 - **One video is the primary** (`app.primaryVideoLayer`): the **leftmost video
   layer** (bottom of the stack, `videoLayers[0]`). Its engine drives the

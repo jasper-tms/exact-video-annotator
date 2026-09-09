@@ -5,7 +5,7 @@
 // Built once, as a native <dialog>, and reused for every open.
 
 import { isPixelGridEnabled, setPixelGridEnabled } from '../pixel-grid.js';
-import { getSecondVideoBehavior, setSecondVideoBehavior } from '../second-video-preference.js';
+import { getSecondMediaBehavior, setSecondMediaBehavior } from '../second-media-preference.js';
 import { getSyncedPlaybackPacing, setSyncedPlaybackPacing } from '../synced-playback-preference.js';
 import { isLoadedFramesHighlightEnabled, setLoadedFramesHighlightEnabled }
   from '../loaded-frames-highlight-preference.js';
@@ -71,30 +71,30 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   app.addEventListener('layers-changed', reflectIntegerCoordinateSelect);
   reflectIntegerCoordinateSelect();
 
-  /* ---- Second video behavior ---- */
+  /* ---- Second media behavior ---- */
 
-  const secondVideoRow = document.createElement('div');
-  secondVideoRow.className = 'settings-row';
-  const secondVideoLabel = document.createElement('label');
-  secondVideoLabel.htmlFor = 'second-video-select';
-  secondVideoLabel.textContent = 'Second video:';
-  const secondVideoSelect = document.createElement('select');
-  secondVideoSelect.id = 'second-video-select';
-  secondVideoSelect.title =
-    'What to do when a second video is loaded while one is already open';
+  const secondMediaRow = document.createElement('div');
+  secondMediaRow.className = 'settings-row';
+  const secondMediaLabel = document.createElement('label');
+  secondMediaLabel.htmlFor = 'second-media-select';
+  secondMediaLabel.textContent = 'Second media:';
+  const secondMediaSelect = document.createElement('select');
+  secondMediaSelect.id = 'second-media-select';
+  secondMediaSelect.title =
+    'What to do when a second video or image is loaded while one is already open';
   for (const [value, text] of [['prompt', 'Prompt'], ['replace', 'Replace'], ['new-layer', 'New layer']]) {
     const optionElement = document.createElement('option');
     optionElement.value = value;
     optionElement.textContent = text;
-    secondVideoSelect.appendChild(optionElement);
+    secondMediaSelect.appendChild(optionElement);
   }
-  secondVideoSelect.value = getSecondVideoBehavior();
-  secondVideoSelect.addEventListener('change', () => {
-    setSecondVideoBehavior(secondVideoSelect.value);
+  secondMediaSelect.value = getSecondMediaBehavior();
+  secondMediaSelect.addEventListener('change', () => {
+    setSecondMediaBehavior(secondMediaSelect.value);
   });
-  secondVideoRow.append(secondVideoLabel, secondVideoSelect);
-  dialogElement.appendChild(secondVideoRow);
-  // The second-video prompt dialog can persist a fresh choice while this modal
+  secondMediaRow.append(secondMediaLabel, secondMediaSelect);
+  dialogElement.appendChild(secondMediaRow);
+  // The second-media prompt dialog can persist a fresh choice while this modal
   // is closed, so openSettings() below re-reads this select every time Settings
   // opens (from the toolbar button or the ＋ menu) — it is never left stale.
 
@@ -266,7 +266,7 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   // surfaces (the ＋ menu's Plugins page "New…" entry) can open it and draw the
   // eye to a section with a brief flash.
   function openSettings({ flashPlugins } = {}) {
-    secondVideoSelect.value = getSecondVideoBehavior();
+    secondMediaSelect.value = getSecondMediaBehavior();
     renderPluginsList();
     dialogElement.showModal();
     if (flashPlugins) {

@@ -10,7 +10,7 @@
 //                   catches every frame, but never gets ahead of real time.
 // A global preference, not per-document, so it is persisted through the shared
 // preference store (localStorage, and the Firebase backend when signed in)
-// alongside the other cross-application settings (see second-video-preference.js).
+// alongside the other cross-application settings (see second-media-preference.js).
 
 import { definePreference } from './sync/preference-store.js';
 

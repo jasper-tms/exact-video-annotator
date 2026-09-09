@@ -202,7 +202,7 @@ export function initializeLayerDetail(app, containerElement) {
     if (layer.type === 'video' && layer.engine) {
       const facts = document.createElement('dl');
       facts.className = 'layer-detail-facts';
-      const information = layer.videoInformation ?? {};
+      const information = layer.mediaInformation ?? {};
       const engine = layer.engine;
       // While the index is still being built, the frame count and the duration
       // describe the part of the clip indexed so far, so they are labelled as
@@ -226,6 +226,27 @@ export function initializeLayerDetail(app, containerElement) {
         ['frame indices', engine.frameIndexIsExact === false ? 'APPROXIMATE (clip could not be indexed)' : 'exact'],
         ['engine tier', engine.tier],
         ['codec', engine.codecString],
+      ]) {
+        if (value === null || value === undefined) continue;
+        const termElement = document.createElement('dt');
+        termElement.textContent = term;
+        const valueElement = document.createElement('dd');
+        valueElement.textContent = String(value);
+        facts.append(termElement, valueElement);
+      }
+      containerElement.appendChild(facts);
+    }
+
+    /* ---- Image layer: the picture's facts ---- */
+
+    if (layer.type === 'image' && layer.bitmap) {
+      const facts = document.createElement('dl');
+      facts.className = 'layer-detail-facts';
+      const information = layer.mediaInformation ?? {};
+      for (const [term, value] of [
+        ['file', information.name],
+        ['dimensions', `${layer.bitmap.width} × ${layer.bitmap.height}`],
+        ['shown on', 'every frame (no timeline)'],
       ]) {
         if (value === null || value === undefined) continue;
         const termElement = document.createElement('dt');

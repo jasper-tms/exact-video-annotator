@@ -305,34 +305,34 @@ button:focus:not(:focus-visible) { outline: none; }
   animation: settings-section-flash 1.1s ease-out;
 }
 
-/* ---------- Second-video prompt ---------- */
+/* ---------- Second-media prompt ---------- */
 
-.second-video-question {
+.second-media-question {
   margin: 0 0 12px;
   font-size: 13px;
 }
 
-.second-video-choices {
+.second-media-choices {
   display: flex;
   gap: 10px;
   margin-bottom: 14px;
 }
 
 /* Two side-by-side toggle buttons; the highlighted one gets an accent outline. */
-.second-video-choice {
+.second-media-choice {
   flex: 1 1 0;
   padding: 12px 10px;
   font-size: 16px;
   font-weight: 600;
 }
 
-.second-video-choice.selected {
+.second-media-choice.selected {
   border-color: var(--accent);
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 
-.second-video-save {
+.second-media-save {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -341,7 +341,7 @@ button:focus:not(:focus-visible) { outline: none; }
   color: var(--text-dim);
 }
 
-.second-video-buttons {
+.second-media-buttons {
   display: flex;
   justify-content: flex-end;
   gap: 8px;

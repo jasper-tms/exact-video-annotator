@@ -4,6 +4,7 @@
 
 import { Viewer } from './viewer.js';
 import { VideoLayer } from './layers/video-layer.js';
+import { ImageLayer } from './layers/image-layer.js';
 import { CoordinatesLayer } from './layers/coordinates-layer.js';
 import { SegmentationLayer } from './layers/segmentation-layer.js';
 import { FramesLayer } from './layers/frames-layer.js';
@@ -29,8 +30,8 @@ import { initializeToasts } from './ui/toasts.js';
 import { initializeSettingsModal } from './ui/settings-modal.js';
 import { initializeAccountControl } from './ui/account-control.js';
 import { initializeSync } from './sync/sync-engine.js';
-import { getSecondVideoBehavior, setSecondVideoBehavior } from './second-video-preference.js';
-import { promptForSecondVideoChoice } from './ui/second-video-prompt.js';
+import { getSecondMediaBehavior, setSecondMediaBehavior } from './second-media-preference.js';
+import { promptForSecondMediaChoice } from './ui/second-media-prompt.js';
 import { drawPixelGrid } from './pixel-grid.js';
 
 // The Cloudflare Pages project is exact-video-annotator.pages.dev, kept as
@@ -160,6 +161,17 @@ class Application extends EventTarget {
     return this.viewer.layers.filter((layer) => layer.type === 'video');
   }
 
+  get imageLayers() {
+    return this.viewer.layers.filter((layer) => layer.type === 'image');
+  }
+
+  /** Media layers that put a picture on the stage: videos and still images.
+      The drop hint reads this to know whether anything is open yet. */
+  get mediaLayers() {
+    return this.viewer.layers.filter(
+      (layer) => layer.type === 'video' || layer.type === 'image');
+  }
+
   /** The video layers actually contributing pixels to the stage — hidden or
       fully-transparent ones do not. Playback-mode selection reads this (not
       videoLayers) so that hiding all but one video drops the app back to the
@@ -174,7 +186,18 @@ class Application extends EventTarget {
   get engine() { return this.primaryVideoLayer?.engine ?? null; }
 
   /** The primary video's facts (see videoInformationFromEngine), or null. */
-  get videoInformation() { return this.primaryVideoLayer?.videoInformation ?? null; }
+  get videoInformation() { return this.primaryVideoLayer?.mediaInformation ?? null; }
+
+  /** The media file the document is provenance-anchored to: the primary video
+      when one is open, otherwise the bottom-most image (image-only mode). It
+      keys autosave and fills the export's provenance, so a lone image's
+      annotations persist across a refresh and record which image they were
+      drawn on. Both video and image facts carry { name, sizeBytes }, which is
+      all autosaveKey and the export need. Null when nothing is open. */
+  get mediaInformation() {
+    if (this.videoInformation) return this.videoInformation;
+    return this.imageLayers[0]?.mediaInformation ?? null;
+  }
 
   /** The frame a follower video should be sitting on right now, per its link
       settings. 'frame-index' pairs equal frame numbers (plus an offset in
@@ -339,6 +362,30 @@ class Application extends EventTarget {
     this.dispatchEvent(new CustomEvent('frame-changed'));
     this.dispatchEvent(new CustomEvent('index-changed'));
     this.viewer.requestRender();
+  }
+
+  /** Close a still-image layer: remove it from the stage and free its bitmap.
+      Images carry no engine, timeline, or annotations, so unlike closing a
+      video this cannot re-key anything — it just drops a picture. */
+  closeImageLayer(layerId) {
+    const imageLayer = this.imageLayers.find((layer) => layer.id === layerId);
+    if (!imageLayer) return;
+    this.viewer.removeLayer(imageLayer);
+    imageLayer.bitmap?.close?.();
+    imageLayer.bitmap = null;
+    if (this.activeLayerId === layerId) this.activeLayerId = null;
+    updateDropHint();
+    this.dispatchEvent(new CustomEvent('layers-changed'));
+    this.viewer.requestRender();
+  }
+
+  /** Close a media layer of either kind, dispatching to the right teardown.
+      Used by the generalized replace path and the tab bar's ✕. */
+  closeMediaLayer(layerId) {
+    const mediaLayer = this.mediaLayers.find((layer) => layer.id === layerId);
+    if (!mediaLayer) return;
+    if (mediaLayer.type === 'video') this.closeVideoLayer(layerId);
+    else this.closeImageLayer(layerId);
   }
 
   /** Re-evaluate which video owns the clock after a layer reorder: the leftmost
@@ -1002,13 +1049,14 @@ class Application extends EventTarget {
   markDocumentChanged() {
     this.dispatchEvent(new CustomEvent('document-changed'));
     this.viewer.requestRender();
-    if (!this.videoInformation) return;
+    if (!this.mediaInformation) return;
     clearTimeout(this.#autosaveTimer);
     this.#autosaveTimer = setTimeout(() => {
-      // The primary video (whose name + size key the autosave) can be closed
-      // between scheduling and firing.
-      if (!this.videoInformation) return;
-      saveAutosave(autosaveKey(this.videoInformation), this.annotationDocument, this.videoInformation);
+      // The media the autosave keys off (the primary video, or the anchoring
+      // image) can be closed between scheduling and firing.
+      const mediaInformation = this.mediaInformation;
+      if (!mediaInformation) return;
+      saveAutosave(autosaveKey(mediaInformation), this.annotationDocument, mediaInformation);
     }, AUTOSAVE_DEBOUNCE_MILLISECONDS);
   }
 
@@ -1114,9 +1162,126 @@ app.setActiveTool('pan');
 
 /* ---------- Video loading ---------- */
 
-/** Whether the drop hint invites a first video: shown only while none is open. */
+/** Whether the drop hint invites a first piece of media: shown only while
+    nothing — no video and no image — is open. */
 function updateDropHint() {
-  dropHint.classList.toggle('hidden', app.videoLayers.length > 0);
+  dropHint.classList.toggle('hidden', app.mediaLayers.length > 0);
+}
+
+/* ---------- Media loading: shared across video and image ----------
+
+   A video layer and an image layer are two kinds of MEDIA layer, and the app
+   treats them the same way whenever the behavior is about "media": where a
+   newly opened one sits in the stack, its opacity, and the "a video/image is
+   already loaded" prompt. The helpers here express that shared logic once; the
+   two kind-specific loaders below (loadVideoSource / loadImageSource) call into
+   it. Only the timeline is video-specific and lives with the video code. */
+
+// Still-image formats every browser decodes natively through
+// createImageBitmap. TIFF is deliberately absent — no browser decodes it
+// without a JavaScript decoder — and would be a separate, larger addition.
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'];
+
+/** Whether a dropped or picked file looks like a still image we can open. The
+    file's MIME type is the primary signal; the extension is the fallback for
+    the platforms and drops that hand over a blank type. */
+function isImageFile(file) {
+  const type = (file.type || '').toLowerCase();
+  if (type.startsWith('image/')) return true;
+  const name = (file.name || '').toLowerCase();
+  return IMAGE_EXTENSIONS.some((extension) => name.endsWith(extension));
+}
+
+/** Where a freshly opened media layer goes in the stack: directly above the
+    topmost media already open (media sit together beneath the annotation
+    layers), or index 0 when nothing is open. Combined with the reversed-media
+    paint order (viewer.js), this puts the newcomer BEHIND the current front —
+    the same rule videos have always followed, now shared by images. */
+function mediaInsertionIndex() {
+  const mediaIndexes = app.viewer.layers
+    .map((layer, index) => (layer.isMedia ? index : -1))
+    .filter((index) => index !== -1);
+  return mediaIndexes.length > 0 ? mediaIndexes[mediaIndexes.length - 1] + 1 : 0;
+}
+
+/** Dim a media layer that is joining media already on screen so both show
+    through, exactly as a second video has always done: the newcomer drops to
+    75%, and the first time a companion joins (exactly two media now) the one
+    already there drops from a full 100% to 75% too. A layer the user has
+    already dialed to some other opacity is left alone; a third-or-later layer
+    only dims itself. */
+function dimJoiningMediaLayer(mediaLayer) {
+  mediaLayer.setOpacity(0.75);
+  const others = app.mediaLayers.filter((layer) => layer !== mediaLayer);
+  if (others.length === 1 && others[0].opacity === 1) others[0].setOpacity(0.75);
+}
+
+/** Offer to restore annotations autosaved for this media file — a video or an
+    image, keyed by its name + size. Restores only into an EMPTY document, so
+    opening media never clobbers annotations already on screen: whichever piece
+    of media is opened first seeds the document, and later ones only add their
+    picture. (At a fresh first-video load the document is empty anyway, so this
+    guard changes nothing there; it matters when an image with annotations is
+    already open and a video with its own autosave then joins.) */
+function offerAutosaveRestore(mediaInformation) {
+  if (!mediaInformation) return;
+  const documentHasItems = app.annotationDocument.layers
+    .some((layer) => layer.items.length > 0);
+  if (documentHasItems) return;
+  const autosaved = loadAutosave(autosaveKey(mediaInformation));
+  if (autosaved && autosaved.document.layers.some((layer) => layer.items.length > 0)) {
+    app.replaceDocument(autosaved.document);
+    app.showToast(`Restored autosaved annotations (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
+  }
+}
+
+/** Open a still image as a new media layer. It joins the stack exactly as a
+    video does — inserted behind the current front, dimmed when it joins other
+    media — because an image is media too; the only thing it never does is drive
+    the timeline. The image draws on every frame regardless of the scrubber, so
+    it stays on screen whether or not a video is open. A `replaceMediaLayer` in
+    the meta swaps out that layer first (the "Replace" choice, which may be
+    swapping out a video). */
+async function loadImageSource(source, { name, sizeBytes, replaceMediaLayer = null }) {
+  let bitmap;
+  try {
+    // A Blob/File decodes directly; a URL string is fetched first. Images are
+    // small next to the byte-range videos, so reading the whole file is fine.
+    const blob = typeof source === 'string' ? await (await fetch(source)).blob() : source;
+    bitmap = await createImageBitmap(blob);
+  } catch (error) {
+    console.error('Image failed to load.', error);
+    app.showToast(`Could not open ${name}: ${error?.message ?? error}`, { kind: 'error' });
+    return;
+  }
+
+  // Replace swaps out the single open media (of either kind) before this one
+  // joins, so the newcomer loads as if it were the first media.
+  if (replaceMediaLayer && app.mediaLayers.includes(replaceMediaLayer)) {
+    app.closeMediaLayer(replaceMediaLayer.id);
+  }
+
+  const imageLayer = new ImageLayer(bitmap, { name });
+  imageLayer.mediaSource = source;
+  imageLayer.mediaInformation = {
+    name, sizeBytes: sizeBytes ?? null, width: bitmap.width, height: bitmap.height,
+  };
+  app.viewer.addLayer(imageLayer, mediaInsertionIndex());
+
+  const isFirstMedia = app.mediaLayers.length === 1;
+  if (isFirstMedia) {
+    app.viewer.fitToContent();
+    // The first media seeds the document — offer this image's autosaved
+    // annotations, exactly as the first video does. Later media add only a
+    // picture, so they never restore (and a replace deliberately keeps the
+    // annotations already on screen).
+    if (!replaceMediaLayer) offerAutosaveRestore(imageLayer.mediaInformation);
+  } else {
+    dimJoiningMediaLayer(imageLayer);
+  }
+  updateDropHint();
+  app.setActiveLayer(imageLayer.id);
+  app.dispatchEvent(new CustomEvent('layers-changed'));
 }
 
 /** Each engine presents into its own canvas + <video> pair, held by a
@@ -1141,7 +1306,7 @@ function createEngineHost() {
     Re-dropping a clip that is already open simply opens another layer of it —
     two copies of one clip at different temporal offsets is a legitimate way
     to compare moments. */
-async function loadVideoSource(source, { name, sizeBytes, replaceVideoLayer = null }) {
+async function loadVideoSource(source, { name, sizeBytes, replaceMediaLayer = null }) {
   // Ties this load's indexing progress to its own status line, and lets a
   // video closed mid-index silence the pass still reading its file
   // (destroying an engine does not stop an index pass already underway).
@@ -1170,7 +1335,7 @@ async function loadVideoSource(source, { name, sizeBytes, replaceVideoLayer = nu
         }
       },
     });
-    attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier, replaceVideoLayer });
+    attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier, replaceMediaLayer });
   } catch (error) {
     activeLoadIdentifiers.delete(loadIdentifier);
     clearIndexingStatus(loadIdentifier);
@@ -1179,29 +1344,37 @@ async function loadVideoSource(source, { name, sizeBytes, replaceVideoLayer = nu
   }
 }
 
-/** Decide how a video the user just dropped or opened should join the
-    workspace, then load it. With no video open it is simply the first video.
-    With two or more already open, a new video always makes a new layer — there
-    is no single video to replace. With exactly one open, the "Second video"
-    setting decides: 'new-layer' (stack it), 'replace' (swap out that one
-    video), or 'prompt' (ask each time, offering to remember the answer). A
-    canceled prompt loads nothing. */
-async function loadVideoIntoWorkspace(source, meta) {
-  const openVideoLayers = app.videoLayers;
-  if (openVideoLayers.length !== 1) {
-    loadVideoSource(source, meta);
+/** Load a video or an image, minding whatever media is already open. `kind` is
+    'video' or 'image'; `meta` carries { name, sizeBytes }. */
+function loadMediaSource(source, meta, kind) {
+  if (kind === 'image') loadImageSource(source, meta);
+  else loadVideoSource(source, meta);
+}
+
+/** Decide how the media the user just dropped or opened — a video OR an image —
+    should join the workspace, then load it. With nothing open it is simply the
+    first media. With two or more media already open, a new one always makes a
+    new layer — there is no single one to replace. With exactly one open, the
+    "Second media" setting decides: 'new-layer' (stack it), 'replace' (swap out
+    that one, of either kind), or 'prompt' (ask each time, offering to remember
+    the answer). A canceled prompt loads nothing. Videos and images are treated
+    identically here — the prompt just names the kind already open. */
+async function loadMediaIntoWorkspace(source, meta, kind) {
+  const openMedia = app.mediaLayers;
+  if (openMedia.length !== 1) {
+    loadMediaSource(source, meta, kind);
     return;
   }
-  let behavior = getSecondVideoBehavior();
+  let behavior = getSecondMediaBehavior();
   if (behavior === 'prompt') {
-    const answer = await promptForSecondVideoChoice();
+    const answer = await promptForSecondMediaChoice(openMedia[0].type);
     if (!answer) return;
     behavior = answer.choice;
-    if (answer.save) setSecondVideoBehavior(behavior);
+    if (answer.save) setSecondMediaBehavior(behavior);
   }
-  loadVideoSource(source, behavior === 'replace'
-    ? { ...meta, replaceVideoLayer: openVideoLayers[0] }
-    : meta);
+  loadMediaSource(source, behavior === 'replace'
+    ? { ...meta, replaceMediaLayer: openMedia[0] }
+    : meta, kind);
 }
 
 /** A load refusal arrives from the engine (v2.4+) as an UnplayableClipError: a
@@ -1325,7 +1498,7 @@ function wireEngineEvents(videoLayer, engine) {
   let pendingIndexDispatch = null;
   const refreshIndexFacts = ({ immediate }) => {
     if (!engineIsCurrent(videoLayer, engine)) return;
-    videoLayer.videoInformation = videoInformationFromEngine(engine, videoLayer.videoInformation);
+    videoLayer.mediaInformation = videoInformationFromEngine(engine, videoLayer.mediaInformation);
     clearTimeout(pendingIndexDispatch);
     const sinceLast = performance.now() - lastIndexDispatchMilliseconds;
     if (!immediate && sinceLast < INDEX_EVENT_THROTTLE_MILLISECONDS) {
@@ -1357,7 +1530,7 @@ function wireEngineEvents(videoLayer, engine) {
     if (!engineIsCurrent(videoLayer, engine)) return;
     const detail = event.detail ?? {};
     if (!detail.message) return;
-    const videoName = videoLayer.videoInformation?.name ?? videoLayer.name;
+    const videoName = videoLayer.mediaInformation?.name ?? videoLayer.name;
     // An index that stopped early is flagged fatal too, but it is not a dead
     // decoder: the frames already published stay exact and keep playing, and
     // rebuilding on the native tier would only re-scan the same container —
@@ -1372,74 +1545,52 @@ function wireEngineEvents(videoLayer, engine) {
   });
 }
 
-function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier, replaceVideoLayer = null }) {
-  // A replace swaps out the single open video. The incoming engine is already
-  // certified (loadVideoSource threw before reaching here if the load failed),
-  // so close the outgoing video now and let this one load along the very same
-  // path a fresh first video takes — primary from the start, fitted to the
-  // view, its engine sitting on its own frame 0 — rather than staging it as a
-  // follower that inherits the outgoing video's playhead. The one fresh-load
-  // step a replace skips is the autosave restore below: annotations are keyed
-  // to frame numbers and deliberately left as they are, now reading against the
-  // new video's frames.
-  if (replaceVideoLayer && app.videoLayers.includes(replaceVideoLayer)) {
-    app.closeVideoLayer(replaceVideoLayer.id);
+function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdentifier, replaceMediaLayer = null }) {
+  // A replace swaps out the single open media (a video OR an image). The
+  // incoming engine is already certified (loadVideoSource threw before reaching
+  // here if the load failed), so close the outgoing media now and let this one
+  // load along the very same path fresh first media takes. A replace's one
+  // difference is the autosave restore below: the annotations already on screen
+  // are deliberately kept, now reading against the new video's frames.
+  if (replaceMediaLayer && app.mediaLayers.includes(replaceMediaLayer)) {
+    app.closeMediaLayer(replaceMediaLayer.id);
   }
 
   const videoLayer = new VideoLayer(engine, hostElement, { name });
-  videoLayer.videoSource = source;
+  videoLayer.mediaSource = source;
   videoLayer.loadIdentifier = loadIdentifier;
-  videoLayer.videoInformation = videoInformationFromEngine(engine, { name, sizeBytes });
+  videoLayer.mediaInformation = videoInformationFromEngine(engine, { name, sizeBytes });
   if (engine.frameIndexState !== 'growing') clearIndexingStatus(loadIdentifier);
 
-  // The new video stacks directly above the topmost video already open —
-  // videos sit together beneath the annotation layers — and the first one
-  // starts the stack at the bottom.
-  const videoLayerIndexes = app.viewer.layers
-    .map((layer, index) => (layer.type === 'video' ? index : -1))
-    .filter((index) => index !== -1);
-  const insertionIndex = videoLayerIndexes.length > 0
-    ? videoLayerIndexes[videoLayerIndexes.length - 1] + 1 : 0;
-  app.viewer.addLayer(videoLayer, insertionIndex);
+  // Media stacks together beneath the annotation layers; a new one goes behind
+  // the current front (shared with images — see mediaInsertionIndex).
+  app.viewer.addLayer(videoLayer, mediaInsertionIndex());
   wireEngineEvents(videoLayer, engine);
   // A change to this video's visibility or opacity can change which playback mode
   // fits (showing a hidden second video should turn solo play into synced, and
   // vice versa), so re-evaluate on every change to the layer while it is playing.
   videoLayer.addEventListener('layer-changed', () => app.reconcilePlaybackMode());
 
+  // Timeline ownership is video-only: this video becomes the primary if no
+  // video was open (even when an image already was — the image never drove the
+  // timeline). Being the first MEDIA of the whole workspace is a separate
+  // question that governs the view and the document, and generalizes to images.
+  const isFirstMedia = app.mediaLayers.length === 1;
   const becomesPrimary = app.primaryVideoLayer === null;
-  if (becomesPrimary) {
-    app.primaryVideoLayer = videoLayer;
-    app.viewer.fitToContent();
+  if (becomesPrimary) app.primaryVideoLayer = videoLayer;
 
-    // Offer any autosaved annotations for this exact video (name + size).
-    // Only the primary: the document is keyed to its timeline, and a follower
-    // arriving later must not replace annotations already in progress. A
-    // replace skips this entirely — its annotations stay put and reapply to the
-    // incoming video's frame numbers, rather than being swapped for whatever the
-    // new video last had autosaved.
-    if (!replaceVideoLayer) {
-      const key = autosaveKey(app.videoInformation);
-      const autosaved = loadAutosave(key);
-      if (autosaved && autosaved.document.layers.some((layer) => layer.items.length > 0)) {
-        app.replaceDocument(autosaved.document);
-        app.showToast(`Restored autosaved annotations (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
-      }
-    }
+  if (isFirstMedia) {
+    app.viewer.fitToContent();
+    // The first media seeds the document — offer this video's autosaved
+    // annotations. A replace keeps the annotations already on screen instead.
+    if (!replaceMediaLayer) offerAutosaveRestore(app.mediaInformation);
   } else {
-    // A new video stacked over one or more already open — a genuine "new
-    // layer". Dim it to 75% so the videos beneath show through it, and the
-    // first time a second video joins, drop the primary from a full 100% to 75%
-    // too so neither wholly hides the other. A primary the user has already
-    // dialed to some other opacity is left as they set it; a third-or-later
-    // video only dims itself.
-    videoLayer.setOpacity(0.75);
-    if (app.videoLayers.length === 2 && app.primaryVideoLayer.opacity === 1) {
-      app.primaryVideoLayer.setOpacity(0.75);
-    }
-    // A follower starts out on the frame matching the primary's playhead.
-    app.synchronizeFollowerVideos();
+    // Joining media already on screen: dim like any additional media layer.
+    dimJoiningMediaLayer(videoLayer);
   }
+  // A brand-new follower (a primary video was already open) starts on the frame
+  // matching the primary's playhead.
+  if (!becomesPrimary) app.synchronizeFollowerVideos();
   updateDropHint();
 
   if (engine.frameIndexIsExact === false) {
@@ -1461,12 +1612,12 @@ function attachEngine(engine, { name, sizeBytes, source, hostElement, loadIdenti
     playhead, keeping the layer itself (id, tab, transform, link settings). */
 async function recoverFromFatalDecode(videoLayer) {
   const frameBeforeFailure = videoLayer.engine.currentFrame;
-  const videoName = videoLayer.videoInformation?.name ?? videoLayer.name;
+  const videoName = videoLayer.mediaInformation?.name ?? videoLayer.name;
   app.showToast(`${videoName}: the video decoder failed mid-stream; switching to the fallback player…`,
     { kind: 'warning' });
   try {
     videoLayer.engine.destroy();
-    const engine = await createBestEngine(videoLayer.videoSource, {
+    const engine = await createBestEngine(videoLayer.mediaSource, {
       canvas: videoLayer.hostElement.querySelector('canvas'),
       video: videoLayer.hostElement.querySelector('video'),
       prefer: 'native',
@@ -1477,7 +1628,7 @@ async function recoverFromFatalDecode(videoLayer) {
       return;
     }
     videoLayer.replaceEngine(engine);
-    videoLayer.videoInformation = videoInformationFromEngine(engine, videoLayer.videoInformation);
+    videoLayer.mediaInformation = videoInformationFromEngine(engine, videoLayer.mediaInformation);
     wireEngineEvents(videoLayer, engine);
     engine.seekToFrame(frameBeforeFailure);
     if (videoLayer === app.primaryVideoLayer) {
@@ -1799,12 +1950,15 @@ scrollToggleButton.addEventListener('click', () => {
 window.addEventListener('scroll', reflectScrollToggle, { passive: true });
 reflectScrollToggle();
 
-const videoFileInput = document.getElementById('video-file-input');
-document.getElementById('open-video-button').addEventListener('click', () => videoFileInput.click());
-videoFileInput.addEventListener('change', () => {
-  const file = videoFileInput.files?.[0];
-  if (file) loadVideoIntoWorkspace(file, { name: file.name, sizeBytes: file.size });
-  videoFileInput.value = '';
+const mediaFileInput = document.getElementById('media-file-input');
+document.getElementById('open-media-button').addEventListener('click', () => mediaFileInput.click());
+mediaFileInput.addEventListener('change', () => {
+  const file = mediaFileInput.files?.[0];
+  if (file) {
+    const meta = { name: file.name, sizeBytes: file.size };
+    loadMediaIntoWorkspace(file, meta, isImageFile(file) ? 'image' : 'video');
+  }
+  mediaFileInput.value = '';
 });
 
 const annotationsFileInput = document.getElementById('annotations-file-input');
@@ -1831,8 +1985,8 @@ async function importAnnotationsFile(file) {
 }
 
 document.getElementById('export-annotations-button').addEventListener('click', () => {
-  const json = documentToJson(app.annotationDocument, app.videoInformation);
-  const baseName = (app.videoInformation?.name ?? 'annotations').replace(/\.[^.]+$/, '');
+  const json = documentToJson(app.annotationDocument, app.mediaInformation);
+  const baseName = (app.mediaInformation?.name ?? 'annotations').replace(/\.[^.]+$/, '');
   const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
   const anchor = document.createElement('a');
   anchor.href = URL.createObjectURL(blob);
@@ -1854,7 +2008,8 @@ stageContainer.addEventListener('drop', async (event) => {
   const file = event.dataTransfer?.files?.[0];
   if (!file) return;
   if (file.name.toLowerCase().endsWith('.json')) await importAnnotationsFile(file);
-  else loadVideoIntoWorkspace(file, { name: file.name, sizeBytes: file.size });
+  else loadMediaIntoWorkspace(file, { name: file.name, sizeBytes: file.size },
+    isImageFile(file) ? 'image' : 'video');
 });
 
 /* ---------- Buttons: no lingering focus ring after a mouse click ----------

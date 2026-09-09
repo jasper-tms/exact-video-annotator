@@ -312,7 +312,21 @@ export function initializeTransport(app, containerElement) {
     for (const control of [playButton, stepBackwardButton, stepForwardButton, scrubber, frameInput]) {
       control.disabled = !hasVideo;
     }
-    if (!hasVideo) return;
+    if (!hasVideo) {
+      // No engine drives the timeline — an image-only workspace, or nothing
+      // open yet. The controls are disabled above; show a plain zeroed readout
+      // rather than leaving the frame box and totals blank.
+      playButton.classList.remove('is-playing');
+      scrubber.max = '0';
+      scrubber.value = '0';
+      if (document.activeElement !== frameInput) frameInput.value = '0';
+      frameTotal.textContent = '/ 0';
+      timeReadout.textContent = `${formatTime(0)} / ${formatTime(0)}`;
+      indexWaiting.hidden = true;
+      exactnessWarning.hidden = true;
+      readout.classList.remove('index-growing', 'index-truncated');
+      return;
+    }
     // isPlaying, not engine.paused: a synchronized play advances the videos
     // while every engine's own paused flag stays true (see app.isPlaying).
     playButton.classList.toggle('is-playing', app.isPlaying);

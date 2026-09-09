@@ -193,6 +193,12 @@ export function initializeLayerTabs(app, containerElement) {
       app.closeVideoLayer(layer.id);
       return;
     }
+    if (layer.type === 'image') {
+      // An image carries no annotations and no timeline, so closing it needs
+      // no warning — it just removes the picture.
+      app.closeImageLayer(layer.id);
+      return;
+    }
     const itemCount = Array.isArray(layer.items) ? layer.items.length : 0;
     if (itemCount > 0) {
       const warning = `⚠️ DELETE the layer "${layer.name}" and the `
@@ -210,7 +216,9 @@ export function initializeLayerTabs(app, containerElement) {
       ? 'Select a layer to delete it'
       : layer.type === 'video'
         ? `Close the video "${layer.name}"`
-        : `Delete the layer "${layer.name}"`;
+        : layer.type === 'image'
+          ? `Close the image "${layer.name}"`
+          : `Delete the layer "${layer.name}"`;
   }
 
   /* ---------- Drag a tab sideways to re-order the layer stack ---------- */

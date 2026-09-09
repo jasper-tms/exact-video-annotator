@@ -15,7 +15,7 @@
 <body>
   <!-- Three justified groups (a CSS grid keeps the center group centered
        regardless of how wide the side groups are): the app identity and Open
-       Video on the left, the annotation import/export pair centered, and
+       Media on the left, the annotation import/export pair centered, and
        Settings plus the account control on the right. The vertical rules are
        the "｜" separators from the layout spec. The live hovered-pixel readout
        used to sit at the far right here; it now overlays the canvas corner. -->
@@ -23,7 +23,7 @@
     <div class="toolbar-side toolbar-left">
       <span id="application-title">exact-video-annotator</span>
       <span class="toolbar-separator" aria-hidden="true"></span>
-      <button id="open-video-button" title="Open a video file">Open Video</button>
+      <button id="open-media-button" title="Open a video or image file">Open Media</button>
     </div>
     <div class="toolbar-side toolbar-center">
       <button id="import-annotations-button" title="Import an annotations JSON file">Import Annotations</button>
@@ -101,9 +101,10 @@
       <div id="stage-container">
         <canvas id="stage-canvas"></canvas>
         <div id="drop-hint">
-          <p>Drop a video here, or use <strong>Open video</strong>.</p>
+          <p>Drop a video or image here, or use <strong>Open Media</strong>.</p>
           <p class="drop-hint-details">Videos are read lazily from disk — arbitrarily large
-             files are fine, and nothing is uploaded anywhere.</p>
+             files are fine — and images open too (PNG, JPEG, WebP, GIF, BMP).
+             Nothing is uploaded anywhere.</p>
         </div>
         <!-- Containers with no central index (WebM/MKV, fragmented MP4, Ogg)
              are indexed by a full pass over the file, which is the one part of
@@ -139,7 +140,8 @@
 
   <div id="toast-container" role="status" aria-live="polite"></div>
 
-  <input type="file" id="video-file-input" accept="video/*,.mp4,.mov,.webm,.m4v" hidden>
+  <input type="file" id="media-file-input"
+         accept="video/*,.mp4,.mov,.webm,.m4v,image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp" hidden>
   <input type="file" id="annotations-file-input" accept="application/json,.json" hidden>
 
   <script type="module" src="js/main.js"></script>

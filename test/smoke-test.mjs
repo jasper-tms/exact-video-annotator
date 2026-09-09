@@ -93,7 +93,7 @@ try {
   }
 
   // ---- Load the fixture through the real file input ----
-  await page.setInputFiles('#video-file-input',
+  await page.setInputFiles('#media-file-input',
     path.join(repositoryRoot, 'test', 'frame_numbered_vfr.mp4'));
   await page.waitForFunction(
     () => window.exactVideoAnnotator.engine !== null
@@ -293,6 +293,72 @@ try {
     window.exactVideoAnnotator.currentFrame !== frameBefore, 2, { timeout: 8000 });
   await page.keyboard.press('Space');
   check(true, 'playback advances frames and pauses again');
+
+  // ---- Open a still image alongside the video ----
+  // Generate a tiny PNG in the browser rather than committing a fixture, then
+  // feed its bytes through the same file input videos use.
+  const pngBase64 = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 6;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#3355ff';
+    context.fillRect(0, 0, 8, 6);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const buffer = await blob.arrayBuffer();
+    let binary = '';
+    for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  });
+  // A video is already open, so this is the "second media" path. Choose
+  // "new layer" up front so it stacks without the prompt dialog blocking. The
+  // preference is read through the shared preference store, which caches its
+  // value at module load, so set it through the live module rather than by
+  // writing localStorage after the page has loaded.
+  await page.evaluate(async () => {
+    const preference = await import('./js/second-media-preference.js');
+    preference.setSecondMediaBehavior('new-layer');
+  });
+  await page.setInputFiles('#media-file-input', {
+    name: 'swatch.png', mimeType: 'image/png', buffer: Buffer.from(pngBase64, 'base64'),
+  });
+  await page.waitForFunction(
+    () => window.exactVideoAnnotator.imageLayers.length === 1, undefined, { timeout: 8000 });
+  const imageFacts = await page.evaluate(() => {
+    const application = window.exactVideoAnnotator;
+    const [imageLayer] = application.imageLayers;
+    const mediaLayers = application.viewer.layers.filter((layer) => layer.isMedia);
+    return {
+      layerTypes: application.viewer.layers.map((layer) => layer.type),
+      width: imageLayer.bitmap.width,
+      height: imageLayer.bitmap.height,
+      // Media are treated identically: the new image stacks like a second video
+      // would — directly above the video in the array, painting BEHIND it, so
+      // the video (leftmost = frontmost media) stays on top.
+      frontmostMediaIsVideo: mediaLayers[0]?.type === 'video',
+      imageIsSecondMedia: mediaLayers[1]?.type === 'image',
+      imageDimmed: imageLayer.opacity === 0.75,
+      videoDimmed: application.primaryVideoLayer.opacity === 0.75,
+      videoStillPrimary: application.primaryVideoLayer?.type === 'video',
+      engineUnchanged: application.engine !== null,
+    };
+  });
+  check(imageFacts.width === 8 && imageFacts.height === 6,
+        'image loaded at its native dimensions');
+  check(imageFacts.frontmostMediaIsVideo && imageFacts.imageIsSecondMedia,
+        'the new image stacks behind the video, treated like any second media layer');
+  check(imageFacts.imageDimmed && imageFacts.videoDimmed,
+        'a second media layer dims both it and the one already open to 75%');
+  check(imageFacts.videoStillPrimary && imageFacts.engineUnchanged,
+        'opening an image leaves the video primary and the timeline intact');
+
+  // The image draws on every frame regardless of the scrubber: stepping frames
+  // must not disturb the image layer (it has no frame binding to disturb).
+  await page.keyboard.press('ArrowLeft');
+  const imageSurvivesFrameStep = await page.evaluate(() =>
+    window.exactVideoAnnotator.imageLayers.length === 1
+    && window.exactVideoAnnotator.imageLayers[0].bitmap !== null);
+  check(imageSurvivesFrameStep, 'image stays present when the frame changes');
 
 } finally {
   await browser.close();

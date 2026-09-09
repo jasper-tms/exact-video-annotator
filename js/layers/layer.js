@@ -37,4 +37,10 @@ export class Layer extends EventTarget {
 
   /** Whether the select tool can interact with this layer's items. */
   get isEditable() { return false; }
+
+  /** Whether this layer puts a picture on the stage (video or image). Media
+      layers share insertion, paint-precedence, opacity, and the "already
+      loaded" prompt; the rest of the app keys those behaviors off this rather
+      than testing for a specific type. Annotation layers are not media. */
+  get isMedia() { return false; }
 }
