@@ -138,7 +138,7 @@ button:focus:not(:focus-visible) { outline: none; }
 .account-menu {
   position: fixed;
   z-index: 30;
-  min-width: 160px;
+  min-width: 120px;
   padding: 6px;
   background: var(--surface-raised);
   border: 1px solid var(--border);
@@ -147,14 +147,6 @@ button:focus:not(:focus-visible) { outline: none; }
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-.account-menu .account-menu-email {
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .account-menu button { width: 100%; text-align: left; }
 
