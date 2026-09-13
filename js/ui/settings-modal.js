@@ -12,6 +12,8 @@ import { isLoadedFramesHighlightEnabled, setLoadedFramesHighlightEnabled }
 import {
   getInstalledPlugins, addInstalledPlugin, removeInstalledPlugin, subscribeInstalledPlugins,
 } from '../sync/installed-plugins-preference.js';
+import { connectPrivateGitHub, installUrl, canonicalPluginUrl }
+  from '../plugins/private-github-loader.js';
 
 export function initializeSettingsModal(app, triggerButtonElement) {
   const dialogElement = document.createElement('dialog');
@@ -237,6 +239,142 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   });
   pluginsAddRow.append(pluginUrlInput, pluginAddButton);
   pluginsSection.appendChild(pluginsAddRow);
+
+  /* ---- Add from a private GitHub repository ---- */
+
+  // Loads plugins from the user's PRIVATE repos via the "Video Examiner" GitHub
+  // App (see the github-app-integration-for-private-plugin-access skill).
+  // Connecting opens a GitHub popup; the repos it comes back with each get an
+  // "Add" that stores the canonical tokenless plugins.examine.video URL in the
+  // list above.
+  const privateGitHubRow = document.createElement('div');
+  privateGitHubRow.className = 'plugins-github-row';
+  const privateGitHubButton = document.createElement('button');
+  privateGitHubButton.type = 'button';
+  privateGitHubButton.className = 'plugins-github-connect';
+  privateGitHubButton.textContent = 'Add from private GitHub repository…';
+  privateGitHubButton.title =
+    'Connect the Video Examiner GitHub App to load plugins from your private repositories';
+  privateGitHubRow.appendChild(privateGitHubButton);
+  pluginsSection.appendChild(privateGitHubRow);
+
+  const privateGitHubPicker = document.createElement('div');
+  privateGitHubPicker.className = 'plugins-github-picker';
+  privateGitHubPicker.hidden = true;
+  pluginsSection.appendChild(privateGitHubPicker);
+
+  function addPrivatePlugin(repository, folderInput) {
+    const folder = folderInput.value.trim().replace(/^\/+|\/+$/g, '');
+    const url = canonicalPluginUrl({
+      installationId: repository.installationId,
+      owner: repository.owner,
+      repo: repository.name,
+      folder,
+    });
+    if (addInstalledPlugin(url)) {
+      const suffix = folder ? ` /${folder}` : '';
+      app.showToast(`Added ${repository.fullName}${suffix}.`, { kind: 'info' });
+      folderInput.value = '';
+    } else {
+      app.showToast('That plugin is already in your list.', { kind: 'warning' });
+    }
+  }
+
+  function renderPrivateGitHubPicker(installations) {
+    privateGitHubPicker.replaceChildren();
+
+    const repositories = [];
+    for (const installation of installations) {
+      for (const repository of installation.repositories ?? []) {
+        const [ownerFromFullName, nameFromFullName] = (repository.full_name ?? '/').split('/');
+        repositories.push({
+          installationId: installation.id,
+          owner: repository.owner ?? ownerFromFullName,
+          name: repository.name ?? nameFromFullName,
+          fullName: repository.full_name ?? `${repository.owner}/${repository.name}`,
+        });
+      }
+    }
+
+    if (repositories.length === 0) {
+      // Authorized, but the app isn't installed on any repositories yet. A
+      // window.open() here would be popup-blocked — this runs after an await, so
+      // it has lost the button's user activation — so show a link the user
+      // clicks (their click carries activation) instead of opening it for them.
+      const message = document.createElement('p');
+      message.className = 'settings-section-hint';
+      message.textContent =
+        'Authorized, but Video Examiner has no repositories yet. Install it on '
+        + 'the repositories you want to load plugins from, then click '
+        + '“Add from private GitHub repository…” again.';
+      const installLink = document.createElement('a');
+      installLink.className = 'plugins-github-install-link';
+      installLink.href = installUrl;
+      installLink.target = '_blank';
+      installLink.rel = 'noopener';
+      installLink.textContent = 'Install Video Examiner on GitHub →';
+      privateGitHubPicker.append(message, installLink);
+      privateGitHubPicker.hidden = false;
+      return;
+    }
+
+    const pickerHint = document.createElement('p');
+    pickerHint.className = 'settings-section-hint';
+    pickerHint.textContent =
+      'Repositories shared with Video Examiner. Add one, optionally naming a folder within it:';
+    privateGitHubPicker.appendChild(pickerHint);
+
+    for (const repository of repositories) {
+      const repoRow = document.createElement('div');
+      repoRow.className = 'plugins-github-repo';
+
+      const nameElement = document.createElement('span');
+      nameElement.className = 'plugins-github-repo-name';
+      nameElement.textContent = repository.fullName;
+      nameElement.title = repository.fullName;
+
+      const folderInput = document.createElement('input');
+      folderInput.type = 'text';
+      folderInput.className = 'plugins-github-folder';
+      folderInput.placeholder = 'folder (optional)';
+
+      const addButton = document.createElement('button');
+      addButton.type = 'button';
+      addButton.className = 'plugins-github-add';
+      addButton.textContent = 'Add';
+      addButton.addEventListener('click', () => addPrivatePlugin(repository, folderInput));
+      folderInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); addPrivatePlugin(repository, folderInput); }
+      });
+
+      repoRow.append(nameElement, folderInput, addButton);
+      privateGitHubPicker.appendChild(repoRow);
+    }
+
+    const doneButton = document.createElement('button');
+    doneButton.type = 'button';
+    doneButton.className = 'plugins-github-done';
+    doneButton.textContent = 'Done';
+    doneButton.addEventListener('click', () => { privateGitHubPicker.hidden = true; });
+    privateGitHubPicker.appendChild(doneButton);
+
+    privateGitHubPicker.hidden = false;
+  }
+
+  privateGitHubButton.addEventListener('click', async () => {
+    const originalText = privateGitHubButton.textContent;
+    privateGitHubButton.disabled = true;
+    privateGitHubButton.textContent = 'Connecting to GitHub…';
+    try {
+      const { installations } = await connectPrivateGitHub();
+      renderPrivateGitHubPicker(installations);
+    } catch (error) {
+      app.showToast(error.message || 'GitHub connection failed.', { kind: 'warning' });
+    } finally {
+      privateGitHubButton.disabled = false;
+      privateGitHubButton.textContent = originalText;
+    }
+  });
 
   dialogElement.appendChild(pluginsSection);
 

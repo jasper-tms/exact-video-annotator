@@ -287,6 +287,74 @@ button:focus:not(:focus-visible) { outline: none; }
   font-size: 12px;
 }
 
+.plugins-github-row {
+  margin-top: 8px;
+}
+
+.plugins-github-connect {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.plugins-github-picker {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plugins-github-picker .settings-section-hint {
+  margin: 0 0 2px;
+}
+
+.plugins-github-repo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.plugins-github-repo-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.plugins-github-folder {
+  flex: 0 1 160px;
+  min-width: 0;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.plugins-github-add {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.plugins-github-done {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.plugins-github-install-link {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--accent);
+}
+
 /* A brief highlight drawing the eye to a section opened from elsewhere (the
    ＋ menu's Plugins page "New…" entry flashes the Plugins section). */
 @keyframes settings-section-flash {
