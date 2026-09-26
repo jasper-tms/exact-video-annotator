@@ -118,9 +118,14 @@ export function initializeTransport(app, containerElement) {
 
   function formatTime(seconds) {
     if (!Number.isFinite(seconds)) return '0:00.00';
-    const wholeMinutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds - wholeMinutes * 60;
-    return `${wholeMinutes}:${remainingSeconds.toFixed(2).padStart(5, '0')}`;
+    // Work in whole hundredths so rounding can't produce a "60.00" seconds field.
+    const totalHundredths = Math.round(seconds * 100);
+    const wholeHours = Math.floor(totalHundredths / 360000);
+    const wholeMinutes = Math.floor((totalHundredths % 360000) / 6000);
+    const remainingSeconds = (totalHundredths % 6000) / 100;
+    const secondsText = remainingSeconds.toFixed(2).padStart(5, '0');
+    if (wholeHours === 0) return `${wholeMinutes}:${secondsText}`;
+    return `${wholeHours}:${String(wholeMinutes).padStart(2, '0')}:${secondsText}`;
   }
 
   /** The last frame the engine will name right now. While the index is growing
