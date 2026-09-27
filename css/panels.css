@@ -74,3 +74,19 @@
 .toast-close-button:hover {
   color: var(--text);
 }
+
+.toast-action-button {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.toast-action-button:hover {
+  border-color: var(--accent);
+}

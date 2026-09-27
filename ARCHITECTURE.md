@@ -356,7 +356,10 @@ app.currentFrame;                    // engine.currentFrame or 0
 app.syncedPaintedFrame;              // last frame actually PAINTED during synced
                                      // playback; render overlays off this, not
                                      // currentFrame, which runs ahead under load
-app.showToast(message, { kind } = {});   // kind: 'info' | 'warning' | 'error'
+app.showToast(message, { kind, sticky, action } = {});
+                                     // kind: 'info' | 'warning' | 'error';
+                                     // action: { label, onSelect } adds a
+                                     // button (and makes the toast sticky)
 app.markDocumentChanged();           // dispatches 'document-changed' + autosave
 app.hover;                           // set by tools while hovering an existing
                                      // annotation; same shape as selection
@@ -614,6 +617,15 @@ swaps the new engine into the existing layer (`videoLayer.replaceEngine`) —
 except when the error carries `detail.incomplete`, which is an index that
 stopped early rather than a dead decoder. Those frames keep playing and the
 native tier would only re-scan the same container, so that case only warns.
+
+A fatal error carrying `detail.sourceUnavailable` means the engine can no
+longer read the source at all: a local file moved, renamed, deleted, or changed
+on disk after it was opened, or a URL that stopped answering. Rebuilding on the
+same source would fail again, so the app shows a sticky error instead. For a
+file, the toast offers "Choose file…": a browser cannot follow a `File` to its
+new name, so the user picks it again. The chosen file then gets a fresh engine
+swapped into the same layer at the same frame (`relinkVideoLayer`), keeping the
+layer's tab, transform and link settings.
 
 ### Media layers: video and image share a base
 

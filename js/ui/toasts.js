@@ -7,6 +7,11 @@
 // A sticky toast ({ sticky: true }) has no timeout and dismisses only from its
 // own close button, leaving its text selectable — for messages meant to be read
 // slowly or copied from, like a load refusal carrying an ffmpeg command.
+//
+// An action ({ action: { label, onSelect } }) adds a button that runs onSelect
+// and dismisses the toast — for a problem the user can fix from right there,
+// like choosing a video's file again after it was moved. A toast offering an
+// action is always sticky: the offer should not vanish on a timer.
 
 const MAXIMUM_VISIBLE_TOASTS = 4;
 const DEFAULT_DURATION_MILLISECONDS = 4000;
@@ -40,9 +45,10 @@ export function initializeToasts(app, containerElement) {
     setTimeout(removeFromDocument, FADE_OUT_FALLBACK_MILLISECONDS);
   }
 
-  app.showToast = (message, { kind = 'info', sticky = false } = {}) => {
+  app.showToast = (message, { kind = 'info', sticky = false, action = null } = {}) => {
     const toast = document.createElement('div');
     toast.className = `toast toast-${kind}`;
+    if (action) sticky = true;
 
     if (sticky) {
       // A whole-body click target would eat the click that was trying to
@@ -56,7 +62,19 @@ export function initializeToasts(app, containerElement) {
       closeButton.setAttribute('aria-label', 'Dismiss');
       closeButton.textContent = '✕';
       closeButton.addEventListener('click', () => dismiss(toast));
-      toast.append(messageElement, closeButton);
+      toast.append(messageElement);
+      if (action) {
+        const actionButton = document.createElement('button');
+        actionButton.type = 'button';
+        actionButton.className = 'toast-action-button';
+        actionButton.textContent = action.label;
+        actionButton.addEventListener('click', () => {
+          dismiss(toast);
+          action.onSelect();
+        });
+        toast.append(actionButton);
+      }
+      toast.append(closeButton);
     } else {
       toast.textContent = message;
       toast.addEventListener('click', () => dismiss(toast));

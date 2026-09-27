@@ -1531,6 +1531,12 @@ function wireEngineEvents(videoLayer, engine) {
     const detail = event.detail ?? {};
     if (!detail.message) return;
     const videoName = videoLayer.mediaInformation?.name ?? videoLayer.name;
+    // The source itself can no longer be read (engine v2.8+): rebuilding on it
+    // would only fail again, so ask for the file instead.
+    if (detail.sourceUnavailable) {
+      reportUnreadableVideoSource(videoLayer, detail.message);
+      return;
+    }
     // An index that stopped early is flagged fatal too, but it is not a dead
     // decoder: the frames already published stay exact and keep playing, and
     // rebuilding on the native tier would only re-scan the same container —
@@ -1627,17 +1633,103 @@ async function recoverFromFatalDecode(videoLayer) {
       engine.destroy();
       return;
     }
-    videoLayer.replaceEngine(engine);
-    videoLayer.mediaInformation = videoInformationFromEngine(engine, videoLayer.mediaInformation);
-    wireEngineEvents(videoLayer, engine);
-    engine.seekToFrame(frameBeforeFailure);
-    if (videoLayer === app.primaryVideoLayer) {
-      app.dispatchEvent(new CustomEvent('video-loaded'));
-      app.dispatchEvent(new CustomEvent('frame-changed'));
-      app.dispatchEvent(new CustomEvent('index-changed'));
-    }
+    installReplacementEngine(videoLayer, engine, frameBeforeFailure);
   } catch (error) {
     reportVideoLoadFailure(error, { introduction: `${videoName}: the fallback player also failed.` });
+  }
+}
+
+/** Swap a rebuilt engine into an open video layer, keeping the layer itself
+    (id, tab, transform, link settings), and put it back on `frame`. */
+function installReplacementEngine(videoLayer, engine, frame) {
+  videoLayer.replaceEngine(engine);
+  videoLayer.mediaInformation = videoInformationFromEngine(engine, videoLayer.mediaInformation);
+  wireEngineEvents(videoLayer, engine);
+  engine.seekToFrame(frame);
+  if (videoLayer === app.primaryVideoLayer) {
+    app.dispatchEvent(new CustomEvent('video-loaded'));
+    app.dispatchEvent(new CustomEvent('frame-changed'));
+    app.dispatchEvent(new CustomEvent('index-changed'));
+  }
+}
+
+/** The engine can no longer read this video's source: its file was moved,
+    renamed, deleted, or changed on disk after it was opened, or its URL stopped
+    answering. The engine has stopped for good, and rebuilding it on the same
+    source would only fail again, so unlike a dead decoder this is not
+    recovered from automatically. For a local file, offer to choose it again —
+    a browser gives no way to follow a File to its new name. */
+function reportUnreadableVideoSource(videoLayer, message) {
+  const videoName = videoLayer.mediaInformation?.name ?? videoLayer.name;
+  const text = `${videoName}: ${message}`;
+  if (typeof videoLayer.mediaSource === 'string') {
+    app.showToast(text, { kind: 'error', sticky: true });
+    return;
+  }
+  app.showToast(text, {
+    kind: 'error',
+    action: { label: 'Choose file…', onSelect: () => chooseRelinkedVideoFile(videoLayer) },
+  });
+}
+
+function chooseRelinkedVideoFile(videoLayer) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = mediaFileInput.accept;
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (file && app.viewer.layers.includes(videoLayer)) relinkVideoLayer(videoLayer, file);
+  });
+  input.click();
+}
+
+/** Rebuild a video layer's engine on a newly chosen file, in place, at the
+    frame it was on — the annotations keep reading against it unchanged. A file
+    of a different size is probably not the same video, so say so. */
+async function relinkVideoLayer(videoLayer, file) {
+  const frameBeforeFailure = videoLayer.engine.currentFrame;
+  const previousSizeBytes = videoLayer.mediaInformation?.sizeBytes;
+  // The old engine's index pass may still be reporting on its old status line.
+  if (videoLayer.loadIdentifier !== null) {
+    activeLoadIdentifiers.delete(videoLayer.loadIdentifier);
+    clearIndexingStatus(videoLayer.loadIdentifier);
+  }
+  const loadIdentifier = ++mostRecentLoadIdentifier;
+  activeLoadIdentifiers.add(loadIdentifier);
+  try {
+    showIndexingStatus(loadIdentifier, file.name, { fraction: 0, framesFound: 0, etaMs: 0 });
+    videoLayer.engine.destroy();
+    const engine = await createBestEngine(file, {
+      canvas: videoLayer.hostElement.querySelector('canvas'),
+      video: videoLayer.hostElement.querySelector('video'),
+      imageSmoothingEnabled: false,   // exact source pixels; see loadVideoSource
+      playWhileIndexing: true,
+      onProgress: (progress) => {
+        if (activeLoadIdentifiers.has(loadIdentifier)) {
+          showIndexingStatus(loadIdentifier, file.name, progress);
+        }
+      },
+    });
+    if (!app.viewer.layers.includes(videoLayer)) {   // closed while rebuilding
+      engine.destroy();
+      activeLoadIdentifiers.delete(loadIdentifier);
+      clearIndexingStatus(loadIdentifier);
+      return;
+    }
+    videoLayer.mediaSource = file;
+    videoLayer.loadIdentifier = loadIdentifier;
+    videoLayer.mediaInformation = { ...videoLayer.mediaInformation, name: file.name, sizeBytes: file.size };
+    if (engine.frameIndexState !== 'growing') clearIndexingStatus(loadIdentifier);
+    installReplacementEngine(videoLayer, engine, frameBeforeFailure);
+    if (videoLayer !== app.primaryVideoLayer) app.synchronizeFollowerVideos();
+    if (previousSizeBytes != null && previousSizeBytes !== file.size) {
+      app.showToast(`${file.name} is not the same size as the file it replaces, so it may be `
+        + 'a different video; annotations may not line up with it.', { kind: 'warning' });
+    }
+  } catch (error) {
+    activeLoadIdentifiers.delete(loadIdentifier);
+    clearIndexingStatus(loadIdentifier);
+    reportVideoLoadFailure(error, { introduction: `Could not open ${file.name}:` });
   }
 }
 
