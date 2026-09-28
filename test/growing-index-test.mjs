@@ -66,8 +66,13 @@ function readDisplays() {
   return page.evaluate(() => {
     const scrubber = document.querySelector('.transport-scrubber');
     const readout = document.querySelector('.transport-readout');
+    // The frame number is an editable <input>, which textContent skips, so
+    // compose the readout as it reads on screen: "frame 12 / 179+ · 0:00.40 / ~0:52.49".
+    const readoutText = `frame ${readout.querySelector('.transport-frame-input').value} `
+      + `${readout.querySelector('.transport-frame-total').textContent} · `
+      + readout.querySelector('.transport-time').textContent;
     return {
-      readout: readout.textContent,
+      readout: readoutText,
       readoutClasses: [...readout.classList],
       scrubberMaximum: Number(scrubber.max),
       indexedFraction: scrubber.style.getPropertyValue('--indexed-fraction'),
@@ -144,7 +149,7 @@ try {
     };
   });
 
-  await page.setInputFiles('#video-file-input', path.join(repositoryRoot, 'test/frame_numbered_vfr.mp4'));
+  await page.setInputFiles('#media-file-input', path.join(repositoryRoot, 'test/frame_numbered_vfr.mp4'));
   await page.waitForFunction(() => window.exactVideoAnnotator.engine !== null);
   await page.waitForTimeout(300);
 

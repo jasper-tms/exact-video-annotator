@@ -260,7 +260,7 @@ try {
 
   /* ================= 2. The plugin in the app ================= */
 
-  await page.setInputFiles('#video-file-input',
+  await page.setInputFiles('#media-file-input',
     path.join(repositoryRoot, 'test', 'frame_numbered_vfr.mp4'));
   await page.waitForFunction(
     () => window.exactVideoAnnotator.engine?.numFrames > 0, undefined, { timeout: 20000 });
@@ -268,8 +268,8 @@ try {
   // Add the layer the way a user would: ＋ → ‹ Plugins → line-fitter.
   await page.click('.layer-tab-add');
   await page.click('.layer-tab-add-menu button:text("Plugins ›")');
-  const uploadDisabled = await page.isDisabled('.layer-tab-add-menu button:text("Upload…")');
-  check(uploadDisabled, 'the Upload… entry is listed but not yet functional');
+  check(await page.isVisible('.layer-tab-add-menu button:text-is("New…")'),
+    'the plugin menu offers New… for adding a plugin by its URL');
   await page.click('.layer-tab-add-menu button:text-is("Line fitter")');
 
   const layerFacts = await page.evaluate(() => {

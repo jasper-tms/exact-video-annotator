@@ -26,7 +26,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 try {
   await page.goto(`http://127.0.0.1:${port}/index.html`);
   await page.waitForFunction(() => window.exactVideoAnnotator !== undefined);
-  await page.setInputFiles('#video-file-input',
+  await page.setInputFiles('#media-file-input',
     path.join(repositoryRoot, 'test', 'frame_numbered_vfr.mp4'));
   await page.waitForFunction(
     () => window.exactVideoAnnotator.engine?.numFrames > 0, undefined, { timeout: 20000 });
