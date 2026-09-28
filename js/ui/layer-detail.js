@@ -11,6 +11,16 @@ function layerTypeDisplayName(type) {
   return `${type[0].toUpperCase()}${type.slice(1)}`;
 }
 
+/** "0.544 wide per 1 tall (anamorphic; meant to be seen at 801 × 1080)" for a
+    video with non-square pixels, or null (row omitted) for square ones. */
+function pixelShapeText(engine) {
+  const pixelAspectRatio = engine.pixelAspectRatio || 1;
+  if (pixelAspectRatio === 1) return null;
+  const shownWidth = Math.round(engine.videoWidth * pixelAspectRatio);
+  return `${Number(pixelAspectRatio.toFixed(3))} wide per 1 tall (anamorphic; meant to be `
+    + `seen at ${shownWidth} × ${engine.videoHeight})`;
+}
+
 export function initializeLayerDetail(app, containerElement) {
   function isUserEditingHere() {
     const activeElement = document.activeElement;
@@ -220,6 +230,9 @@ export function initializeLayerDetail(app, containerElement) {
       for (const [term, value] of [
         ['file', information.name],
         ['dimensions', `${engine.videoWidth} × ${engine.videoHeight}`],
+        // Only an anamorphic video has anything to say here; its dimensions
+        // (and annotation coordinates) count stored pixels, shown non-square.
+        ['pixel shape', pixelShapeText(engine)],
         ['frames', framesText],
         ['duration', durationText],
         ['mean frame rate', information.frameRate ? `${information.frameRate} frames/second` : null],

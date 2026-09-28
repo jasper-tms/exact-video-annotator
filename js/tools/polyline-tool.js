@@ -41,7 +41,7 @@ import {
   endDragOnExistingItem, cancelDragOnExistingItem, updateHover, clearHover,
 } from './annotation-dragging.js';
 
-// Screen-constant sizes (world units = screenPixels / pixelsPerLocalUnit).
+// Screen-constant sizes, in stage CSS pixels.
 const CLOSE_DISTANCE_SCREEN_PIXELS = 10;
 const DUPLICATE_VERTEX_SCREEN_PIXELS = 4;
 const OVERLAY_STROKE_SCREEN_PIXELS = 2;
@@ -63,9 +63,12 @@ function activeClassColor(app) {
   return classEntry?.color ?? DRAWING_FALLBACK_COLOR;
 }
 
-/** Distance between two world points expressed in on-screen pixels. */
+/** Distance between two world points expressed in on-screen pixels (world
+    units need not be square on screen, so both are mapped there first). */
 function distanceInScreenPixels(app, worldA, worldB) {
-  return Math.hypot(worldA.x - worldB.x, worldA.y - worldB.y) * app.viewer.viewTransform.scale;
+  const stageA = app.viewer.stageFromWorldPoint(worldA);
+  const stageB = app.viewer.stageFromWorldPoint(worldB);
+  return Math.hypot(stageA.x - stageB.x, stageA.y - stageB.y);
 }
 
 /**
@@ -396,65 +399,71 @@ export function createDrawingTool({
       return false;
     },
 
+    // Drawn in stage pixels at positions mapped from world coordinates, like
+    // the coordinates layer's marks, so it keeps its shape where world units
+    // are not square on screen.
     drawOverlay(context, renderState) {
       if (!inProgress) return;
       const app = inProgress.app;
-      const pixelsPerLocalUnit = renderState.pixelsPerLocalUnit;
-      const strokeWidth = OVERLAY_STROKE_SCREEN_PIXELS / pixelsPerLocalUnit;
-      const vertexSize = OVERLAY_VERTEX_SCREEN_PIXELS / pixelsPerLocalUnit;
+      const strokeWidth = OVERLAY_STROKE_SCREEN_PIXELS;
+      const vertexSize = OVERLAY_VERTEX_SCREEN_PIXELS;
       const color = activeClassColor(app);
       const worldVertices = inProgress.vertices.map(
         (vertex) => app.worldFromLocal(inProgress.layer, { x: vertex[0], y: vertex[1] }));
-
-      context.save();
-      context.lineWidth = strokeWidth;
-      context.strokeStyle = color;
-      context.lineJoin = 'round';
-      context.lineCap = 'round';
-
-      // The already-placed polyline.
-      if (worldVertices.length > 1) {
-        context.beginPath();
-        context.moveTo(worldVertices[0].x, worldVertices[0].y);
-        for (let index = 1; index < worldVertices.length; index++) {
-          context.lineTo(worldVertices[index].x, worldVertices[index].y);
-        }
-        context.stroke();
-      }
-
-      // The rubber-band segment from the last vertex to the pointer.
+      const stageVertices = worldVertices.map((vertex) => renderState.stageFromLocal(vertex));
       const pointer = inProgress.pointerWorld;
-      if (pointer && worldVertices.length > 0) {
-        const last = worldVertices[worldVertices.length - 1];
+      const stagePointer = pointer ? renderState.stageFromLocal(pointer) : null;
+
+      renderState.drawInStagePixels(() => {
         context.save();
-        context.setLineDash([strokeWidth * 3, strokeWidth * 3]);
-        context.beginPath();
-        context.moveTo(last.x, last.y);
-        context.lineTo(pointer.x, pointer.y);
-        context.stroke();
-        context.restore();
-      }
-
-      // Vertex markers.
-      context.fillStyle = color;
-      for (const worldVertex of worldVertices) {
-        context.beginPath();
-        context.arc(worldVertex.x, worldVertex.y, vertexSize / 2, 0, Math.PI * 2);
-        context.fill();
-      }
-
-      // Closing cue: ring the first vertex when the pointer is close enough to
-      // close a large-enough shape.
-      if (canClickToClose && pointer && worldVertices.length >= MINIMUM_VERTICES_TO_CLOSE
-          && distanceInScreenPixels(app, worldVertices[0], pointer) <= CLOSE_DISTANCE_SCREEN_PIXELS) {
-        context.beginPath();
-        context.arc(worldVertices[0].x, worldVertices[0].y, vertexSize, 0, Math.PI * 2);
-        context.strokeStyle = CLOSING_CUE_COLOR;
         context.lineWidth = strokeWidth;
-        context.stroke();
-      }
+        context.strokeStyle = color;
+        context.lineJoin = 'round';
+        context.lineCap = 'round';
 
-      context.restore();
+        // The already-placed polyline.
+        if (stageVertices.length > 1) {
+          context.beginPath();
+          context.moveTo(stageVertices[0].x, stageVertices[0].y);
+          for (let index = 1; index < stageVertices.length; index++) {
+            context.lineTo(stageVertices[index].x, stageVertices[index].y);
+          }
+          context.stroke();
+        }
+
+        // The rubber-band segment from the last vertex to the pointer.
+        if (stagePointer && stageVertices.length > 0) {
+          const last = stageVertices[stageVertices.length - 1];
+          context.save();
+          context.setLineDash([strokeWidth * 3, strokeWidth * 3]);
+          context.beginPath();
+          context.moveTo(last.x, last.y);
+          context.lineTo(stagePointer.x, stagePointer.y);
+          context.stroke();
+          context.restore();
+        }
+
+        // Vertex markers.
+        context.fillStyle = color;
+        for (const stageVertex of stageVertices) {
+          context.beginPath();
+          context.arc(stageVertex.x, stageVertex.y, vertexSize / 2, 0, Math.PI * 2);
+          context.fill();
+        }
+
+        // Closing cue: ring the first vertex when the pointer is close enough to
+        // close a large-enough shape.
+        if (canClickToClose && pointer && worldVertices.length >= MINIMUM_VERTICES_TO_CLOSE
+            && distanceInScreenPixels(app, worldVertices[0], pointer) <= CLOSE_DISTANCE_SCREEN_PIXELS) {
+          context.beginPath();
+          context.arc(stageVertices[0].x, stageVertices[0].y, vertexSize, 0, Math.PI * 2);
+          context.strokeStyle = CLOSING_CUE_COLOR;
+          context.lineWidth = strokeWidth;
+          context.stroke();
+        }
+
+        context.restore();
+      });
     },
   };
 }

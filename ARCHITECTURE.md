@@ -37,18 +37,58 @@ layer-local  --layer.transform-->  world  --viewer.viewTransform-->  stage CSS p
 ```
 
 - **layer-local**: the space annotation geometry is stored in. For a video
-  layer, local space is the upright source video's pixel grid.
+  layer, local space is the upright source video's pixel grid — its *stored*
+  pixels, even when the video is anamorphic (see "Pixel shape" below).
 - **world**: the shared canvas space. `layer.transform = { scale, offsetX,
   offsetY }` maps local → world (`world = local × scale + offset`). Default is
   identity, so by default world equals the primary video's pixel space.
 - **stage**: the on-screen canvas. `viewer.viewTransform = { scale, offsetX,
-  offsetY }` maps world → stage CSS pixels and implements zoom + pan. The
-  canvas backing store is stage CSS size × `devicePixelRatio`.
+  offsetY }` together with `viewer.pixelAspectRatio` maps world → stage CSS
+  pixels and implements zoom + pan: `stageX = worldX × scale ×
+  pixelAspectRatio + offsetX`, `stageY = worldY × scale + offsetY`. The canvas
+  backing store is stage CSS size × `devicePixelRatio`.
 
 When a layer's `draw(context, renderState)` runs, the canvas transform is
-already composed so the layer draws in **local coordinates**. Anything that
-must have constant on-screen size (vertex handles, line widths) divides by
-`renderState.pixelsPerLocalUnit`.
+already composed so the layer draws in **local coordinates**. That transform
+stretches horizontally whenever world units are not square, which is right for
+pictures (the media layers) and wrong for marks meant to keep a fixed
+on-screen shape (points, vertex handles, strokes, labels). Those are drawn in
+stage pixels instead: map each position with `renderState.stageFromLocal(point)`,
+then draw inside `renderState.drawInStagePixels(callback)`, where sizes are
+plain screen pixels. A path built in local coordinates *before* that call keeps
+its geometry, so stroking it inside gives an even line width (the pixel grid
+and the empty-video outline do this). Hit-testing measures in stage pixels the
+same way, so a tolerance is the same distance in every direction.
+`renderState.pixelsPerLocalUnit` is the scale of the narrower-drawn axis, for
+decisions like "is a source pixel big enough to see" (smoothing, the pixel
+grid's fade-in).
+
+### Pixel shape (anamorphic media)
+
+An anamorphic video stores pixels meant to be shown non-square. HandBrake's
+automatic anamorphic output does this, for example storing 1472 × 1080 pixels
+that are each 0.544 as wide as tall. The engine reports `videoWidth` /
+`videoHeight` in stored pixels on both tiers, plus `pixelAspectRatio`. Layer-local
+coordinates, and so every annotation and export, stay in stored pixels. They
+name real pixels of the file, the ones Python or ffmpeg decode.
+
+World units are those stored pixels. `reconcileWorldPixelShape` in `main.js`
+runs on every change to the loaded media and sets `viewer.pixelAspectRatio`:
+- **Every loaded media layer shares one pixel shape**: world units are shown at
+  that shape. An anamorphic video looks as intended, and the pixel grid
+  outlines its real, non-square pixels.
+- **Loaded media disagree** (two videos of different shapes, or an anamorphic
+  video next to an image): no single grid shows them all correctly. The viewer
+  falls back to square world units, each medium drawn at its stored pixel
+  counts, and a warning toast says some videos will appear stretched. It warns
+  only when media arrive or change shape, not on every later change while the
+  disagreement lasts.
+
+Images always count as square. Image formats can carry a pixel shape (PNG
+`pHYs`, JPEG JFIF density), but browsers ignore it and so does the annotator.
+The engine is created with `applyPixelAspectRatio: false`, so its canvas holds
+the stored shape at one stored pixel per canvas pixel. The viewer applies the
+shape, once, for every layer alike.
 
 ## Modules and contracts
 
@@ -63,6 +103,10 @@ viewer.layers;                       // Array<Layer>, index 0 = bottom
 viewer.addLayer(layer); viewer.removeLayer(layer);
 viewer.moveLayerToIndex(layer, index);
 viewer.viewTransform;                // { scale, offsetX, offsetY }
+viewer.pixelAspectRatio;             // width ÷ height of a world unit on screen
+viewer.setPixelAspectRatio(value);   // keeps the stage-center world point fixed
+viewer.stageFromWorldPoint(point); viewer.worldFromStagePoint(point);
+viewer.stageTransformForLayer(layer); // { scaleX, scaleY, offsetX, offsetY }
 viewer.worldFromPointerEvent(event); // → {x, y} world coordinates
 viewer.zoomAtStagePoint(factor, stagePoint);
 viewer.panByStagePixels(deltaX, deltaY);
@@ -118,7 +162,11 @@ layer.hitTest(localPoint, renderState); // annotation layers only, see below
 {
   frame,               // integer current frame (engine.currentFrame)
   frameFloat,          // engine.currentFrameFloat, for interpolated drawing
-  pixelsPerLocalUnit,  // on-screen pixels per local unit for THIS layer
+  // Filled in per layer by the viewer (see "Coordinate spaces"):
+  pixelsPerLocalUnit,  // on-screen pixels per local unit, narrower-drawn axis
+  stageFromLocal,      // (point) → stage CSS pixels, for THIS layer
+  drawInStagePixels,   // (callback) → runs it with the context in stage pixels
+  devicePixelRatio,
   selection,           // { layerId, itemId, vertexIndex } or null
   hover,               // same shape as selection, or null
   document,            // the AnnotationDocument (for class colors etc.)
@@ -142,8 +190,10 @@ layer.hitTest(localPoint, renderState)
   //   edge is an ordinary trailing segment here, not a wrap-around special
   //   case — see "Polylines: open vs. closed" below. A point item has no
   //   segments.
-  // Handle sizes are screen-constant: tolerance = HANDLE_RADIUS_SCREEN_PIXELS
-  //                                              / renderState.pixelsPerLocalUnit
+  // Handle sizes are screen-constant: distances are measured between
+  //   renderState.stageFromLocal(...) positions, against a tolerance in
+  //   screen pixels, so it is equal in every direction even when local units
+  //   are not square on screen.
 layer.getItem(itemId);               // live item object (read-only use)
 layer.items;                         // the backing array from the document
 

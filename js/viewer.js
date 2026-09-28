@@ -9,6 +9,17 @@
 // that started on empty space but hasn't moved far enough yet to tell click
 // from drag) by calling beginPanFromPointerEvent(event) from its
 // onPointerDown or onPointerMove.
+//
+// World units need not be square on screen. When every loaded media layer
+// shares one non-square pixel shape (an anamorphic video), world units are
+// those stored pixels, and the view transform shows each one
+// pixelAspectRatio times as wide as it is tall. So world → stage is
+//   stageX = worldX × scale × pixelAspectRatio + offsetX
+//   stageY = worldY × scale                    + offsetY
+// and anything drawn under the resulting canvas transform is stretched the
+// same way. Layers that draw marks meant to keep a fixed on-screen shape
+// (points, handles, strokes, text) position them with renderState.stageFromLocal
+// and draw them in stage pixels instead (see renderState below).
 
 const MINIMUM_VIEW_SCALE = 0.01;
 const MAXIMUM_VIEW_SCALE = 200;
@@ -22,6 +33,10 @@ export class Viewer extends EventTarget {
     this.context = stageCanvas.getContext('2d');
     this.layers = [];
     this.viewTransform = { scale: 1, offsetX: 0, offsetY: 0 };
+    // Width ÷ height of one world unit on screen: 1 (square) unless every
+    // media layer shares an anamorphic pixel shape. Set by main.js through
+    // setPixelAspectRatio.
+    this.pixelAspectRatio = 1;
     this.backgroundColor = '#101014';
 
     // Installed by main.js: { onPointerDown, onPointerMove, onPointerUp }
@@ -80,27 +95,59 @@ export class Viewer extends EventTarget {
 
   worldFromStagePoint(stagePoint) {
     const { scale, offsetX, offsetY } = this.viewTransform;
-    return { x: (stagePoint.x - offsetX) / scale, y: (stagePoint.y - offsetY) / scale };
+    return {
+      x: (stagePoint.x - offsetX) / (scale * this.pixelAspectRatio),
+      y: (stagePoint.y - offsetY) / scale,
+    };
   }
 
   stageFromWorldPoint(worldPoint) {
     const { scale, offsetX, offsetY } = this.viewTransform;
-    return { x: worldPoint.x * scale + offsetX, y: worldPoint.y * scale + offsetY };
+    return {
+      x: worldPoint.x * scale * this.pixelAspectRatio + offsetX,
+      y: worldPoint.y * scale + offsetY,
+    };
   }
 
   worldFromPointerEvent(event) {
     return this.worldFromStagePoint(this.stagePointFromPointerEvent(event));
   }
 
-  /** Compose a layer's local→world transform with the view transform. */
+  /** Compose a layer's local→world transform with the view transform:
+      stage = local × (scaleX, scaleY) + (offsetX, offsetY). The two scales
+      differ exactly when world units are not square on screen. */
   stageTransformForLayer(layer) {
+    return this.#stageTransformFor(layer.transform);
+  }
+
+  /** The identity layer transform: stage transform for world coordinates. */
+  stageTransformForWorld() {
+    return this.#stageTransformFor({ scale: 1, offsetX: 0, offsetY: 0 });
+  }
+
+  #stageTransformFor(local) {
     const view = this.viewTransform;
-    const local = layer.transform;
+    const horizontalViewScale = view.scale * this.pixelAspectRatio;
     return {
-      scale: view.scale * local.scale,
-      offsetX: view.offsetX + view.scale * local.offsetX,
+      scaleX: horizontalViewScale * local.scale,
+      scaleY: view.scale * local.scale,
+      offsetX: view.offsetX + horizontalViewScale * local.offsetX,
       offsetY: view.offsetY + view.scale * local.offsetY,
     };
+  }
+
+  /** Change how wide a world unit is shown relative to its height, keeping
+      whatever world point sits at the center of the stage where it is. */
+  setPixelAspectRatio(pixelAspectRatio) {
+    if (!(pixelAspectRatio > 0) || pixelAspectRatio === this.pixelAspectRatio) return;
+    const centerX = this.stageCanvas.clientWidth / 2;
+    const centerWorldX = this.worldFromStagePoint({ x: centerX, y: 0 }).x;
+    this.pixelAspectRatio = pixelAspectRatio;
+    this.viewTransform = {
+      ...this.viewTransform,
+      offsetX: centerX - centerWorldX * this.viewTransform.scale * pixelAspectRatio,
+    };
+    this.#viewChanged();
   }
 
   /* ---------- Zoom and pan ---------- */
@@ -149,16 +196,19 @@ export class Viewer extends EventTarget {
     if (!union) return;
     const stageWidth = this.stageCanvas.clientWidth;
     const stageHeight = this.stageCanvas.clientHeight;
-    const contentWidth = union.right - union.left;
+    // Widths are fitted as they will be SHOWN, which for non-square world
+    // units is pixelAspectRatio times their world width.
+    const shownContentWidth = (union.right - union.left) * this.pixelAspectRatio;
     const contentHeight = union.bottom - union.top;
-    if (!stageWidth || !stageHeight || !contentWidth || !contentHeight) return;
+    if (!stageWidth || !stageHeight || !shownContentWidth || !contentHeight) return;
     const scale = Math.min(
-      (stageWidth * (1 - 2 * FIT_MARGIN_FRACTION)) / contentWidth,
+      (stageWidth * (1 - 2 * FIT_MARGIN_FRACTION)) / shownContentWidth,
       (stageHeight * (1 - 2 * FIT_MARGIN_FRACTION)) / contentHeight,
     );
     this.viewTransform = {
       scale,
-      offsetX: (stageWidth - contentWidth * scale) / 2 - union.left * scale,
+      offsetX: (stageWidth - shownContentWidth * scale) / 2
+        - union.left * scale * this.pixelAspectRatio,
       offsetY: (stageHeight - contentHeight * scale) / 2 - union.top * scale,
     };
     this.#viewChanged();
@@ -175,8 +225,23 @@ export class Viewer extends EventTarget {
 
   /**
    * Called once per animation frame by main.js. renderState carries frame,
-   * frameFloat, selection, hover, and document; the viewer fills in
-   * pixelsPerLocalUnit per layer.
+   * frameFloat, selection, hover, and document; the viewer fills in, per layer
+   * (and for the overlay, with world coordinates as the local ones):
+   *   pixelsPerLocalUnit   on-screen CSS pixels per local unit along the
+   *                        SHORTER-drawn axis — the one that decides when a
+   *                        source pixel is big enough to see (smoothing, the
+   *                        pixel grid's fade-in). Equal to both axes' scale
+   *                        whenever world units are square.
+   *   stageFromLocal(point) → {x, y} in stage CSS pixels. Marks with a fixed
+   *                        on-screen size and shape are positioned through
+   *                        this and drawn by drawInStagePixels.
+   *   drawInStagePixels(callback) runs callback with the context transform
+   *                        set to stage CSS pixels (device pixel ratio only),
+   *                        then restores the local transform. A path built
+   *                        BEFORE the call keeps its local geometry, so
+   *                        stroking it inside gives an even, screen-pixel
+   *                        line width even when local units are not square.
+   *   devicePixelRatio
    */
   renderIfNeeded(renderState) {
     if (!this.#needsRender) return;
@@ -214,37 +279,20 @@ export class Viewer extends EventTarget {
       const layerTransform = this.stageTransformForLayer(layer);
       context.save();
       context.globalAlpha = layer.opacity;
-      context.setTransform(
-        devicePixelRatioNow * layerTransform.scale, 0,
-        0, devicePixelRatioNow * layerTransform.scale,
-        devicePixelRatioNow * layerTransform.offsetX,
-        devicePixelRatioNow * layerTransform.offsetY,
-      );
-      layer.draw(context, {
-        ...renderState,
-        pixelsPerLocalUnit: layerTransform.scale,
-        devicePixelRatio: devicePixelRatioNow,
-      });
+      layer.draw(context, this.#enterLocalSpace(
+        context, layerTransform, devicePixelRatioNow, renderState));
       context.restore();
     }
 
     if (this.overlayPainter) {
-      const view = this.viewTransform;
       context.save();
       // A throw in the overlay painter must not blank the canvas (the layers
       // above are already painted) or kill the render loop — degrade to "no
       // overlay this frame" and log the failure once so it stays diagnosable
       // without spamming the console every tick.
       try {
-        context.setTransform(
-          devicePixelRatioNow * view.scale, 0, 0, devicePixelRatioNow * view.scale,
-          devicePixelRatioNow * view.offsetX, devicePixelRatioNow * view.offsetY,
-        );
-        this.overlayPainter(context, {
-          ...renderState,
-          pixelsPerLocalUnit: view.scale,
-          devicePixelRatio: devicePixelRatioNow,
-        });
+        this.overlayPainter(context, this.#enterLocalSpace(
+          context, this.stageTransformForWorld(), devicePixelRatioNow, renderState));
         this.overlayPainterErrorLogged = false;
       } catch (error) {
         if (!this.overlayPainterErrorLogged) {
@@ -255,6 +303,28 @@ export class Viewer extends EventTarget {
         context.restore();
       }
     }
+  }
+
+  /** Set the context's transform to draw in the local space of stageTransform
+      and return the renderState a draw call in that space receives (see
+      renderIfNeeded). */
+  #enterLocalSpace(context, stageTransform, devicePixelRatioNow, renderState) {
+    const { scaleX, scaleY, offsetX, offsetY } = stageTransform;
+    const localTransform = [
+      devicePixelRatioNow * scaleX, 0, 0, devicePixelRatioNow * scaleY,
+      devicePixelRatioNow * offsetX, devicePixelRatioNow * offsetY,
+    ];
+    context.setTransform(...localTransform);
+    return {
+      ...renderState,
+      pixelsPerLocalUnit: Math.min(scaleX, scaleY),
+      devicePixelRatio: devicePixelRatioNow,
+      stageFromLocal: (point) => ({ x: point.x * scaleX + offsetX, y: point.y * scaleY + offsetY }),
+      drawInStagePixels: (callback) => {
+        context.setTransform(devicePixelRatioNow, 0, 0, devicePixelRatioNow, 0, 0);
+        try { callback(); } finally { context.setTransform(...localTransform); }
+      },
+    };
   }
 
   setOverlayPainter(painter) {

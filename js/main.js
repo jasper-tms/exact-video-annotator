@@ -1127,6 +1127,40 @@ app.viewer.toolDelegate = {
   onPointerUp: (worldPoint, event) => app.activeTool?.onPointerUp?.(app, worldPoint, event),
   onDoubleClick: (worldPoint, event) => app.activeTool?.onDoubleClick?.(app, worldPoint, event),
 };
+/* ---------- Pixel shape ---------- */
+
+// World units are the loaded media's stored pixels. When every loaded video and
+// image shares one pixel shape, the viewer shows world units at that shape (an
+// anamorphic video appears as intended and the pixel grid outlines its real,
+// non-square pixels). Media disagreeing about the shape cannot all be shown
+// correctly on one grid, so the viewer falls back to square world units — each
+// medium drawn at its stored pixel counts — and says so. See "Pixel shape" in
+// ARCHITECTURE.md.
+const pixelShapeByMediaLayer = new Map();   // layer -> the pixel shape last reconciled
+
+function reconcileWorldPixelShape() {
+  const mediaLayers = app.mediaLayers;
+  let mediaChanged = false;
+  for (const layer of mediaLayers) {
+    if (pixelShapeByMediaLayer.get(layer) !== layer.pixelAspectRatio) mediaChanged = true;
+  }
+  pixelShapeByMediaLayer.clear();
+  for (const layer of mediaLayers) pixelShapeByMediaLayer.set(layer, layer.pixelAspectRatio);
+
+  const distinctShapes = new Set(pixelShapeByMediaLayer.values());
+  const shapesAgree = distinctShapes.size <= 1;
+  app.viewer.setPixelAspectRatio(shapesAgree ? (distinctShapes.values().next().value ?? 1) : 1);
+  // Warn only when something just arrived (or changed shape) and caused or
+  // joined a disagreement, not on every later layer change while it lasts.
+  if (!shapesAgree && mediaChanged) {
+    const kinds = app.imageLayers.length > 0 ? 'Videos and images' : 'Videos';
+    app.showToast(`${kinds} with different pixel shapes were loaded! Displaying all `
+      + `${kinds.toLowerCase()} with square pixels — some videos will appear stretched.`,
+    { kind: 'warning' });
+  }
+}
+app.viewer.addEventListener('layers-changed', reconcileWorldPixelShape);
+
 app.viewer.setOverlayPainter((context, renderState) => {
   drawPixelGrid(context, renderState);
   app.activeTool?.drawOverlay?.(context, renderState);
@@ -1321,6 +1355,11 @@ async function loadVideoSource(source, { name, sizeBytes, replaceMediaLayer = nu
       // smoothed approximation of them — the engine defaults to smoothing on
       // (right for a typical video player, wrong for us).
       imageSmoothingEnabled: false,
+      // Annotation coordinates index STORED pixels, and the viewer applies an
+      // anamorphic video's pixel shape itself (see "Pixel shape" in
+      // ARCHITECTURE.md), so the engine's canvas must hold the stored shape:
+      // one stored pixel per canvas pixel in the videoWidth × videoHeight host.
+      applyPixelAspectRatio: false,
       // Hand back a playable engine as soon as the opening frames have been
       // certified, and keep indexing the rest underneath it, rather than making
       // someone wait for the last byte of a long clip before they can annotate
@@ -1474,6 +1513,10 @@ function videoInformationFromEngine(engine, { name, sizeBytes }) {
     declaredDurationSeconds: engine.expectedDuration || null,
     width: engine.videoWidth,
     height: engine.videoHeight,
+    // Width ÷ height of one stored pixel: 1 unless the video is anamorphic,
+    // in which case width/height (and every annotation coordinate) count
+    // stored pixels that are shown this many times as wide as they are tall.
+    pixelAspectRatio: engine.pixelAspectRatio || 1,
   };
 }
 
@@ -1628,6 +1671,7 @@ async function recoverFromFatalDecode(videoLayer) {
       video: videoLayer.hostElement.querySelector('video'),
       prefer: 'native',
       imageSmoothingEnabled: false,
+      applyPixelAspectRatio: false,   // stored-pixel canvas; see loadVideoSource
     });
     if (!app.viewer.layers.includes(videoLayer)) {   // closed while rebuilding
       engine.destroy();
@@ -1643,6 +1687,8 @@ async function recoverFromFatalDecode(videoLayer) {
     (id, tab, transform, link settings), and put it back on `frame`. */
 function installReplacementEngine(videoLayer, engine, frame) {
   videoLayer.replaceEngine(engine);
+  // A relinked file can be a different video with a different pixel shape.
+  reconcileWorldPixelShape();
   videoLayer.mediaInformation = videoInformationFromEngine(engine, videoLayer.mediaInformation);
   wireEngineEvents(videoLayer, engine);
   engine.seekToFrame(frame);
@@ -1703,6 +1749,7 @@ async function relinkVideoLayer(videoLayer, file) {
       canvas: videoLayer.hostElement.querySelector('canvas'),
       video: videoLayer.hostElement.querySelector('video'),
       imageSmoothingEnabled: false,   // exact source pixels; see loadVideoSource
+      applyPixelAspectRatio: false,   // stored-pixel canvas; see loadVideoSource
       playWhileIndexing: true,
       onProgress: (progress) => {
         if (activeLoadIdentifiers.has(loadIdentifier)) {

@@ -2,7 +2,9 @@
 // a property of the canvas's own coordinate system, not of any particular
 // layer, so it is drawn as part of the overlay (world coordinates, scaled by
 // the view transform only) and appears whether or not a video — or anything
-// else — is loaded. Invisible until the user has zoomed in enough to
+// else — is loaded. World units are the loaded media's pixels, so when every
+// loaded video shares one non-square pixel shape the grid cells are that
+// shape too (see "Pixel shape" in ARCHITECTURE.md). Invisible until the user has zoomed in enough to
 // actually distinguish individual units, then fades in, capping at a still-
 // subtle maximum opacity. Can be turned off entirely from the settings modal;
 // that preference is global (not per-document), so it is kept through the
@@ -46,8 +48,9 @@ function opacityForScale(pixelsPerLocalUnit) {
 /**
  * Draws grid lines across whatever part of the world is currently visible on
  * screen. Called from the overlay painter, so context is already transformed
- * into world coordinates and renderState.pixelsPerLocalUnit is the view
- * transform's scale (screen pixels per world unit).
+ * into world coordinates and renderState.pixelsPerLocalUnit is screen pixels
+ * per world unit along the narrower-drawn axis — the grid fades in once the
+ * cells are big enough to see in both directions.
  */
 export function drawPixelGrid(context, renderState) {
   if (!isPixelGridEnabled()) return;
@@ -78,7 +81,6 @@ export function drawPixelGrid(context, renderState) {
   context.save();
   context.globalAlpha = opacity;
   context.strokeStyle = GRID_COLOR;
-  context.lineWidth = LINE_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
   context.beginPath();
   for (let n = Math.ceil(minX + integerCoordinateOffset); n <= Math.floor(maxX + integerCoordinateOffset); n++) {
     const x = n - integerCoordinateOffset;
@@ -90,6 +92,12 @@ export function drawPixelGrid(context, renderState) {
     context.moveTo(minX, y);
     context.lineTo(maxX, y);
   }
-  context.stroke();
+  // The path was built in world coordinates; stroking it in stage pixels
+  // makes vertical and horizontal lines equally thin even when world units
+  // are not square on screen.
+  renderState.drawInStagePixels(() => {
+    context.lineWidth = LINE_WIDTH_SCREEN_PIXELS;
+    context.stroke();
+  });
   context.restore();
 }

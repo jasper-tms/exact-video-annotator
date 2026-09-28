@@ -85,6 +85,10 @@ export class VideoLayer extends MediaLayer {
 
   get sourceWidth() { return this.engine.videoWidth; }
   get sourceHeight() { return this.engine.videoHeight; }
+  // An anamorphic video's stored pixels are not square; the engine reads their
+  // shape from the container. sourceWidth/sourceHeight still count stored
+  // pixels, which is what layer-local coordinates index.
+  get pixelAspectRatio() { return this.engine.pixelAspectRatio || 1; }
 
   draw(context, renderState) {
     const { engine } = this;
@@ -93,14 +97,19 @@ export class VideoLayer extends MediaLayer {
     // Show no picture (a native <video> would render the void black, which
     // drawing would composite onto the stage), but trace a thin grey outline
     // around where the video sits so it is clear the video is present, just
-    // without a frame at this time. Sizing the stroke by pixelsPerLocalUnit
-    // keeps it ~1 CSS pixel wide at any zoom.
+    // without a frame at this time. The rectangle is traced in local
+    // coordinates and stroked in stage pixels, keeping it 1 CSS pixel wide at
+    // any zoom and on every side, even where local pixels are not square.
     if (this.inVoid) {
       const integerCoordinateOffset = renderState.document?.integerCoordinateOffset ?? 0;
-      context.lineWidth = 1 / (renderState.pixelsPerLocalUnit || 1);
-      context.strokeStyle = 'rgba(140, 140, 140, 0.8)';
-      context.strokeRect(-integerCoordinateOffset, -integerCoordinateOffset,
+      context.beginPath();
+      context.rect(-integerCoordinateOffset, -integerCoordinateOffset,
         engine.videoWidth, engine.videoHeight);
+      renderState.drawInStagePixels(() => {
+        context.lineWidth = 1;
+        context.strokeStyle = 'rgba(140, 140, 140, 0.8)';
+        context.stroke();
+      });
       return;
     }
     const element = engine.displayElement;

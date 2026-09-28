@@ -16,9 +16,11 @@ let dragState = null;
 /** Hit-test one annotation layer at a world-space point. */
 export function hitTestLayer(app, layer, worldPoint) {
   const localPoint = app.localFromWorld(layer, worldPoint);
+  const { scaleX, scaleY, offsetX, offsetY } = app.viewer.stageTransformForLayer(layer);
   return layer.hitTest(localPoint, {
     frame: app.currentFrame,
-    pixelsPerLocalUnit: app.viewer.stageTransformForLayer(layer).scale,
+    pixelsPerLocalUnit: Math.min(scaleX, scaleY),
+    stageFromLocal: (point) => ({ x: point.x * scaleX + offsetX, y: point.y * scaleY + offsetY }),
     document: app.annotationDocument,
   });
 }

@@ -35,6 +35,12 @@ export class MediaLayer extends Layer {
   get sourceWidth() { return 0; }
   get sourceHeight() { return 0; }
 
+  /** Width ÷ height of one source pixel as the media means it to be shown. 1
+      (square) here; a video overrides it with its container's pixel shape.
+      Images always answer 1: browsers ignore the pixel-shape fields image
+      formats can carry, and so does the annotator. */
+  get pixelAspectRatio() { return 1; }
+
   contentBounds() {
     const width = this.sourceWidth;
     const height = this.sourceHeight;

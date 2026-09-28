@@ -17,8 +17,8 @@
 
 import { Layer } from './layer.js';
 
-// All sizes below are on-screen pixels; drawing divides them by
-// renderState.pixelsPerLocalUnit so they stay constant regardless of zoom.
+// All sizes below are on-screen (stage CSS) pixels, constant regardless of
+// zoom: marks are drawn and hit-tested in stage space (see draw()).
 const POINT_RADIUS_SCREEN_PIXELS = 5;
 const POINT_OUTLINE_WIDTH_SCREEN_PIXELS = 1.5;
 const SELECTION_RING_GAP_SCREEN_PIXELS = 3;
@@ -84,22 +84,27 @@ export class CoordinatesLayer extends Layer {
 
   /* ---------- Drawing ---------- */
 
+  // Every mark is drawn in stage pixels (renderState.drawInStagePixels), at a
+  // position mapped from local coordinates by renderState.stageFromLocal. That
+  // keeps points round, handles square and strokes even however the local
+  // units are stretched on screen (an anamorphic video's pixels are not
+  // square), and lets every size below be a plain on-screen pixel count.
   draw(context, renderState) {
-    const pixelsPerLocalUnit = renderState.pixelsPerLocalUnit;
     const baseAlpha = context.globalAlpha;
-    for (const item of this.items) {
-      if (item.vertices.length === 0) continue;
-      if (item.kind === 'point') this.#drawPoint(context, renderState, item, pixelsPerLocalUnit, baseAlpha);
-      else this.#drawPath(context, renderState, item, pixelsPerLocalUnit, baseAlpha);
-    }
+    renderState.drawInStagePixels(() => {
+      for (const item of this.items) {
+        if (item.vertices.length === 0) continue;
+        const stageVertices = item.vertices.map(
+          ([x, y]) => renderState.stageFromLocal({ x, y }));
+        if (item.kind === 'point') this.#drawPoint(context, renderState, item, stageVertices[0], baseAlpha);
+        else this.#drawPath(context, renderState, item, stageVertices, baseAlpha);
+      }
+    });
     context.globalAlpha = baseAlpha;
   }
 
-  #drawPoint(context, renderState, item, pixelsPerLocalUnit, baseAlpha) {
-    const radius = POINT_RADIUS_SCREEN_PIXELS / pixelsPerLocalUnit;
-    const outlineWidth = POINT_OUTLINE_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
-    const labelFontSize = LABEL_FONT_SCREEN_PIXELS / pixelsPerLocalUnit;
-    const [x, y] = item.vertices[0];
+  #drawPoint(context, renderState, item, { x, y }, baseAlpha) {
+    const radius = POINT_RADIUS_SCREEN_PIXELS;
     // A frame-agnostic item (frame === null) applies to every frame, so it
     // always draws at full strength rather than the dimmed off-frame alpha.
     const onCurrentFrame = item.frame === null || item.frame === renderState.frame;
@@ -111,7 +116,7 @@ export class CoordinatesLayer extends Layer {
     context.arc(x, y, radius, 0, Math.PI * 2);
     context.fillStyle = color;
     context.fill();
-    context.lineWidth = outlineWidth;
+    context.lineWidth = POINT_OUTLINE_WIDTH_SCREEN_PIXELS;
     context.strokeStyle = POINT_OUTLINE_COLOR;
     context.stroke();
 
@@ -119,20 +124,20 @@ export class CoordinatesLayer extends Layer {
     const isHovered = matchesItem(renderState.hover, this.id, item.id);
     if (isSelected) {
       context.beginPath();
-      context.arc(x, y, radius + SELECTION_RING_GAP_SCREEN_PIXELS / pixelsPerLocalUnit, 0, Math.PI * 2);
-      context.lineWidth = SELECTION_RING_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
+      context.arc(x, y, radius + SELECTION_RING_GAP_SCREEN_PIXELS, 0, Math.PI * 2);
+      context.lineWidth = SELECTION_RING_WIDTH_SCREEN_PIXELS;
       context.strokeStyle = '#ffffff';
       context.stroke();
     } else if (isHovered) {
       context.beginPath();
-      context.arc(x, y, radius + SELECTION_RING_GAP_SCREEN_PIXELS / pixelsPerLocalUnit, 0, Math.PI * 2);
-      context.lineWidth = HOVER_RING_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
+      context.arc(x, y, radius + SELECTION_RING_GAP_SCREEN_PIXELS, 0, Math.PI * 2);
+      context.lineWidth = HOVER_RING_WIDTH_SCREEN_PIXELS;
       context.strokeStyle = 'rgba(255, 255, 255, 0.5)';
       context.stroke();
     }
 
     if (item.name) {
-      context.font = `${labelFontSize}px system-ui, sans-serif`;
+      context.font = `${LABEL_FONT_SCREEN_PIXELS}px system-ui, sans-serif`;
       context.textAlign = 'left';
       context.textBaseline = 'bottom';
       context.fillStyle = LABEL_COLOR;
@@ -140,10 +145,9 @@ export class CoordinatesLayer extends Layer {
     }
   }
 
-  #drawPath(context, renderState, item, pixelsPerLocalUnit, baseAlpha) {
-    const strokeWidth = STROKE_WIDTH_SCREEN_PIXELS / pixelsPerLocalUnit;
-    const handleSize = VERTEX_HANDLE_SCREEN_PIXELS / pixelsPerLocalUnit;
-    const fontSize = LABEL_FONT_SCREEN_PIXELS / pixelsPerLocalUnit;
+  #drawPath(context, renderState, item, stageVertices, baseAlpha) {
+    const strokeWidth = STROKE_WIDTH_SCREEN_PIXELS;
+    const handleSize = VERTEX_HANDLE_SCREEN_PIXELS;
     const isCurrentFrame = item.frame === null || item.frame === renderState.frame;
     const frameAlpha = isCurrentFrame ? 1 : OFF_FRAME_ALPHA_MULTIPLIER;
     const color = colorForItem(item, renderState);
@@ -155,9 +159,9 @@ export class CoordinatesLayer extends Layer {
     context.lineCap = 'round';
 
     context.beginPath();
-    context.moveTo(item.vertices[0][0], item.vertices[0][1]);
-    for (let index = 1; index < item.vertices.length; index++) {
-      context.lineTo(item.vertices[index][0], item.vertices[index][1]);
+    context.moveTo(stageVertices[0].x, stageVertices[0].y);
+    for (let index = 1; index < stageVertices.length; index++) {
+      context.lineTo(stageVertices[index].x, stageVertices[index].y);
     }
     const closed = isClosedPolyline(item);
     if (closed) context.closePath();
@@ -174,26 +178,26 @@ export class CoordinatesLayer extends Layer {
     context.stroke();
 
     if (isSelected) {
-      this.#drawVertexHandles(context, item, renderState, handleSize, strokeWidth, color, baseAlpha);
+      this.#drawVertexHandles(context, stageVertices, renderState, handleSize, strokeWidth, color, baseAlpha);
     }
 
     if (item.name) {
       context.globalAlpha = baseAlpha * frameAlpha;
       context.fillStyle = color;
-      context.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
+      context.font = `${LABEL_FONT_SCREEN_PIXELS}px system-ui, -apple-system, sans-serif`;
       context.textBaseline = 'bottom';
-      context.fillText(item.name, item.vertices[0][0] + handleSize, item.vertices[0][1] - handleSize);
+      context.fillText(item.name, stageVertices[0].x + handleSize, stageVertices[0].y - handleSize);
     }
 
     context.restore();
   }
 
-  #drawVertexHandles(context, item, renderState, handleSize, strokeWidth, color, baseAlpha) {
+  #drawVertexHandles(context, stageVertices, renderState, handleSize, strokeWidth, color, baseAlpha) {
     const activeVertexIndex = renderState.selection?.vertexIndex ?? null;
     context.globalAlpha = baseAlpha;
     context.lineWidth = strokeWidth * 0.75;
-    for (let index = 0; index < item.vertices.length; index++) {
-      const [x, y] = item.vertices[index];
+    for (let index = 0; index < stageVertices.length; index++) {
+      const { x, y } = stageVertices[index];
       const isActive = index === activeVertexIndex;
       const size = isActive ? handleSize * ACTIVE_VERTEX_SIZE_MULTIPLIER : handleSize;
       // The active vertex inverts fill/stroke so it reads as distinct.
@@ -220,8 +224,13 @@ export class CoordinatesLayer extends Layer {
 
   /* ---------- Hit testing ---------- */
 
+  /** renderState needs frame and stageFromLocal. Distances are measured on
+      screen, not in local units, so the tolerance is the same number of
+      pixels in every direction even where local units are not square. */
   hitTest(localPoint, renderState) {
-    const tolerance = HIT_TOLERANCE_SCREEN_PIXELS / renderState.pixelsPerLocalUnit;
+    const tolerance = HIT_TOLERANCE_SCREEN_PIXELS;
+    const stagePoint = renderState.stageFromLocal(localPoint);
+    const stageVertex = ([x, y]) => renderState.stageFromLocal({ x, y });
 
     // Prefer current-frame items over off-frame ones, and within each group
     // prefer topmost-drawn (later items sit visually on top).
@@ -238,8 +247,8 @@ export class CoordinatesLayer extends Layer {
     // Priority (1): vertices, across all candidates.
     for (const item of orderedItems) {
       for (let index = 0; index < item.vertices.length; index++) {
-        const [x, y] = item.vertices[index];
-        if (Math.hypot(localPoint.x - x, localPoint.y - y) <= tolerance) {
+        const { x, y } = stageVertex(item.vertices[index]);
+        if (Math.hypot(stagePoint.x - x, stagePoint.y - y) <= tolerance) {
           return { itemId: item.id, part: 'vertex', vertexIndex: index };
         }
       }
@@ -252,9 +261,9 @@ export class CoordinatesLayer extends Layer {
     for (const item of orderedItems) {
       const segmentCount = Math.max(0, item.vertices.length - 1);
       for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
-        const [ax, ay] = item.vertices[segmentIndex];
-        const [bx, by] = item.vertices[segmentIndex + 1];
-        if (distanceToSegment(localPoint.x, localPoint.y, ax, ay, bx, by) <= tolerance) {
+        const { x: ax, y: ay } = stageVertex(item.vertices[segmentIndex]);
+        const { x: bx, y: by } = stageVertex(item.vertices[segmentIndex + 1]);
+        if (distanceToSegment(stagePoint.x, stagePoint.y, ax, ay, bx, by) <= tolerance) {
           return { itemId: item.id, part: 'segment', vertexIndex: segmentIndex };
         }
       }
