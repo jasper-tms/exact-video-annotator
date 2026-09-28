@@ -19,10 +19,11 @@ CSS, JS) do NOT trigger a rebuild, so a single page load rebuilds once. This
 assumes build.sh is a fast staging step, since it reruns on every page load.
 
 Usage:
-    python http_server_with_redirects.py [port] [directory]
-                                         [--no-build] [--no-browser]
+    python http_server.py [port] [directory]
+                         [--no-build] [--no-browser]
 
-    port         Port to serve on (default: 8000).
+    port         Port to serve on. If omitted, the first free port from 8000
+                 upward is used; if given and already in use, the server exits.
     directory    Directory to serve (default: the freshly built "dist", or the
                  repository root under --no-build).
     --no-build   Skip build.sh entirely (no startup build, no rebuild-on-
@@ -38,15 +39,19 @@ at, typically the live project.
 """
 
 import argparse
+import errno
 import http.server
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
 import webbrowser
 from pathlib import Path
 from urllib.parse import unquote
+
+DEFAULT_PORT = 8000
 
 
 def parse_redirects_file(filepath):
@@ -296,8 +301,9 @@ def main():
         description='Development server matching Cloudflare Pages behavior '
                     '(_redirects, pretty URLs, 404.html, Range requests), '
                     'rebuilding on each page load.')
-    parser.add_argument('port', nargs='?', type=int, default=8000,
-                        help='Port to serve on (default: 8000).')
+    parser.add_argument('port', nargs='?', type=int, default=None,
+                        help='Port to serve on. If omitted, the first free '
+                             f'port from {DEFAULT_PORT} upward is used.')
     parser.add_argument('directory', nargs='?', default=None,
                         help='Directory to serve (default: the freshly built '
                              '"dist", or this repository root under '
@@ -311,7 +317,6 @@ def main():
                         help='Do not open the site in a browser on startup.')
     args = parser.parse_args()
 
-    port = args.port
     repo_root = Path(__file__).parent.resolve()
 
     # Build first (blocking) so the served dist/ reflects the current sources,
@@ -343,6 +348,46 @@ def main():
     else:
         print("No _redirects file found or file is empty")
 
+    RedirectHandler.serve_directory = serve_directory
+
+    # Use the requested port, or if none was given, the first free port
+    # starting from the default.
+    if args.port is not None:
+        candidate_ports = [args.port]
+    else:
+        candidate_ports = range(DEFAULT_PORT, DEFAULT_PORT + 100)
+    httpd = None
+    for port in candidate_ports:
+        # Python's server sets SO_REUSEADDR, which on macOS lets it bind a port
+        # that another server is already listening on via localhost, so bind()
+        # alone can't be trusted to fail. Check for an existing listener first.
+        port_in_use = False
+        for family, host in [(socket.AF_INET, '127.0.0.1'),
+                             (socket.AF_INET6, '::1')]:
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                probe.settimeout(0.2)
+                if probe.connect_ex((host, port)) == 0:
+                    port_in_use = True
+        if port_in_use:
+            continue
+        try:
+            # Threading so a page and its concurrent asset / range-streamed
+            # fetches can all be in flight at once.
+            httpd = http.server.ThreadingHTTPServer(('', port), RedirectHandler)
+            break
+        except OSError as error:
+            if error.errno != errno.EADDRINUSE:
+                raise
+    if httpd is None:
+        if args.port is not None:
+            print(f'\nPort {args.port} is already in use. Pass a different '
+                  'port, or omit it to pick a free one automatically.',
+                  file=sys.stderr)
+        else:
+            print(f'\nNo free port found between {candidate_ports[0]} and '
+                  f'{candidate_ports[-1]}.', file=sys.stderr)
+        sys.exit(1)
+
     url = f'http://localhost:{port}'
     print(f"\nServing {serve_directory} at {url}")
     if RedirectHandler.rebuild_on_page_load:
@@ -350,11 +395,7 @@ def main():
     else:
         print("Press Ctrl+C to stop\n")
 
-    RedirectHandler.serve_directory = serve_directory
-
-    # Threading so a page and its concurrent asset / range-streamed fetches
-    # can all be in flight at once.
-    with http.server.ThreadingHTTPServer(("", port), RedirectHandler) as httpd:
+    with httpd:
         # The socket is already bound and listening, so the browser's first
         # request queues even if it beats serve_forever() below.
         if not args.no_browser:
