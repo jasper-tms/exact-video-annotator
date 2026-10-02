@@ -83,11 +83,14 @@
       <!-- Pixel-wise segmentation isn't implemented yet, so this button has no
            backing tool at all — it always shows a "not implemented" message. -->
       <button id="paint-tool-button" class="rail-button" title="Paint pixels — not implemented yet">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 3 L13.5 10.5"></path>
-          <path d="M12 10 C 8.5 9.5 5.5 12 5.5 15 C 5.5 17.5 4.8 19.4 3 20.8 C 8 21.3 13.8 19.5 14 13.8 Z"
-                fill="currentColor"></path>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+          <!-- Drawn upright (tip down), then turned so the tip points down-left:
+               a tapered handle, a short metal band, and a flame-shaped tip. -->
+          <g transform="rotate(45 12 12)">
+            <path d="M11.3 1.5 Q12 0.5 12.7 1.5 Q13.4 7 13.6 12.4 L10.4 12.4 Q10.6 7 11.3 1.5 Z"></path>
+            <path d="M10.5 13.2 L13.5 13.2 L13.2 15.6 L10.8 15.6 Z"></path>
+            <path d="M10.8 16.4 L13.2 16.4 C 14.7 17.3 14.8 20.1 13.1 21.4 C 12.4 22 11.7 22.5 11.2 23.4 C 10.5 22.3 9.3 20.8 9.5 19 C 9.6 17.8 10.1 16.9 10.8 16.4 Z"></path>
+          </g>
         </svg>
       </button>
       <!-- Frame-agnostic toggle: when on (∞ lit), newly drawn annotations apply
