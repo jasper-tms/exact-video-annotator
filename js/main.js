@@ -2092,9 +2092,57 @@ scrollToggleButton.addEventListener('click', () => {
       + firstScreenFit.pixelsLeftToGrow() - toolbarHeight;
     window.scrollTo({ top: target, behavior: 'smooth' });
   } else {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollToTop();
   }
 });
+
+// Below this distance from the top, scroll up in steps of our own (see
+// scrollToTop).
+const STEPPED_SCROLL_TO_TOP_MAXIMUM_PIXELS = 200;
+const STEPPED_SCROLL_TO_TOP_MILLISECONDS = 250;
+
+/** Smoothly scroll back to the top of the page. On iPhone (WebKit, in every
+    iPhone browser) with the browser's bars collapsed, a request to scroll
+    straight to 0 from within roughly a bar's height of the top is silently
+    ignored, smooth or instant, although small upward scrolls from there work
+    and scrolling to 0 from further down works. So short distances are
+    animated here as a series of instant small steps, ending 2 → 1 → 0: even
+    if that last step is ignored, the page ends within the "scrolled to the
+    top" tolerance. */
+function scrollToTop() {
+  const startTop = window.scrollY;
+  if (startTop > STEPPED_SCROLL_TO_TOP_MAXIMUM_PIXELS) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  const startTime = performance.now();
+  let lastTarget = startTop;
+  // The user taking over (touching, wheeling, or pressing a key) stops the
+  // animation. Comparing window.scrollY against the last step would not do:
+  // on iPhone it can lag a frame behind an instant scroll.
+  let interrupted = false;
+  const interruptingEvents = ['touchstart', 'wheel', 'keydown'];
+  const interrupt = () => { interrupted = true; };
+  for (const type of interruptingEvents) {
+    window.addEventListener(type, interrupt, { passive: true, once: true });
+  }
+  const stopListening = () => {
+    for (const type of interruptingEvents) window.removeEventListener(type, interrupt);
+  };
+  function step(now) {
+    if (interrupted) { stopListening(); return; }
+    const progress = Math.min(1, (now - startTime) / STEPPED_SCROLL_TO_TOP_MILLISECONDS);
+    const easedProgress = 1 - (1 - progress) ** 3;
+    // Never jump straight to 0 from more than 2 pixels away (see above).
+    const target = Math.max(Math.round(startTop * (1 - easedProgress)),
+                            Math.min(lastTarget - 1, 2));
+    window.scrollTo({ top: target, behavior: 'instant' });
+    lastTarget = target;
+    if (target > 0) requestAnimationFrame(step);
+    else stopListening();
+  }
+  requestAnimationFrame(step);
+}
 window.addEventListener('scroll', reflectScrollToggle, { passive: true });
 // The browser's bottom bar coming or going changes what is in view without
 // any scrolling.
