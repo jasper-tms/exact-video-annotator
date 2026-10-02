@@ -419,6 +419,12 @@ button:focus:not(:focus-visible) { outline: none; }
   pointer-events: none;
 }
 
+/* Touch devices have no keyboard to press these with (same test as the drop
+   hint's touch-only line). */
+@media (hover: none) and (pointer: coarse) {
+  .rail-button[data-hotkey]::after { content: none; }
+}
+
 .rail-button.active-tool {
   background: var(--accent);
   border-color: var(--accent);
