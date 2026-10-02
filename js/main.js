@@ -23,6 +23,7 @@ import { lineTool } from './tools/line-tool.js';
 import { initializeEventHotkeys } from './tools/event-hotkeys.js';
 import { initializeTransport } from './ui/transport.js';
 import { initializeLayerTabs } from './ui/layer-tabs.js';
+import { initializeFirstScreenFit } from './ui/first-screen-fit.js';
 import { initializeLayerDetail } from './ui/layer-detail.js';
 import { initializeAnnotationsTable } from './ui/annotations-table.js';
 import { initializeClassManager } from './ui/class-manager.js';
@@ -2061,6 +2062,7 @@ reflectAnnotationMode();
 
 /* ---------- Scroll-to-details toggle (bottom of the tool rail) ---------- */
 
+const firstScreenFit = initializeFirstScreenFit(document.getElementById('viewport-section'));
 const scrollToggleButton = document.getElementById('scroll-toggle-button');
 // Treat anything within a few pixels of the top as "fully scrolled up".
 const SCROLL_TOP_THRESHOLD_PIXELS = 4;
@@ -2079,9 +2081,12 @@ function reflectScrollToggle() {
 scrollToggleButton.addEventListener('click', () => {
   if (isScrolledToTop()) {
     // Reveal the details section, leaving it just below the sticky toolbar.
+    // Aim for where it will be once scrolling has grown the first screen to
+    // its full height (see first-screen-fit.js), not where it is now.
     const details = document.getElementById('details-section');
     const toolbarHeight = document.getElementById('toolbar').offsetHeight;
-    const target = details.getBoundingClientRect().top + window.scrollY - toolbarHeight;
+    const target = details.getBoundingClientRect().top + window.scrollY
+      + firstScreenFit.pixelsLeftToGrow() - toolbarHeight;
     window.scrollTo({ top: target, behavior: 'smooth' });
   } else {
     window.scrollTo({ top: 0, behavior: 'smooth' });

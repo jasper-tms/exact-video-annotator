@@ -342,12 +342,10 @@ button:focus:not(:focus-visible) { outline: none; }
 /* ---------- First screenful: tool rail + canvas + transport + tabs ---------- */
 
 #viewport-section {
-  height: calc(100vh - var(--toolbar-height));
-  /* Dynamic viewport height: on mobile, follows the browser's own bottom bar
-     as it slides in and out, so the transport and layer tabs stay just above
-     it instead of underneath it. (100vh above is the fallback for browsers
-     without dvh; on mobile it is the height with that bar hidden.) */
-  height: calc(100dvh - var(--toolbar-height));
+  /* --first-screen-bottom is set by js/ui/first-screen-fit.js so that, on
+     mobile, the transport and layer tabs stay above the browser's bottom bar
+     while scrolled to the top; 100vh is only the value before it runs. */
+  height: calc(var(--first-screen-bottom, 100vh) - var(--toolbar-height));
   display: flex;
   min-height: 0;
 }
