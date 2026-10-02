@@ -730,6 +730,11 @@ button:focus:not(:focus-visible) { outline: none; }
 #drop-hint {
   position: absolute;
   inset: 0;
+  /* Centered as if a mobile browser's bottom bar were showing, so the hint
+     holds still while the stage grows and shrinks with that bar (see
+     js/ui/first-screen-fit.js): leave out whatever part of the first screen
+     reaches below the small viewport height. Zero on desktop. */
+  bottom: max(0px, calc(var(--first-screen-bottom, 100svh) - 100svh));
   display: flex;
   flex-direction: column;
   align-items: center;
