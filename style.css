@@ -395,16 +395,10 @@ button:focus:not(:focus-visible) { outline: none; }
   justify-content: center;
 }
 
-/* This glyph renders small at the base size; enlarge it to fill the button. */
-#tool-rail button[data-tool="point"],
-#frame-agnostic-toggle {
-  font-size: 21px;
-}
-
-/* ● sits visibly below true center in its own line box at this font size (a
-   font-metrics quirk of that particular glyph, not a layout bug); nudge the
-   flex-centered content up so it reads as centered in the button. */
-#tool-rail button[data-tool="point"] { padding-bottom: 2px; }
+/* Every rail icon is inline SVG rather than a text glyph, so it renders the
+   same on every platform (text glyphs vary by font, and some become color
+   emoji on phones). */
+.rail-button svg { display: block; }
 
 /* Single-key hotkey, tucked into the button's bottom-right corner. Inherits the
    button color (white when active, dim otherwise) and stays out of pointer flow. */

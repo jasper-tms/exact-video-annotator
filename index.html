@@ -58,8 +58,17 @@
           <polygon points="1,12 6,8.5 6,11 18,11 18,8.5 23,12 18,15.5 18,13 6,13 6,15.5"></polygon>
         </svg>
       </button>
-      <button data-tool="point" class="rail-button" title="Add points">●</button>
-      <button data-tool="line" class="rail-button" title="Draw lines">╱</button>
+      <button data-tool="point" class="rail-button" title="Add points">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="12" r="6.5"></circle>
+        </svg>
+      </button>
+      <button data-tool="line" class="rail-button" title="Draw lines">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="5" y1="19" x2="19" y2="5"></line>
+        </svg>
+      </button>
       <button data-tool="polyline" class="rail-button" title="Draw polylines">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -73,17 +82,56 @@
       </button>
       <!-- Pixel-wise segmentation isn't implemented yet, so this button has no
            backing tool at all — it always shows a "not implemented" message. -->
-      <button id="paint-tool-button" class="rail-button" title="Paint pixels — not implemented yet">🖌</button>
+      <button id="paint-tool-button" class="rail-button" title="Paint pixels — not implemented yet">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 3 L13.5 10.5"></path>
+          <path d="M12 10 C 8.5 9.5 5.5 12 5.5 15 C 5.5 17.5 4.8 19.4 3 20.8 C 8 21.3 13.8 19.5 14 13.8 Z"
+                fill="currentColor"></path>
+        </svg>
+      </button>
       <!-- Frame-agnostic toggle: when on (∞ lit), newly drawn annotations apply
            across every frame instead of being anchored to the current frame.
            Defaults to off; it never changes existing annotations. -->
       <button id="frame-agnostic-toggle" class="rail-button" data-hotkey="a"
-              title="Frame-agnostic mode off: new annotations anchor to the current frame (a)">∞</button>
+              title="Frame-agnostic mode off: new annotations anchor to the current frame (a)">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 12 C 9.5 8.2 3.5 8.2 3.5 12 C 3.5 15.8 9.5 15.8 12 12
+                   C 14.5 8.2 20.5 8.2 20.5 12 C 20.5 15.8 14.5 15.8 12 12 Z"></path>
+        </svg>
+      </button>
       <span class="rail-divider"></span>
-      <button id="undo-button" class="rail-button" title="Undo (Cmd/Ctrl+Z)" disabled>↩</button>
-      <button id="redo-button" class="rail-button" title="Redo (Shift+Cmd/Ctrl+Z)" disabled>↪</button>
+      <!-- Undo and redo fill the whole button: an arrow about a quarter of the
+           way down, and the word in small capitals below it (squeezed to a
+           fixed width with textLength so it measures the same in any font). -->
+      <button id="undo-button" class="rail-button" title="Undo (Cmd/Ctrl+Z)" disabled>
+        <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="7" y1="8" x2="25" y2="8"></line>
+          <polyline points="11,4 7,8 11,12"></polyline>
+          <text x="16" y="23" text-anchor="middle" textLength="22" lengthAdjust="spacingAndGlyphs"
+                fill="currentColor" stroke="none" font-family="system-ui, sans-serif"
+                font-size="9.5" font-weight="700">UNDO</text>
+        </svg>
+      </button>
+      <button id="redo-button" class="rail-button" title="Redo (Shift+Cmd/Ctrl+Z)" disabled>
+        <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="7" y1="8" x2="25" y2="8"></line>
+          <polyline points="21,4 25,8 21,12"></polyline>
+          <text x="16" y="23" text-anchor="middle" textLength="22" lengthAdjust="spacingAndGlyphs"
+                fill="currentColor" stroke="none" font-family="system-ui, sans-serif"
+                font-size="9.5" font-weight="700">REDO</text>
+        </svg>
+      </button>
       <span class="rail-divider"></span>
-      <button id="fit-view-button" class="rail-button" data-hotkey="f" title="Fit the view to the content (f)">⛶</button>
+      <button id="fit-view-button" class="rail-button" data-hotkey="f" title="Fit the view to the content (f)">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15"></path>
+        </svg>
+      </button>
       <!-- Pinned to the bottom of the rail: scroll the page down to the details
            below the canvas, then back up. Its glyph reflects the direction it
            will scroll (down when at the top, up otherwise). -->
