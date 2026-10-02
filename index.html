@@ -101,10 +101,12 @@
       <div id="stage-container">
         <canvas id="stage-canvas"></canvas>
         <div id="drop-hint">
-          <p>Drop a video or image here, or use <strong>Open Media</strong>.</p>
-          <p class="drop-hint-details">Videos are read lazily from disk — arbitrarily large
-             files are fine — and images open too (PNG, JPEG, WebP, GIF, BMP).
-             Nothing is uploaded anywhere.</p>
+          <!-- Touch devices cannot drag files onto the page, so they get the
+               second line instead of the first (see #drop-hint in style.css). -->
+          <p class="drop-hint-for-pointer">Drop a video or image here, or use <strong>Open Media</strong>.</p>
+          <p class="drop-hint-for-touch">Press <strong>Open Media</strong> above to get started.</p>
+          <p class="drop-hint-details">Your files never leave your device — they just load into your browser.<br>
+             Try images or videos of any size and length — most formats load instantly.</p>
         </div>
         <!-- Containers with no central index (WebM/MKV, fragmented MP4, Ogg)
              are indexed by a full pass over the file, which is the one part of

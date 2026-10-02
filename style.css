@@ -745,7 +745,13 @@ button:focus:not(:focus-visible) { outline: none; }
 }
 
 #drop-hint.hidden { display: none; }
-.drop-hint-details { font-size: 12px; max-width: 380px; }
+.drop-hint-details { font-size: 12px; max-width: 500px; padding: 0 16px; }
+
+.drop-hint-for-touch { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .drop-hint-for-pointer { display: none; }
+  .drop-hint-for-touch { display: block; }
+}
 
 /* Indexing progress, bottom-left of the stage. Stays up while a clip plays
    whose index is still growing underneath it. */
