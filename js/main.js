@@ -2064,11 +2064,14 @@ reflectAnnotationMode();
 
 const firstScreenFit = initializeFirstScreenFit(document.getElementById('viewport-section'));
 const scrollToggleButton = document.getElementById('scroll-toggle-button');
-// Treat anything within a few pixels of the top as "fully scrolled up".
+// "Scrolled to the top" means only the first screen is in view, give or take
+// a few pixels. That is not the same as a scroll position of 0: on mobile,
+// the first screen stays pinned above the browser's bottom bar for a little
+// way down the page (see first-screen-fit.js).
 const SCROLL_TOP_THRESHOLD_PIXELS = 4;
 
 function isScrolledToTop() {
-  return window.scrollY <= SCROLL_TOP_THRESHOLD_PIXELS;
+  return firstScreenFit.pixelsScrolledPastFirstScreen() <= SCROLL_TOP_THRESHOLD_PIXELS;
 }
 
 function reflectScrollToggle() {
@@ -2093,6 +2096,10 @@ scrollToggleButton.addEventListener('click', () => {
   }
 });
 window.addEventListener('scroll', reflectScrollToggle, { passive: true });
+// The browser's bottom bar coming or going changes what is in view without
+// any scrolling.
+window.addEventListener('resize', reflectScrollToggle);
+window.visualViewport?.addEventListener('resize', reflectScrollToggle);
 reflectScrollToggle();
 
 const mediaFileInput = document.getElementById('media-file-input');

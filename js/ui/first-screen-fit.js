@@ -28,9 +28,12 @@ export function initializeFirstScreenFit(sectionElement) {
     return largeViewportProbe.getBoundingClientRect().height;
   }
 
+  function visibleBottom() {
+    return Math.max(0, window.scrollY) + dynamicViewportProbe.getBoundingClientRect().height;
+  }
+
   function fittedBottom() {
-    const scrollTop = Math.max(0, window.scrollY);
-    return Math.min(fullBottom(), scrollTop + dynamicViewportProbe.getBoundingClientRect().height);
+    return Math.min(fullBottom(), visibleBottom());
   }
 
   function update() {
@@ -47,6 +50,10 @@ export function initializeFirstScreenFit(sectionElement) {
         browser's bottom bar (0 on desktop). Scrolling to something below it
         has to aim this much further down to land where intended. */
     pixelsLeftToGrow: () => fullBottom() - fittedBottom(),
+    /** How much of the page below the first screen is in view (0 while the
+        first screen fills the window, including while it is pinned above the
+        browser's bottom bar a little way down the page). */
+    pixelsScrolledPastFirstScreen: () => Math.max(0, visibleBottom() - fullBottom()),
   };
 }
 
