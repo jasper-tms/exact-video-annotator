@@ -903,15 +903,15 @@ button:focus:not(:focus-visible) { outline: none; }
 }
 
 /* Folded onto its own line (the is-folded class is set by
-   js/ui/transport.js): frame values to the left, the dot in the center, and
-   the time values to the right. */
+   js/ui/transport.js): frame values to the left, time values to the right,
+   and the dot centered in the gap between them. */
 #transport-container.is-folded .transport-readout {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto 1fr auto;
 }
 
-#transport-container.is-folded .transport-time {
-  justify-self: end;
+#transport-container.is-folded .transport-time-gap {
+  justify-self: center;
 }
 
 /* Its width is set by js/ui/transport.js to reserve space for the current

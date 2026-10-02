@@ -337,6 +337,9 @@ export function initializeTransport(app, containerElement) {
       scrubber.max = '0';
       scrubber.value = '0';
       if (document.activeElement !== frameInput) frameInput.value = '0';
+      // With no last frame to size for, room for four digits (see the
+      // matching line in updateIndexDisplays).
+      frameInput.style.width = 'calc(4ch + 14px)';
       frameTotal.textContent = '/ 0';
       timeReadout.textContent = `${formatTime(0)} / ${formatTime(0)}`;
       indexWaiting.hidden = true;
