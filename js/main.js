@@ -1125,6 +1125,7 @@ app.viewer.toolDelegate = {
     app.activeTool?.onPointerMove?.(app, worldPoint, event);
   },
   onPointerUp: (worldPoint, event) => app.activeTool?.onPointerUp?.(app, worldPoint, event),
+  onPointerCancel: (worldPoint, event) => app.activeTool?.onPointerCancel?.(app, worldPoint, event),
   onDoubleClick: (worldPoint, event) => app.activeTool?.onDoubleClick?.(app, worldPoint, event),
 };
 /* ---------- Pixel shape ---------- */

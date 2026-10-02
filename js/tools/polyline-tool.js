@@ -314,6 +314,16 @@ export function createDrawingTool({
       }
     },
 
+    // The press was taken over (a second finger began a pinch): forget it
+    // without placing a vertex, deselecting, or committing a move. A shape
+    // in progress stays in progress.
+    onPointerCancel(app, worldPoint, event) { // eslint-disable-line no-unused-vars
+      pendingVertexPress = null;
+      pendingEmptyPress = null;
+      cancelDragOnExistingItem();
+      app.viewer.requestRender();
+    },
+
     onDoubleClick(app, worldPoint, event) { // eslint-disable-line no-unused-vars
       if (!inProgress) {
         const layer = app.findAnnotationLayerForType('coordinates');

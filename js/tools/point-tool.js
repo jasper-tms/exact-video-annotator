@@ -72,6 +72,14 @@ export const pointTool = {
     }
   },
 
+  // The press was taken over (a second finger began a pinch): forget it
+  // without deselecting or committing anything.
+  onPointerCancel(app, worldPoint, event) { // eslint-disable-line no-unused-vars
+    pendingEmptyPress = null;
+    cancelDragOnExistingItem();
+    app.viewer.requestRender();
+  },
+
   onDoubleClick(app, worldPoint, event) {
     const layer = app.targetLayerForType('coordinates');
     const hit = layer.visible ? hitTestLayer(app, layer, worldPoint) : null;

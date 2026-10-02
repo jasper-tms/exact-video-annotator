@@ -84,8 +84,13 @@ export function endDragOnExistingItem(app) {
   return true;
 }
 
-/** Drop any armed drag without committing (tool deactivation). */
+/** Drop any armed drag without committing (tool deactivation, or a second
+    finger turning the gesture into a pinch), putting a moved item back where
+    the drag found it. */
 export function cancelDragOnExistingItem() {
+  if (dragState?.moved) {
+    dragState.layer.restoreItemGeometry(dragState.itemId, dragState.beforeSnapshot);
+  }
   dragState = null;
 }
 
