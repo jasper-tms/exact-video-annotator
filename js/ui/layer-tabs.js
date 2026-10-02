@@ -402,8 +402,23 @@ export function initializeLayerTabs(app, containerElement) {
     }
     updateDeleteButton();
     updateScrollButtons();
-    strip.querySelector('.layer-tab.active')
-      ?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    scrollActiveTabIntoView();
+  }
+
+  /** Scroll the strip sideways just far enough to show the active tab. Not
+      scrollIntoView, which would also scroll the page vertically whenever the
+      tabs are out of sight (for example, under a mobile browser's bottom
+      bar), yanking the top of the app off screen. */
+  function scrollActiveTabIntoView() {
+    const activeTab = strip.querySelector('.layer-tab.active');
+    if (!activeTab) return;
+    const stripRectangle = strip.getBoundingClientRect();
+    const tabRectangle = activeTab.getBoundingClientRect();
+    if (tabRectangle.left < stripRectangle.left) {
+      strip.scrollLeft -= stripRectangle.left - tabRectangle.left;
+    } else if (tabRectangle.right > stripRectangle.right) {
+      strip.scrollLeft += tabRectangle.right - stripRectangle.right;
+    }
   }
 
   function buildTab(layer, isSelected) {

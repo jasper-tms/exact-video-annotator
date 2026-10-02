@@ -343,6 +343,11 @@ button:focus:not(:focus-visible) { outline: none; }
 
 #viewport-section {
   height: calc(100vh - var(--toolbar-height));
+  /* Dynamic viewport height: on mobile, follows the browser's own bottom bar
+     as it slides in and out, so the transport and layer tabs stay just above
+     it instead of underneath it. (100vh above is the fallback for browsers
+     without dvh; on mobile it is the height with that bar hidden.) */
+  height: calc(100dvh - var(--toolbar-height));
   display: flex;
   min-height: 0;
 }
