@@ -41,7 +41,8 @@ eur3 (e.g. `europe-west4`) or they will not be "next to" the database.
   is not authorized). The production/staging domains that must stay listed:
   `examine.video`, `www.examine.video`, `exact-video-annotator.pages.dev`.
   **Any new deploy domain must be added there** or sign-in fails on it with no
-  obvious error.
+  obvious error. Cloudflare Pages also deploys every pushed branch to
+  `<branch>.exact-video-annotator.pages.dev`.
 
 ## What is stored (and what is deliberately NOT)
 
