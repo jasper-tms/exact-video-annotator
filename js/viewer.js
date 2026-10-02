@@ -8,7 +8,9 @@
 // On a touchscreen, two fingers pinch to zoom and drag to pan together. The
 // second finger down takes the gesture over from the tool: the first finger's
 // interaction is cancelled (onPointerCancel), and no finger is forwarded to
-// the tool again until every finger has lifted.
+// the tool again until every finger has lifted. Until then, the view follows
+// whichever fingers are down, as a map app does: lifting one of two fingers
+// carries on as a one-finger pan, and putting it back resumes the pinch.
 //
 // A tool can also request a pan explicitly (an empty-space drag, or a drag
 // that started on empty space but hasn't moved far enough yet to tell click
@@ -54,7 +56,7 @@ export class Viewer extends EventTarget {
     this.#needsRender = true;
     this.#activePan = null;
     this.#touchStagePoints = new Map();
-    this.#pinch = null;
+    this.#touchGesture = null;
 
     this.#resizeObserver = new ResizeObserver(() => this.requestRender());
     this.#resizeObserver.observe(stageCanvas);
@@ -66,10 +68,10 @@ export class Viewer extends EventTarget {
   // Every touch pointer currently down on the canvas: pointerId → its latest
   // stage point.
   #touchStagePoints;
-  // While a two-finger gesture is in progress (from the second finger down
+  // While a multi-finger gesture is in progress (from the second finger down
   // until the last finger up): { pointerIds, lastCenter, lastDistance } for
-  // the two fingers driving it, or null.
-  #pinch;
+  // the one or two fingers driving it, or null.
+  #touchGesture;
 
   /* ---------- Layer stack ---------- */
 
@@ -355,10 +357,10 @@ export class Viewer extends EventTarget {
     canvas.addEventListener('pointerdown', (event) => {
       if (event.pointerType === 'touch') {
         this.#touchStagePoints.set(event.pointerId, this.stagePointFromPointerEvent(event));
-        if (this.#touchStagePoints.size === 2 && !this.#pinch) this.#beginPinch(event);
-        if (this.#pinch) {
+        if (this.#touchStagePoints.size === 2 && !this.#touchGesture) this.#beginTouchGesture(event);
+        if (this.#touchGesture) {
           canvas.setPointerCapture(event.pointerId);
-          this.#updatePinch();
+          this.#updateTouchGesture();
           return;
         }
       }
@@ -375,7 +377,7 @@ export class Viewer extends EventTarget {
     canvas.addEventListener('pointermove', (event) => {
       if (this.#touchStagePoints.has(event.pointerId)) {
         this.#touchStagePoints.set(event.pointerId, this.stagePointFromPointerEvent(event));
-        if (this.#pinch) { this.#updatePinch(); return; }
+        if (this.#touchGesture) { this.#updateTouchGesture(); return; }
       }
       if (this.#activePan && event.pointerId === this.#activePan.pointerId) {
         this.panByStagePixels(event.clientX - this.#activePan.lastX,
@@ -389,9 +391,9 @@ export class Viewer extends EventTarget {
 
     const endPointer = (event) => {
       this.#touchStagePoints.delete(event.pointerId);
-      if (this.#pinch) {
-        if (this.#touchStagePoints.size === 0) this.#pinch = null;
-        else this.#updatePinch();
+      if (this.#touchGesture) {
+        if (this.#touchStagePoints.size === 0) this.#touchGesture = null;
+        else this.#updateTouchGesture();
         return;
       }
       if (this.#activePan && event.pointerId === this.#activePan.pointerId) {
@@ -432,7 +434,7 @@ export class Viewer extends EventTarget {
 
   /** A second finger has come down: take over from whatever the first finger
       was doing (a pan, or an interaction with the tool). */
-  #beginPinch(secondFingerEvent) {
+  #beginTouchGesture(secondFingerEvent) {
     const [firstFingerId] = this.#touchStagePoints.keys();
     if (this.#activePan) {
       this.#activePan = null;
@@ -440,31 +442,35 @@ export class Viewer extends EventTarget {
       this.toolDelegate?.onPointerCancel?.(
         this.worldFromPointerEvent(secondFingerEvent), secondFingerEvent);
     }
-    this.#pinch = { pointerIds: [firstFingerId, secondFingerEvent.pointerId],
-                    lastCenter: null, lastDistance: null };
+    this.#touchGesture = { pointerIds: [firstFingerId, secondFingerEvent.pointerId],
+                           lastCenter: null, lastDistance: null };
   }
 
-  /** Zoom by the change in the two fingers' spread and pan by the movement of
-      their midpoint. When the pair of fingers driving the gesture changes (one
-      lifts while others stay down), the new pair only sets a fresh baseline,
-      so the view never jumps. */
-  #updatePinch() {
-    const pinch = this.#pinch;
+  /** Pan by the movement of the driving fingers' midpoint (or of the one
+      finger, when only one is down), and with two fingers also zoom by the
+      change in their spread. When the set of fingers driving the gesture
+      changes (one lifts or comes down), the new set only sets a fresh
+      baseline, so the view never jumps. */
+  #updateTouchGesture() {
+    const gesture = this.#touchGesture;
     const pointerIds = [...this.#touchStagePoints.keys()].slice(0, 2);
-    if (pointerIds.length < 2) {
-      pinch.lastCenter = null;
-      return;
+    const points = pointerIds.map((pointerId) => this.#touchStagePoints.get(pointerId));
+    const center = {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    };
+    const distance = points.length === 2
+      ? Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) : null;
+    const sameFingers = pointerIds.length === gesture.pointerIds.length
+      && pointerIds.every((pointerId, index) => pointerId === gesture.pointerIds[index]);
+    if (sameFingers && gesture.lastCenter) {
+      if (distance > 0 && gesture.lastDistance > 0) {
+        this.zoomAtStagePoint(distance / gesture.lastDistance, gesture.lastCenter);
+      }
+      this.panByStagePixels(center.x - gesture.lastCenter.x, center.y - gesture.lastCenter.y);
     }
-    const [first, second] = pointerIds.map((pointerId) => this.#touchStagePoints.get(pointerId));
-    const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
-    const distance = Math.hypot(second.x - first.x, second.y - first.y);
-    const samePair = pointerIds[0] === pinch.pointerIds[0] && pointerIds[1] === pinch.pointerIds[1];
-    if (samePair && pinch.lastCenter && pinch.lastDistance > 0 && distance > 0) {
-      this.zoomAtStagePoint(distance / pinch.lastDistance, pinch.lastCenter);
-      this.panByStagePixels(center.x - pinch.lastCenter.x, center.y - pinch.lastCenter.y);
-    }
-    pinch.pointerIds = pointerIds;
-    pinch.lastCenter = center;
-    pinch.lastDistance = distance;
+    gesture.pointerIds = pointerIds;
+    gesture.lastCenter = center;
+    gesture.lastDistance = distance;
   }
 }
