@@ -26,9 +26,10 @@ export function initializeTransport(app, containerElement) {
     <button class="transport-step-backward" title="Back one frame (← or ,)" disabled>${CHEVRON_LEFT_ICON}</button>
     <button class="transport-step-forward" title="Forward one frame (→ or .)" disabled>${CHEVRON_RIGHT_ICON}</button>
     <input type="range" class="transport-scrubber" min="0" max="0" step="1" value="0" disabled>
-    <span class="transport-readout"><span>Frame</span><input type="text" class="transport-frame-input"
-      inputmode="numeric" title="Frame number (press Enter to jump)" disabled><span
-      class="transport-frame-total"></span><span class="transport-time-gap">·</span><span
+    <span class="transport-readout"><span class="transport-frame-group"><span>Frame</span><input
+      type="text" class="transport-frame-input" inputmode="numeric"
+      title="Frame number (press Enter to jump)" disabled><span
+      class="transport-frame-total"></span></span><span class="transport-time-gap">·</span><span
       class="transport-time"></span></span>
     <span class="index-waiting" hidden
           title="Playback has reached the last frame indexed so far and is waiting for the index to catch up."
@@ -51,6 +52,17 @@ export function initializeTransport(app, containerElement) {
   const exactnessWarning = containerElement.querySelector('.exactness-warning');
 
   let scrubbingWasPlaying = false;
+
+  // When the bar is too narrow for one line, the readout wraps below the
+  // scrubber (see #transport-container in style.css). CSS cannot tell that a
+  // flex item has wrapped, so measure it and mark the container, which lays
+  // the readout out across the whole second line instead.
+  const foldObserver = new ResizeObserver(() => {
+    const isFolded = readout.getBoundingClientRect().top >= scrubber.getBoundingClientRect().bottom;
+    containerElement.classList.toggle('is-folded', isFolded);
+  });
+  foldObserver.observe(containerElement);
+  foldObserver.observe(readout);
 
   playButton.addEventListener('click', () => app.togglePlayback());
 

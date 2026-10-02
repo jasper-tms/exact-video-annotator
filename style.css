@@ -768,11 +768,18 @@ button:focus:not(:focus-visible) { outline: none; }
 
 /* ---------- Transport bar (populated by js/ui/transport.js) ---------- */
 
+/* Wraps onto a second line when the window is too narrow for everything:
+   the buttons and scrubber stay on the first line and the Frame/Time readout
+   (plus any index notices) moves to the second. There is no fixed breakpoint
+   — the readout wraps as soon as the scrubber would otherwise shrink below its
+   flex-basis, so the point at which it folds tracks the readout's real width
+   (which grows with the clip's frame count and duration). */
 #transport-container {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   padding: 8px 12px;
   background: var(--surface);
   border-top: 1px solid var(--border);
@@ -831,7 +838,10 @@ button:focus:not(:focus-visible) { outline: none; }
      --scrubber-cached bands with transparent gaps that let the base show
      through); 'none' when there is nothing cached or on the native tier. */
   --cached-segments: none;
-  flex: 1 1 auto;
+  /* The basis is the narrowest the scrubber gets before the readout wraps
+     to the next line (see #transport-container above). The huge grow factor
+     keeps the readout from taking spare width while they share a line. */
+  flex: 100000 1 150px;
   min-width: 60px;
   appearance: none;
   -webkit-appearance: none;
@@ -873,6 +883,10 @@ button:focus:not(:focus-visible) { outline: none; }
 #transport-container .transport-scrubber:disabled::-moz-range-thumb { background: var(--text-dim); }
 
 #transport-container .transport-readout {
+  /* Grows only when it has a line to itself: beside the scrubber, the
+     scrubber's far larger grow factor takes all but a sliver of the spare
+     width. */
+  flex-grow: 1;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
   font-size: 12px;
@@ -880,6 +894,24 @@ button:focus:not(:focus-visible) { outline: none; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+#transport-container .transport-frame-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Folded onto its own line (the is-folded class is set by
+   js/ui/transport.js): frame values to the left, the dot in the center, and
+   the time values to the right. */
+#transport-container.is-folded .transport-readout {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+}
+
+#transport-container.is-folded .transport-time {
+  justify-self: end;
 }
 
 /* Its width is set by js/ui/transport.js to reserve space for the current
