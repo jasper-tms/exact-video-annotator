@@ -60,7 +60,7 @@ try {
   await page.waitForFunction(() => window.exactVideoAnnotator !== undefined);
 
   // ---- The version stamp describes the code actually being served ----
-  // Only a built deployment has one: build.sh writes it into dist/, so a local
+  // Only a built deployment has one: build.mjs writes it into dist/, so a local
   // run serving the repository root has no /version to ask.
   if (testingDeployedApp) {
     const versionFacts = await page.evaluate(async () => {

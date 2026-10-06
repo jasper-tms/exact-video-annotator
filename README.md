@@ -95,7 +95,7 @@ the extensionless one exists because it is easier to type):
 }
 ```
 
-`build.sh` writes it, so the stamp describes the commit that produced the
+`build.mjs` writes it, so the stamp describes the commit that produced the
 files being served rather than whatever the repository looks like now.
 `annotatorVersion` is read from `VERSION` (see [Releasing](#releasing)) and
 `videoEngineVersion` out of the pinned CDN URL in `index.html`, which makes
@@ -137,7 +137,7 @@ git push                          # the workflow tags v0.10.0 and releases it
 ```
 
 Nowhere else in the tree states the version, so nothing can drift out of step
-with `VERSION` and there is no sync step or commit hook to run: `build.sh` reads
+with `VERSION` and there is no sync step or commit hook to run: `build.mjs` reads
 `VERSION` when it stamps a build, and the tag is derived from the same file. The
 version is deliberately *not* baked into `index.html` — the deployed app reports
 what it is at `/version`, and a copy in the page would be one more thing to keep

@@ -12,11 +12,15 @@ Matches production behavior that a plain `python3 -m http.server` cannot:
   - No browser caching (Cache-Control: no-store), so a plain refresh always
     shows your latest edits.
 
-Rebuild-on-refresh: by default the server runs `build.sh` once on startup, and
-again whenever the browser loads an HTML page, so a refresh reflects your latest
-edits to the source files that build.sh assembles. Asset requests (images, JSON,
-CSS, JS) do NOT trigger a rebuild, so a single page load rebuilds once. This
-assumes build.sh is a fast staging step, since it reruns on every page load.
+Rebuild-on-refresh: by default the server runs the build (`node build.mjs
+--dist`, the same thing Cloudflare's build.sh runs) once on startup, and again
+whenever the browser loads an HTML page, so a refresh reflects your latest edits
+to the source files the build assembles. Asset requests (images, JSON, CSS, JS)
+do NOT trigger a rebuild, so a single page load rebuilds once. This assumes the
+build is fast, since it reruns on every page load.
+
+Works on Windows (PowerShell, Command Prompt), macOS and Linux. Needs only
+Python 3 and Node.js (for the build) -- no bash.
 
 Usage:
     python http_server.py [port] [directory]
@@ -26,7 +30,7 @@ Usage:
                  upward is used; if given and already in use, the server exits.
     directory    Directory to serve (default: the freshly built "dist", or the
                  repository root under --no-build).
-    --no-build   Skip build.sh entirely (no startup build, no rebuild-on-
+    --no-build   Skip the build entirely (no startup build, no rebuild-on-
                  refresh) and serve the repository root (or an explicit
                  directory) live. Pages that only exist post-build are then
                  unavailable, since they live only in dist/.
@@ -69,8 +73,8 @@ def parse_redirects_file(filepath):
     if not os.path.exists(filepath):
         return rules
 
-    with open(filepath, 'r') as f:
-        for line in f:
+    with open(filepath, 'r', encoding='utf-8') as file:
+        for line in file:
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
@@ -119,17 +123,30 @@ class RedirectHandler(http.server.SimpleHTTPRequestHandler):
 
     # Absolute directory to serve. Passed to the handler explicitly (rather than
     # relying on the process working directory) so serving keeps working after a
-    # rebuild's `rm -rf dist` replaces the directory under us -- the process cwd
-    # would be left dangling, but this absolute path resolves to the new dist/.
+    # rebuild deletes and recreates dist/ under us -- the process cwd would be
+    # left dangling, but this absolute path resolves to the new dist/.
     serve_directory = None
 
     # Set when the server is in build mode (not --no-build). When True, loading
-    # an HTML page re-runs build.sh first so the page reflects the latest edits.
+    # an HTML page re-runs the build first so the page reflects the latest edits.
     rebuild_on_page_load = False
     repo_root = None
     # Serializes builds against each other and against serving, so a rebuild's
-    # `rm -rf dist` can't race a concurrent read of dist/ on another thread.
+    # deletion of dist/ can't race a concurrent read of dist/ on another thread.
     build_lock = threading.Lock()
+
+    # Pin the content types the site depends on. Otherwise Python asks the
+    # operating system, and on Windows the registry can map e.g. .js to
+    # text/plain, which browsers refuse to run as a script.
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        '.html': 'text/html',
+        '.js': 'text/javascript',
+        '.mjs': 'text/javascript',
+        '.css': 'text/css',
+        '.json': 'application/json',
+        '.svg': 'image/svg+xml',
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(self.serve_directory), **kwargs)
@@ -153,7 +170,13 @@ class RedirectHandler(http.server.SimpleHTTPRequestHandler):
         if match:
             destination, status = match
             if status == 200:
-                # Rewrite: serve the destination file but keep the URL.
+                # Rewrite: serve the destination file but keep the URL. A
+                # rewrite onto a page (/performance -> /) is a page load too,
+                # so rebuild first, as step 2 does for every other page.
+                if self.rebuild_on_page_load and self.resolve_html_target(destination) is not None:
+                    with self.build_lock:
+                        if not run_build(self.repo_root):
+                            return self.send_build_error()
                 self.path = destination
                 return super().do_GET()
             # Redirect: preserve the incoming query string, like Pages.
@@ -212,21 +235,21 @@ class RedirectHandler(http.server.SimpleHTTPRequestHandler):
         pretty-URL .html, or a direct .html file.
         """
         directory = Path(self.directory)
-        rel = base.lstrip('/')
+        relative_path = base.lstrip('/')
 
         if base == '' or base.endswith('/'):
-            index = directory / rel / 'index.html'
+            index = directory / relative_path / 'index.html'
             return index if index.is_file() else None
 
         if '.' not in base.split('/')[-1]:
-            html = directory / (rel + '.html')
+            html = directory / (relative_path + '.html')
             if html.is_file():
                 return html
-            index = directory / rel / 'index.html'
+            index = directory / relative_path / 'index.html'
             return index if index.is_file() else None
 
         if base.endswith('.html'):
-            direct = directory / rel
+            direct = directory / relative_path
             return direct if direct.is_file() else None
 
         return None
@@ -234,7 +257,7 @@ class RedirectHandler(http.server.SimpleHTTPRequestHandler):
     def send_build_error(self):
         body = (b'<!DOCTYPE html><meta charset=utf-8><title>Build failed</title>'
                 b'<body style="font-family:system-ui;padding:2rem">'
-                b'<h1>build.sh failed</h1>'
+                b'<h1>Build failed</h1>'
                 b'<p>See the server terminal for the full output.</p></body>')
         self.send_response(500)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -291,8 +314,19 @@ class RedirectHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def run_build(repo_root):
-    """Run build.sh (blocking). Return True on success, False on failure."""
-    result = subprocess.run(['bash', 'build.sh'], cwd=repo_root)
+    """
+    Run the build (blocking). Return True on success, False on failure.
+
+    Runs `node build.mjs --dist` directly rather than build.sh (which is just a
+    wrapper around it for Cloudflare), so no bash is needed on Windows.
+    """
+    try:
+        result = subprocess.run(['node', 'build.mjs', '--dist'], cwd=repo_root)
+    except FileNotFoundError:
+        print('\nCould not find `node`. The build needs Node.js: install it from '
+              'https://nodejs.org, then open a new terminal and try again.',
+              file=sys.stderr)
+        return False
     return result.returncode == 0
 
 
@@ -309,7 +343,7 @@ def main():
                              '"dist", or this repository root under '
                              '--no-build).')
     parser.add_argument('--no-build', action='store_true',
-                        help='Skip build.sh entirely (no startup build and no '
+                        help='Skip the build entirely (no startup build and no '
                              'rebuild-on-refresh) and serve the repository root '
                              'live (pages that only exist post-build are then '
                              'unavailable).')
@@ -322,9 +356,9 @@ def main():
     # Build first (blocking) so the served dist/ reflects the current sources,
     # then serve dist/ by default and rebuild before each page load.
     if not args.no_build:
-        print('Running build.sh...')
+        print('Building...')
         if not run_build(repo_root):
-            print('\nbuild.sh failed; not starting the server.', file=sys.stderr)
+            print('\nBuild failed; not starting the server.', file=sys.stderr)
             sys.exit(1)
         default_directory = repo_root / 'dist'
         RedirectHandler.rebuild_on_page_load = True
@@ -376,7 +410,10 @@ def main():
             httpd = http.server.ThreadingHTTPServer(('', port), RedirectHandler)
             break
         except OSError as error:
-            if error.errno != errno.EADDRINUSE:
+            # Windows also refuses ports it has reserved (e.g. for Hyper-V)
+            # with an access-denied error rather than "in use"; skip those too.
+            if error.errno not in (errno.EADDRINUSE, errno.EACCES,
+                                   getattr(errno, 'WSAEACCES', None)):
                 raise
     if httpd is None:
         if args.port is not None:
