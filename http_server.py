@@ -13,7 +13,7 @@ Matches production behavior that a plain `python3 -m http.server` cannot:
     shows your latest edits.
 
 Rebuild-on-refresh: by default the server runs the build (`node build.mjs
---dist`, the same thing Cloudflare's build.sh runs) once on startup, and again
+--dist`, the same command Cloudflare Pages runs) once on startup, and again
 whenever the browser loads an HTML page, so a refresh reflects your latest edits
 to the source files the build assembles. Asset requests (images, JSON, CSS, JS)
 do NOT trigger a rebuild, so a single page load rebuilds once. This assumes the
@@ -317,8 +317,8 @@ def run_build(repo_root):
     """
     Run the build (blocking). Return True on success, False on failure.
 
-    Runs `node build.mjs --dist` directly rather than build.sh (which is just a
-    wrapper around it for Cloudflare), so no bash is needed on Windows.
+    Runs `node build.mjs --dist`, the same command Cloudflare Pages runs. It
+    needs no bash, so it works on Windows.
     """
     try:
         result = subprocess.run(['node', 'build.mjs', '--dist'], cwd=repo_root)
