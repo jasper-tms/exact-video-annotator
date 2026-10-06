@@ -77,7 +77,7 @@ engine rather than a large fixture; see the comment at the top of the file.
 
 ## Deploying
 
-Cloudflare Pages: build command `bash build.sh`, output directory `dist/`.
+Cloudflare Pages: build command `node build.mjs --dist`, output directory `dist/`.
 
 ### What is live right now
 

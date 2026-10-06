@@ -1002,10 +1002,10 @@ per-video, local-only, and never synced.
 
 ## Deploy
 
-Cloudflare Pages, build command `bash build.sh`, output directory `dist/`.
-`build.sh` runs `node build.mjs --dist`, which copies the static app
-(index.html, style.css, css/, js/) into `dist/` — there is no compile step —
-and writes the version stamp served at `/version`.
+Cloudflare Pages, build command `node build.mjs --dist`, output directory
+`dist/`. `build.mjs` copies the static app (index.html, style.css, css/, js/)
+into `dist/` — there is no compile step — and writes the version stamp served
+at `/version`.
 
 The app's version lives in `VERSION` and nowhere else: no module imports it and
 nothing in `index.html` states it, so there is no copy to keep in step. It

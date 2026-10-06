@@ -3,8 +3,8 @@
 // dist/ and write the version stamp served at /version.
 //
 // Usage:
-//   node build.mjs --dist    stage the deploy into dist/ (what build.sh and
-//                            http_server.py run)
+//   node build.mjs --dist    stage the deploy into dist/ (what Cloudflare Pages
+//                            and http_server.py run)
 //
 // Staging dist/ is this build's only job, so it happens with or without
 // --dist; the flag is accepted so every repository's build is invoked the same
