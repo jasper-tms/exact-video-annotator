@@ -8,3 +8,9 @@ TODO*
 .firebase/
 firebase-debug.log
 firestore-debug.log
+
+# Never commit secrets. The GitHub App private key (.pem) and any exported
+# secrets live outside the repo (on the Pi / as Cloudflare Worker secrets);
+# this is a belt-and-suspenders guard.
+*.pem
+*.key
