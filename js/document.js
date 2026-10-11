@@ -146,6 +146,9 @@ export function documentFromJson(jsonObject) {
     if (layer.plugin !== undefined && layer.plugin !== null) {
       parsedLayer.plugin = {
         id: asString(layer.plugin.id, 'layer plugin id'),
+        // The folder the plugin was loaded from (absent for built-in plugins),
+        // so a reader that lacks the plugin can say where to get it.
+        ...(typeof layer.plugin.url === 'string' ? { url: layer.plugin.url } : {}),
         options: (typeof layer.plugin.options === 'object' && layer.plugin.options !== null)
           ? { ...layer.plugin.options }
           : {},

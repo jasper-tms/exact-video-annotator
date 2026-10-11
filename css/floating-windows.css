@@ -1,0 +1,77 @@
+/* Floating windows over the canvas (js/ui/floating-window.js). The window is
+   laid out at its design size and placed and scaled by a transform, so every
+   size here is in design pixels. */
+
+/* Windows move with the footage, so clip them to the canvas rather than let
+   them cover the bars and panels around it. */
+#stage-container { overflow: hidden; }
+
+.floating-window {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 6px 6px 0 6px;   /* square where the resize grip sits */
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  z-index: 5;
+  user-select: none;
+}
+
+.floating-window[hidden] { display: none; }
+
+/* The border is drawn over the content rather than around it, so the resize
+   grip can cover it and reach the window's very edge. */
+.floating-window::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--border);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.floating-window-title {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: grab;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floating-window-title:active { cursor: grabbing; }
+
+.floating-window-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The resize grip: a grey square in the bottom-right corner crossed by three
+   diagonal lines running edge to edge. */
+.floating-window-resize-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 10.5px;
+  height: 10.5px;
+  z-index: 2;
+  cursor: nwse-resize;
+  background-color: var(--border);
+  background-image: linear-gradient(135deg,
+    transparent 0 46%, var(--text-dim) 46% 53%,
+    transparent 53% 64%, var(--text-dim) 64% 71%,
+    transparent 71% 82%, var(--text-dim) 82% 89%,
+    transparent 89%);
+}

@@ -18,20 +18,44 @@
 //
 // The layer it builds may implement any of the optional annotation-logic hooks
 // documented in ARCHITECTURE.md (shouldFinishAfterVertex, afterVertexPlaced,
-// beforeShapeCommitted, afterItemDragged, refitItem).
+// beforeShapeCommitted, afterItemDragged, refitItem, handleCanvasDoubleClick).
+//
+// Built-in plugins are registered at startup; plugins loaded from a URL (see
+// plugin-loader.js) join them at runtime through registerPlugin, which
+// announces each arrival on `pluginRegistryEvents` so open documents can
+// rebuild layers that were waiting for it.
 
 import { lineFitterPlugin } from './line-fitter/plugin.js';
 
-// Plugins that ship with the app. Uploaded plugins will join this list once
-// the ＋ menu's "Upload…" entry is wired up.
+// Plugins that ship with the app.
 const BUILT_IN_PLUGINS = [lineFitterPlugin];
+
+// id → { descriptor, url }, in registration order. `url` is the folder a
+// plugin was loaded from, or null for a built-in.
+const registeredPlugins = new Map(
+  BUILT_IN_PLUGINS.map((plugin) => [plugin.id, { descriptor: plugin, url: null }]));
+
+/** Fires 'plugin-registered' (detail: { descriptor, url }) when a plugin joins. */
+export const pluginRegistryEvents = new EventTarget();
+
+/** Add (or replace, when reloaded) a plugin. */
+export function registerPlugin(descriptor, { url = null } = {}) {
+  registeredPlugins.set(descriptor.id, { descriptor, url });
+  pluginRegistryEvents.dispatchEvent(
+    new CustomEvent('plugin-registered', { detail: { descriptor, url } }));
+}
 
 /** Every plugin available in the ＋ menu, in listing order. */
 export function listPlugins() {
-  return [...BUILT_IN_PLUGINS];
+  return [...registeredPlugins.values()].map((entry) => entry.descriptor);
 }
 
 /** The plugin with this id, or null when a document names one we do not have. */
 export function findPlugin(pluginId) {
-  return BUILT_IN_PLUGINS.find((plugin) => plugin.id === pluginId) ?? null;
+  return registeredPlugins.get(pluginId)?.descriptor ?? null;
+}
+
+/** The folder URL a plugin was loaded from, or null (built-in or unknown). */
+export function pluginUrl(pluginId) {
+  return registeredPlugins.get(pluginId)?.url ?? null;
 }

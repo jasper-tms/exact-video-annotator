@@ -125,16 +125,19 @@ visit — is the planned v2 (see "Future: permanent authorization"), not built.
 - `js/ui/settings-modal.js` — the Settings modal's Plugins section, where the
   "Add from private GitHub repository…" button drives the helper: connect →
   list the shared repos → store each chosen repo's canonical tokenless URL in
-  the installed-plugins list. (Fetching/running a plugin from a stored URL is
-  still unwired for every plugin, private or public.)
+  the installed-plugins list.
+- `js/plugins/plugin-loader.js` — fetches and runs a plugin from its folder URL
+  (any public URL, or a canonical private one through a fresh `/s/<token>/`
+  URL); `js/main.js` loads every installed URL at startup and retries private
+  ones after the user connects GitHub.
 
 ## Related
 
 - The plugin repo for these sport plugins:
   github.com/jasper-tms/exact-video-annotator-sport-plugins (private).
 - The plugin contract the loaded folder must satisfy (manifest, host-API
-  injection, URL persistence) is specified in the movim repo's
-  `plan_court-keypoint-correspondence-annotator.md`, Part 1.
+  injection, URL persistence) is in ARCHITECTURE.md, "Loading plugins from a
+  URL".
 
 ## Future: permanent authorization (v2)
 
@@ -188,8 +191,9 @@ Additive: no rework of the v1 Worker, proxy, or client helper.
       private GitHub repository…": connect → pick repos → store canonical URL).
 - [ ] Install the App (done interactively per user, or self-serve via the app),
       which also first exercises the OAuth + proxy path end to end.
-- [ ] Wire actual fetching/running of a plugin from its stored URL (unbuilt for
-      every plugin, private or public), and confirm `.pem`/client-secret never
-      enter any repo or bundle.
+- [x] Wire actual fetching/running of a plugin from its stored URL
+      (`js/plugins/plugin-loader.js`).
+- [ ] Confirm `.pem`/client-secret never enter any repo or bundle, and load a
+      private plugin end to end (needs the App installed first).
 - [ ] v2: permanent authorization (see the section above) — silent re-mint via a
       verified Firebase ID token + a `uid → installations` store.

@@ -1,7 +1,9 @@
 // The point tool: double-click empty space (or an annotation of a different
 // kind) to place a new point annotation, committed as one undoable "Add
-// point" command. A single click there instead deselects (or, if it turns
-// into a drag, pans the view instead). Pressing an existing annotation of ANY
+// point" command, unless the layer is a plugin's that claims the double-click
+// through its handleCanvasDoubleClick hook (placing a named point, say). A
+// single click there instead deselects (or, if it turns into a drag, pans the
+// view instead). Pressing an existing annotation of ANY
 // kind selects it, and dragging then moves it — the shared behavior in
 // annotation-dragging.js, unfiltered by kind, so there is no separate select
 // tool and no tool is blind to another kind's annotations. A double-click on
@@ -82,6 +84,7 @@ export const pointTool = {
 
   onDoubleClick(app, worldPoint, event) {
     const layer = app.targetLayerForType('coordinates');
+    if (layer.visible && layer.handleCanvasDoubleClick?.(app, worldPoint, event)) return;
     const hit = layer.visible ? hitTestLayer(app, layer, worldPoint) : null;
     if (hit && layer.getItem(hit.itemId)?.kind === 'point') return;
 

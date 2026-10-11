@@ -496,23 +496,26 @@ app events; they never poll.
 ## Plugins
 
 A plugin is an annotation layer type with extra annotation logic baked in. It
-is added from the tab bar's ＋ menu under **Plugins ›** (which also lists a
-not-yet-functional **Upload…**), appears as its own tab, and contributes its
-own settings to the layer detail panel.
+is added from the tab bar's ＋ menu under **Plugins ›**, appears as its own
+tab, and contributes its own settings to the layer detail panel. Plugins either
+ship with the app (the line fitter) or are loaded from a URL (see "Loading
+plugins from a URL" below).
 
 A plugin does **not** invent a storage format: it reuses one of the built-in
 annotation layer types, so its annotations are ordinary items of that layer's
 type in the document and in the export. Only the layer says which plugin made
 it.
 
-`js/plugins/registry.js` holds the descriptors:
+`js/plugins/registry.js` holds the descriptors (built-ins at startup, loaded
+plugins as they arrive through `registerPlugin`, announced by a
+`plugin-registered` event on `pluginRegistryEvents`):
 
 ```js
 {
   id, name, description,
   layerType: 'coordinates' | 'segmentation' | 'frames',   // storage, and what tools target
   preferredToolId,                             // selected when a layer is added
-  createViewLayer(documentLayer, app) → Layer,  // documentLayer.plugin = {id, options}
+  createViewLayer(documentLayer, app) → Layer,  // documentLayer.plugin = {id, url?, options}
   buildSettings(app, layer) → HTMLElement,      // shown in the layer detail panel
 }
 ```
@@ -534,7 +537,76 @@ layer.afterItemDragged(app, itemId);             // runs inside the drag's own
                                                  // command, so both undo as one
 layer.refitItem(app, itemId);                    // → true if geometry changed;
                                                  // used by `r` and the panel
+layer.handleCanvasDoubleClick(app, worldPoint, event); // → true claims a
+                                                 // double-click with the point
+                                                 // tool (which otherwise adds a
+                                                 // new unnamed point)
 ```
+
+### Loading plugins from a URL
+
+A plugin outside the app is a folder holding a manifest and an ES module
+(`js/plugins/plugin-loader.js`):
+
+```js
+// plugin.json
+{ "manifestVersion": 1, "id": "…", "name": "…", "version": "…",
+  "entry": "./index.js", "hostApiVersion": 1 }
+// index.js
+export default function createPlugin(host) { return descriptor; }
+```
+
+The entry's default export is a factory that receives the **host API** and
+returns a descriptor of the shape above. A plugin gets everything from the app
+through `host` rather than importing the app's files, so it does not depend on
+their layout; its own imports are of its own sibling files, resolved against
+its folder URL:
+
+```js
+host.hostApiVersion;                // 1; a manifest naming another is refused
+host.baseUrl;                       // the plugin folder, for loading its assets
+host.app;                           // the Application
+host.layers;                        // { Layer, CoordinatesLayer, SegmentationLayer, FramesLayer }
+host.newId();                       // a fresh item/class id
+host.ui.createFloatingWindow(options); // see "Floating windows"
+```
+
+Where plugins load from:
+
+- **The installed list** (Settings → Plugins, synced to the account; see
+  "Accounts and preference sync"): every URL in it loads at startup and when it
+  is added. Typing a URL there is the user's consent to run it.
+- **`?plugin=<folder URL>`** (repeatable) loads one for this visit only, after a
+  confirmation (a link must not run code unasked); confirmed URLs are
+  remembered in `localStorage` so the question is asked once per URL.
+- **Private GitHub repositories**: canonical
+  `https://plugins.examine.video/gh/…` folder URLs (added through Settings →
+  "Add from private GitHub repository…", see the
+  `github-app-integration-for-private-plugin-access` skill) are fetched through
+  a fresh session-token URL. Without a session they fail with a hint to
+  connect, and connecting fires `plugin-sources-changed`, which retries them.
+
+Any other URL is fetched as is, so its host must send CORS headers allowing
+this app's origin. A layer made by a loaded plugin records the plugin's folder
+in `plugin.url`, so a document opened where the plugin is missing names where
+to get it. Layers opened before their plugin finished loading are rebuilt as
+the plugin's when it arrives.
+
+### Floating windows
+
+`createFloatingWindow(app, { title, content, aspectRatio, designWidth,
+worldRect, onWorldRectChanged })` (`js/ui/floating-window.js`) floats a panel
+over the canvas for a plugin's own interface. It is anchored in **world
+coordinates**, like an annotation: its top-left corner is a world point and its
+width a world length, so panning moves it with the footage and zooming scales
+it (the whole window, title bar included, is laid out at a fixed design size
+and scaled as one). Dragging the title bar moves it; dragging the grip in its
+bottom-right corner resizes it with the aspect ratio locked and the top-left
+corner fixed, keeping the grabbed spot under the pointer. Wheel
+and pinch over it zoom the canvas as usual. It returns
+`{ element, worldRect, setVisible, setTitle, destroy }`, and calls
+`onWorldRectChanged(worldRect)` after each move or resize so the plugin can
+save the placement (e.g. in its layer options).
 
 `js/plugins/refit.js` wraps `refitItem` in an undo command;
 `js/plugins/frame-pixels.js` is the shared way to read the pixels of the frame
@@ -624,6 +696,8 @@ drive it with synthetic edges and stripes.
 | --- | --- |
 | `Space` | play/pause |
 | `ArrowLeft` / `,` , `ArrowRight` / `.` | step one frame |
+| `[` , `]` | jump to the previous / next frame with an annotation (on the selected annotation layer, else on any) |
+| `Shift`+arrows | nudge the selected point, vertex or shape by one pixel (`Shift`+`Alt`+arrows: a tenth, where the layer allows fractional coordinates) |
 | `1`–`9` | activate the Nth tool-rail button from the top (currently: `1` pan, `2` point, `3` line, `4` polyline) |
 | `0` | scroll to/from the details section (same button, bottom of the tool rail) |
 | `v` | toggle the selected layer's visibility |
@@ -987,8 +1061,8 @@ from gstatic, so a blocked CDN or an offline start never breaks the app.
 - The existing global preferences (pixel grid, second-video behavior, synced
   playback, loaded-frames highlight) are defined through the store; their
   `localStorage` keys are unchanged. `js/sync/installed-plugins-preference.js`
-  adds the plugin URL list (whole-list last-write-wins; loading a plugin from
-  its URL is future work — see [Plugins](#plugins)).
+  adds the plugin URL list (whole-list last-write-wins); each URL in it is
+  loaded at startup — see [Plugins](#plugins).
 - `js/ui/account-control.js` — the top bar's right-hand Log in / account control
   (disabled when no config is present).
 

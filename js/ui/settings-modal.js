@@ -179,8 +179,9 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   const pluginsHint = document.createElement('p');
   pluginsHint.className = 'settings-section-hint';
   pluginsHint.textContent =
-    'Add a plugin by its URL (typically a GitHub URL). Loading plugins from '
-    + 'their URL is coming soon; for now the list is saved to your account.';
+    'Add a plugin by the URL of its folder (the one holding plugin.json). '
+    + 'Plugins in this list load whenever the app starts, and the list is saved to '
+    + 'your account.';
   pluginsSection.appendChild(pluginsHint);
 
   const pluginsList = document.createElement('ul');
@@ -220,7 +221,7 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   const pluginUrlInput = document.createElement('input');
   pluginUrlInput.type = 'url';
   pluginUrlInput.className = 'plugins-url-input';
-  pluginUrlInput.placeholder = 'https://…/plugin.js';
+  pluginUrlInput.placeholder = 'https://…/my-plugin/';
   const pluginAddButton = document.createElement('button');
   pluginAddButton.type = 'button';
   pluginAddButton.textContent = 'Add';
@@ -368,6 +369,8 @@ export function initializeSettingsModal(app, triggerButtonElement) {
     try {
       const { installations } = await connectPrivateGitHub();
       renderPrivateGitHubPicker(installations);
+      // Private plugins that could not load without a session can load now.
+      app.dispatchEvent(new CustomEvent('plugin-sources-changed'));
     } catch (error) {
       app.showToast(error.message || 'GitHub connection failed.', { kind: 'warning' });
     } finally {

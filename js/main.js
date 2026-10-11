@@ -15,7 +15,10 @@ import {
 } from './document.js';
 import { getSyncedPlaybackPacing } from './synced-playback-preference.js';
 import { panTool } from './tools/pan-tool.js';
-import { findPlugin } from './plugins/registry.js';
+import { findPlugin, pluginRegistryEvents, pluginUrl } from './plugins/registry.js';
+import { loadPluginFromUrl } from './plugins/plugin-loader.js';
+import { getInstalledPlugins, subscribeInstalledPlugins }
+  from './sync/installed-plugins-preference.js';
 import { refitSelectedItem } from './plugins/refit.js';
 import { pointTool } from './tools/point-tool.js';
 import { polylineTool } from './tools/polyline-tool.js';
@@ -869,6 +872,60 @@ class Application extends EventTarget {
     this.seekToFrame(this.currentFrame + delta);
   }
 
+  /** Seek to the nearest frame after (direction 1) or before (direction -1)
+      the current one that has an annotation — on the selected annotation
+      layer, or on any annotation layer when none is selected. Returns whether
+      there was one to go to. */
+  jumpToAnnotatedFrame(direction) {
+    if (!this.engine) return false;
+    const selected = this.selectedLayer;
+    const layers = this.annotationLayers.includes(selected) ? [selected] : this.annotationLayers;
+    const frames = new Set();
+    for (const layer of layers) {
+      for (const item of layer.items) {
+        if (Number.isInteger(item.frame)) frames.add(item.frame);
+        if (Number.isInteger(item.startFrame)) frames.add(item.startFrame);
+      }
+    }
+    const sorted = [...frames].sort((first, second) => first - second);
+    const target = direction > 0
+      ? sorted.find((frame) => frame > this.currentFrame)
+      : sorted.reverse().find((frame) => frame < this.currentFrame);
+    if (target === undefined) return false;
+    if (this.isPlaying) this.pausePlayback();
+    this.seekToFrame(target);
+    return true;
+  }
+
+  /** Move the selected vertex (or every vertex of the selected shape) by
+      (deltaX, deltaY) layer-local units, as one undoable step. Returns whether
+      anything was selected that could move. */
+  nudgeSelection(deltaX, deltaY) {
+    const selection = this.selection;
+    if (!selection) return false;
+    const layer = this.viewer.layers.find((candidate) => candidate.id === selection.layerId);
+    const item = layer?.isEditable ? layer.getItem?.(selection.itemId) : null;
+    if (!item?.vertices) return false;
+    const beforeSnapshot = layer.snapshotItemGeometry(item.id);
+    if (selection.vertexIndex !== null) {
+      layer.moveVertexTo(item.id, selection.vertexIndex, {
+        x: item.vertices[selection.vertexIndex][0] + deltaX,
+        y: item.vertices[selection.vertexIndex][1] + deltaY,
+      });
+    } else {
+      layer.moveItemBy(item.id, { x: deltaX, y: deltaY });
+    }
+    layer.afterItemDragged?.(this, item.id);
+    const afterSnapshot = layer.snapshotItemGeometry(item.id);
+    this.undoHistory.execute({
+      label: 'Nudge',
+      apply: () => layer.restoreItemGeometry(item.id, afterSnapshot),
+      revert: () => layer.restoreItemGeometry(item.id, beforeSnapshot),
+    });
+    this.viewer.requestRender();
+    return true;
+  }
+
   /* ---------- Layers ---------- */
 
   get annotationLayers() {
@@ -940,7 +997,10 @@ class Application extends EventTarget {
       transform: { scale: 1, offsetX: 0, offsetY: 0 },
       items: [],
     };
-    if (plugin) documentLayer.plugin = { id: plugin.id, options: {} };
+    if (plugin) {
+      const url = pluginUrl(plugin.id);
+      documentLayer.plugin = { id: plugin.id, ...(url ? { url } : {}), options: {} };
+    }
     const viewLayer = this.#createViewLayer(documentLayer);
     this.undoHistory.execute({
       label: 'Add layer',
@@ -989,8 +1049,11 @@ class Application extends EventTarget {
       // A document written by a build that had this plugin. Its annotations are
       // ordinary items, so open them on a plain layer of the storage type and
       // keep the plugin field so re-exporting does not drop it.
+      const source = documentLayer.plugin.url
+        ? ` Add ${documentLayer.plugin.url} in Settings → Plugins to use it.` : '';
       this.showToast(`Layer "${documentLayer.name}" was made by the "${pluginId}" plugin, `
-        + 'which is not available here — opening it as a plain layer.', { kind: 'warning' });
+        + `which is not available here — opening it as a plain layer.${source}`,
+      { kind: 'warning' });
     }
     // The extra `this` (app) argument is only read by CoordinatesLayer (to look
     // up the document's integer-coordinate convention); the other constructors,
@@ -1009,7 +1072,9 @@ class Application extends EventTarget {
         documentLayer.allowFractionalCoordinates = viewLayer.allowFractionalCoordinates;
       }
       if (viewLayer.plugin) {
-        documentLayer.plugin = { id: viewLayer.plugin.id, options: { ...viewLayer.options } };
+        documentLayer.plugin = {
+          ...documentLayer.plugin, id: viewLayer.plugin.id, options: { ...viewLayer.options },
+        };
       }
       this.markDocumentChanged();
     });
@@ -1192,6 +1257,60 @@ app.addKeyHandler((event) => {
   if (event.key !== 'r' && event.key !== 'R') return false;
   return refitSelectedItem(app);
 });
+
+/* ---------- Plugins loaded from a URL ---------- */
+
+// Plugins in the user's installed list (Settings → Plugins) load at startup and
+// whenever the list gains one. A `?plugin=<folder URL>` parameter (repeatable)
+// loads one for this visit only, after the user agrees to run its code — a
+// link should not be able to run code here unasked. See plugin-loader.js.
+const loadedOrLoadingPluginUrls = new Set();
+const APPROVED_PLUGIN_URLS_KEY = 'exact-video-annotator.approvedPluginUrls';
+
+async function loadPluginAndReport(url) {
+  if (loadedOrLoadingPluginUrls.has(url)) return;
+  loadedOrLoadingPluginUrls.add(url);
+  try {
+    await loadPluginFromUrl(app, url);
+  } catch (error) {
+    loadedOrLoadingPluginUrls.delete(url);   // so it is retried, e.g. after connecting GitHub
+    app.showToast(`Could not load the plugin at ${url}: ${error.message ?? error}`, { kind: 'error' });
+  }
+}
+
+function loadInstalledPlugins() {
+  for (const url of getInstalledPlugins()) loadPluginAndReport(url);
+}
+
+// Layers opened before their plugin arrived were built as plain layers; now
+// that it is here, rebuild them as the plugin's.
+pluginRegistryEvents.addEventListener('plugin-registered', (event) => {
+  const { id } = event.detail.descriptor;
+  if (app.annotationDocument.layers.some((layer) => layer.plugin?.id === id)) {
+    app.rebuildAnnotationLayersFromDocument();
+  }
+});
+
+loadInstalledPlugins();
+subscribeInstalledPlugins(loadInstalledPlugins);
+// Settings fires this after connecting GitHub, so private plugins that failed
+// for want of a session load now.
+app.addEventListener('plugin-sources-changed', loadInstalledPlugins);
+
+for (const url of new URLSearchParams(window.location.search).getAll('plugin')) {
+  let approved = [];
+  try { approved = JSON.parse(localStorage.getItem(APPROVED_PLUGIN_URLS_KEY)) ?? []; } catch { /* none */ }
+  if (!approved.includes(url)) {
+    const agreed = window.confirm(`This link asks to load a plugin from\n\n${url}\n\n`
+      + 'A plugin runs its own code in this page, with access to your annotations. '
+      + 'Only continue if you trust where it comes from.');
+    if (!agreed) continue;
+    try {
+      localStorage.setItem(APPROVED_PLUGIN_URLS_KEY, JSON.stringify([...approved, url]));
+    } catch { /* not remembered; asked again next time */ }
+  }
+  loadPluginAndReport(url);
+}
 
 app.rebuildAnnotationLayersFromDocument();
 app.setActiveTool('pan');
@@ -2240,6 +2359,21 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'Space') {
     event.preventDefault();
     app.togglePlayback();
+    return;
+  }
+  // Shift+arrows nudge the selected point or shape by one pixel (Shift+Alt by
+  // a tenth, on layers that allow fractional coordinates).
+  const nudgeDirections = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  if (event.shiftKey && event.key in nudgeDirections) {
+    event.preventDefault();
+    const step = event.altKey ? 0.1 : 1;
+    const [directionX, directionY] = nudgeDirections[event.key];
+    app.nudgeSelection(directionX * step, directionY * step);
+    return;
+  }
+  if (event.key === '[' || event.key === ']') {
+    event.preventDefault();
+    app.jumpToAnnotatedFrame(event.key === ']' ? 1 : -1);
     return;
   }
   if (event.key === 'ArrowLeft' || event.key === ',') { event.preventDefault(); app.stepFrame(-1); return; }
