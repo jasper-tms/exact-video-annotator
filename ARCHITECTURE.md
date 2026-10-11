@@ -125,8 +125,8 @@ is already active toggles it off), a left-drag pans as well, via
 `viewer.beginPanFromPointerEvent(event)`. Space is exclusively play/pause. All
 other pointer events are forwarded to the active tool by `main.js`.
 
-There is **no separate select tool**: the point/line/polyline tools hit-test
-their target layer on pointer-down, so pressing an existing annotation of
+There is **no separate select tool**: the pan, point, line and polyline tools
+hit-test their target layer on pointer-down, so pressing an existing annotation of
 **any** kind **selects** it and dragging **moves** it (the whole item, or the
 grabbed vertex) — no tool is blind to another kind's annotations. This shared
 behavior lives in `js/tools/annotation-dragging.js`. A click on empty space

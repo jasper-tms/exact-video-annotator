@@ -1,6 +1,6 @@
-// Shared "grab what's already there" behavior for the point, line, and polyline
-// tools — there is no separate select tool; each drawing tool selects, drags,
-// and edits annotations of its own kind. Pressing an existing item selects it,
+// Shared "grab what's already there" behavior for the pan, point, line, and
+// polyline tools — there is no separate select tool; each of them selects,
+// drags, and edits existing annotations. Pressing an existing item selects it,
 // dragging moves the whole item or the grabbed vertex, and hovering highlights
 // what a press would grab. Drags mutate geometry live for preview (bypassing
 // undo on purpose) and are committed as one undo command, built from
