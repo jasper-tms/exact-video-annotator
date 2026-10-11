@@ -12,7 +12,7 @@
 
 export const firebaseConfig = {
   apiKey: 'AIzaSyDGSNdLTbQ8f3UbMK7wilHnIe8iqWR93Zk',
-  authDomain: 'exact-video-annotator.firebaseapp.com',
+  authDomain: 'auth.examine.video',
   projectId: 'exact-video-annotator',
   storageBucket: 'exact-video-annotator.firebasestorage.app',
   messagingSenderId: '163100434452',

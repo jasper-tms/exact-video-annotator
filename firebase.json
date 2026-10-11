@@ -1,5 +1,26 @@
 {
   "firestore": {
     "rules": "firebase/firestore.rules"
+  },
+  "hosting": {
+    "public": "firebase/hosting",
+    "redirects": [
+      {
+        "source": "/",
+        "destination": "https://examine.video/",
+        "type": 301
+      }
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "X-Robots-Tag",
+            "value": "noindex"
+          }
+        ]
+      }
+    ]
   }
 }

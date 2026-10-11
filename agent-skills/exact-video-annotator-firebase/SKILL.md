@@ -38,11 +38,40 @@ eur3 (e.g. `europe-west4`) or they will not be "next to" the database.
 - **Authorized domains gotcha:** Google sign-in only completes on a domain
   listed under Authentication › Settings › Authorized domains. `localhost` is
   there by default (so test at `http://localhost:...`, NOT `127.0.0.1`, which
-  is not authorized). The production/staging domains that must stay listed:
-  `examine.video`, `www.examine.video`, `exact-video-annotator.pages.dev`.
-  **Any new deploy domain must be added there** or sign-in fails on it with no
-  obvious error. Cloudflare Pages also deploys every pushed branch to
-  `<branch>.exact-video-annotator.pages.dev`.
+  is not authorized). The domains that must stay listed: `examine.video`,
+  `www.examine.video`, `auth.examine.video`,
+  `exact-video-annotator.pages.dev` and `dev.exact-video-annotator.pages.dev`.
+  **Any new deploy domain must be added there** or sign-in fails on it with
+  `auth/unauthorized-domain`. Cloudflare Pages also deploys every pushed
+  branch to `<branch>.exact-video-annotator.pages.dev`; only `dev` is listed.
+  Read or change the list with the Identity Toolkit REST API
+  (`https://identitytoolkit.googleapis.com/admin/v2/projects/exact-video-annotator/config`,
+  GET, or PATCH with `?updateMask=authorizedDomains` and the whole list), a
+  `gcloud auth print-access-token` bearer token and the header
+  `X-Goog-User-Project: exact-video-annotator`.
+
+## Custom auth domain (auth.examine.video)
+
+`authDomain` in `js/firebase-config.js` is `auth.examine.video`, so the Google
+sign-in popup shows our domain instead of
+`exact-video-annotator.firebaseapp.com`. It is set up like movim-website's
+`auth.movim.ai` and reaction-test's `auth.movement.vision`:
+- **Firebase Hosting placeholder:** Firebase serves the reserved `/__/auth/*`
+  sign-in pages on any Hosting site, but a custom domain gets its certificate
+  only after a Hosting deploy. The `"hosting"` block in `firebase.json` serves
+  `firebase/hosting/` (just a `404.html`); `/` redirects to
+  https://examine.video/ and every response is `noindex`. Nothing else uses
+  Hosting. Redeploy only if the placeholder changes:
+  `firebase/node_modules/.bin/firebase deploy --only hosting --project exact-video-annotator`.
+- **Hosting custom domain** `auth.examine.video` on the default site, whose
+  one DNS record is a Cloudflare CNAME `auth` → `exact-video-annotator.web.app`
+  set to **DNS only** (grey cloud): if Cloudflare proxies it, Firebase can
+  neither verify the domain nor issue its certificate.
+- **Authorized domain** `auth.examine.video` (above).
+- **OAuth redirect URI** `https://auth.examine.video/__/auth/handler` on the
+  "Web client (auto created by Google Service)" (Google Cloud console → Google
+  Auth Platform → Clients). Firebase never adds it; without it Google sign-in
+  fails with `Error 400: redirect_uri_mismatch`.
 
 ## What is stored (and what is deliberately NOT)
 
