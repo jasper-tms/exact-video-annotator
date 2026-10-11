@@ -239,7 +239,10 @@ function clampNumber(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, Number(value) || 0));
 }
 
-/* ---------- Autosave (localStorage) ---------- */
+/* ---------- Saving in the browser (localStorage, on the Save button) ---------- */
+
+// The names keep "autosave" so annotations saved before saving became manual
+// still restore.
 
 const AUTOSAVE_PREFIX = 'exact-video-annotator.autosave.';
 
@@ -248,14 +251,16 @@ export function autosaveKey(videoInformation) {
   return `${AUTOSAVE_PREFIX}${videoInformation.name}.${videoInformation.sizeBytes ?? 'unknown-size'}`;
 }
 
+/** Returns whether the save succeeded (false when storage is full or disabled). */
 export function saveAutosave(key, annotationDocument, videoInformation) {
   try {
     localStorage.setItem(key, JSON.stringify({
       savedAt: new Date().toISOString(),
       document: documentToJson(annotationDocument, videoInformation),
     }));
+    return true;
   } catch {
-    // Quota exceeded or storage disabled — autosave is best-effort by design.
+    return false;
   }
 }
 

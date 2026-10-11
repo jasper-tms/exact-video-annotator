@@ -1,6 +1,6 @@
 // Application wiring: owns the app object (state + events), the video
 // pipeline, the animation loop, tool switching, global keyboard handling,
-// import/export, and autosave. See ARCHITECTURE.md for every contract.
+// import/export, and saving in the browser. See ARCHITECTURE.md for every contract.
 
 import { Viewer } from './viewer.js';
 import { VideoLayer } from './layers/video-layer.js';
@@ -62,8 +62,6 @@ function layerTypeDisplayName(type) {
   return `${type[0].toUpperCase()}${type.slice(1)}`;
 }
 
-const AUTOSAVE_DEBOUNCE_MILLISECONDS = 500;
-
 // How long a seek must sit unresolved before the stall is shown on screen
 // (the video picture dims) — see isSeekPendingDisplay.
 const SEEK_PENDING_DISPLAY_DELAY_MILLISECONDS = 80;
@@ -92,7 +90,9 @@ class Application extends EventTarget {
   //   'agnostic' — the item applies across every frame (frame = null)
   annotationMode = 'anchored';
   #keyHandlers = [];
-  #autosaveTimer = null;
+  // Whether the annotations changed since they were last saved in the browser
+  // (Save), exported to a file, imported or restored.
+  hasUnsavedChanges = false;
   // The frame last asked for via seekToFrame/stepFrame, kept to answer
   // isSeekPending: whether the engine has actually caught up to it yet.
   #requestedFrame = null;
@@ -1113,17 +1113,52 @@ class Application extends EventTarget {
   /* ---------- Document lifecycle ---------- */
 
   markDocumentChanged() {
+    this.setHasUnsavedChanges(true);
     this.dispatchEvent(new CustomEvent('document-changed'));
     this.viewer.requestRender();
-    if (!this.mediaInformation) return;
-    clearTimeout(this.#autosaveTimer);
-    this.#autosaveTimer = setTimeout(() => {
-      // The media the autosave keys off (the primary video, or the anchoring
-      // image) can be closed between scheduling and firing.
-      const mediaInformation = this.mediaInformation;
-      if (!mediaInformation) return;
-      saveAutosave(autosaveKey(mediaInformation), this.annotationDocument, mediaInformation);
-    }, AUTOSAVE_DEBOUNCE_MILLISECONDS);
+  }
+
+  /** Flag (or clear) unsaved changes; announced as 'unsaved-changes-changed'. */
+  setHasUnsavedChanges(hasUnsavedChanges) {
+    if (this.hasUnsavedChanges === hasUnsavedChanges) return;
+    this.hasUnsavedChanges = hasUnsavedChanges;
+    this.dispatchEvent(new CustomEvent('unsaved-changes-changed'));
+  }
+
+  /** Save the annotations in this browser (localStorage), keyed by the open
+      media (the primary video, or the anchoring image), for restoring the
+      next time that media is opened. Saving happens only on request. */
+  saveAnnotationsInBrowser() {
+    const mediaInformation = this.mediaInformation;
+    if (!mediaInformation) {
+      this.showToast('Open the video or image first: saved annotations are kept per media file.',
+        { kind: 'error' });
+      return;
+    }
+    if (!saveAutosave(autosaveKey(mediaInformation), this.annotationDocument, mediaInformation)) {
+      this.showToast('Could not save in this browser (storage full or disabled). Export instead.',
+        { kind: 'error' });
+      return;
+    }
+    this.setHasUnsavedChanges(false);
+    this.showToast(`Saved annotations in this browser for ${mediaInformation.name}.`);
+  }
+
+  /** Remove every annotation, keeping the layers, classes and event types,
+      as one undoable command. */
+  clearAnnotations() {
+    const layers = this.annotationDocument.layers.filter((layer) => layer.items.length > 0);
+    if (layers.length === 0) return;
+    // In place: each view layer shares its item list with the document.
+    const removedItems = layers.map((layer) => layer.items.slice());
+    this.setSelection(null);
+    this.undoHistory.execute({
+      label: 'Clear annotations',
+      apply: () => { for (const layer of layers) layer.items.length = 0; },
+      revert: () => {
+        layers.forEach((layer, index) => { layer.items.length = 0; layer.items.push(...removedItems[index]); });
+      },
+    });
   }
 
   replaceDocument(annotationDocument) {
@@ -1371,7 +1406,8 @@ function dimJoiningMediaLayer(mediaLayer) {
   if (others.length === 1 && others[0].opacity === 1) others[0].setOpacity(0.75);
 }
 
-/** Offer to restore annotations autosaved for this media file — a video or an
+/** Offer to restore annotations saved in this browser for this media file (with
+    the Save button) — a video or an
     image, keyed by its name + size. Restores only into an EMPTY document, so
     opening media never clobbers annotations already on screen: whichever piece
     of media is opened first seeds the document, and later ones only add their
@@ -1386,7 +1422,8 @@ function offerAutosaveRestore(mediaInformation) {
   const autosaved = loadAutosave(autosaveKey(mediaInformation));
   if (autosaved && autosaved.document.layers.some((layer) => layer.items.length > 0)) {
     app.replaceDocument(autosaved.document);
-    app.showToast(`Restored autosaved annotations (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
+    app.setHasUnsavedChanges(false);
+    app.showToast(`Restored the annotations saved in this browser (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
   }
 }
 
@@ -2297,11 +2334,32 @@ async function importAnnotationsFile(file) {
       return;
     }
     app.replaceDocument(parsed);
+    app.setHasUnsavedChanges(false);
     app.showToast(`Imported annotations from ${file.name}.`);
   } catch (error) {
     app.showToast(`Could not import ${file.name}: ${error.message ?? error}`, { kind: 'error' });
   }
 }
+
+const saveAnnotationsButton = document.getElementById('save-annotations-button');
+saveAnnotationsButton.addEventListener('click', () => app.saveAnnotationsInBrowser());
+// The Save button shows a dot while there are changes not yet saved or exported.
+app.addEventListener('unsaved-changes-changed', () => {
+  saveAnnotationsButton.classList.toggle('has-unsaved-changes', app.hasUnsavedChanges);
+});
+document.getElementById('clear-annotations-button').addEventListener('click', () => {
+  const hasItems = app.annotationDocument.layers.some((layer) => layer.items.length > 0);
+  if (!hasItems) { app.showToast('There are no annotations to clear.'); return; }
+  if (window.confirm('Clear every annotation? (Undo brings them back; annotations saved in '
+    + 'the browser stay saved until you save again.)')) {
+    app.clearAnnotations();
+  }
+});
+// Saving is manual, so warn before leaving with changes not saved or exported.
+window.addEventListener('beforeunload', (event) => {
+  const hasItems = app.annotationDocument.layers.some((layer) => layer.items.length > 0);
+  if (app.hasUnsavedChanges && hasItems) event.preventDefault();
+});
 
 document.getElementById('export-annotations-button').addEventListener('click', () => {
   const json = documentToJson(app.annotationDocument, app.mediaInformation);
@@ -2312,6 +2370,7 @@ document.getElementById('export-annotations-button').addEventListener('click', (
   anchor.download = `${baseName}.annotations.json`;
   anchor.click();
   URL.revokeObjectURL(anchor.href);
+  app.setHasUnsavedChanges(false);
 });
 
 /* ---------- Drag and drop ---------- */

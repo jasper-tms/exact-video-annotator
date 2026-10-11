@@ -10,7 +10,8 @@ transforms — and the playhead is frame-exact, courtesy of
 No server, no upload: videos open straight from local disk (read lazily by
 byte range, so arbitrarily large files are fine) or from any URL that answers
 HTTP Range requests. Annotations live in a single JSON file you export and
-import, with localStorage autosave as a safety net.
+import, and can also be saved in the browser (localStorage) with the Save
+button.
 
 ## Design principles
 

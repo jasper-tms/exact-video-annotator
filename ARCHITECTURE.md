@@ -273,7 +273,9 @@ documentFromJson(jsonObject) → AnnotationDocument (validates; no migration —
                                                     rejected outright)
 newId() → unique string id
 autosaveKey(videoInformation) → string      // keyed by video name + size
-saveAutosave(key, annotationDocument); loadAutosave(key); clearAutosave(key)
+saveAutosave(key, annotationDocument) → whether it saved; loadAutosave(key); clearAutosave(key)
+                                            // (the Save button's storage; the
+                                            // names predate manual saving)
 ```
 
 Document shape (also the export JSON, `format: "exact-video-annotator"`,
@@ -342,7 +344,7 @@ undoHistory.canUndo; undoHistory.canRedo;
 //          dispatches 'history-changed' after any operation.
 ```
 
-`main.js` listens for `'history-changed'` and re-renders + autosaves.
+`main.js` listens for `'history-changed'` and re-renders (marking unsaved changes).
 
 ### `js/tools/…` — tool objects
 
@@ -410,7 +412,10 @@ app.showToast(message, { kind, sticky, action } = {});
                                      // kind: 'info' | 'warning' | 'error';
                                      // action: { label, onSelect } adds a
                                      // button (and makes the toast sticky)
-app.markDocumentChanged();           // dispatches 'document-changed' + autosave
+app.markDocumentChanged();           // dispatches 'document-changed', flags
+                                     // unsaved changes (hasUnsavedChanges)
+app.saveAnnotationsInBrowser();      // the Save button
+app.clearAnnotations();              // the Clear button: every item, undoable
 app.hover;                           // set by tools while hovering an existing
                                      // annotation; same shape as selection
 app.togglePlayback(); app.stepFrame(delta);
@@ -789,7 +794,7 @@ video-specific even though stacking, precedence, and opacity generalize.
 null, `app.currentFrame` is 0, and the transport bar shows a disabled "Frame 0"
 — the null-engine guards on `seekToFrame` / `stepFrame` / `togglePlayback` were
 already in place. Annotations still work: frame-agnostic ones are frame-less,
-anchored ones bind to frame 0. Autosave and export provenance follow
+anchored ones bind to frame 0. Saving in the browser and export provenance follow
 `app.mediaInformation`, which falls back from the primary video to the
 bottom-most image, so a lone image's annotations persist across a refresh and
 its file name is recorded in the export. `offerAutosaveRestore` seeds the
@@ -1024,10 +1029,13 @@ What the UI does with that:
 ## Persistence
 
 - Export/import: a single JSON file (`<video-name>.annotations.json`).
-- Autosave: the serialized document under `localStorage` keyed by the
-  **primary** video's name + size, saved (debounced) on every
-  `'document-changed'`; offered for restore when the same video is reopened
-  as the primary (never when it arrives as a follower).
+- Saving in the browser: the top bar's **Save** button stores the serialized
+  document under `localStorage` keyed by the **primary** video's name + size.
+  Nothing is saved automatically; Save shows a dot while there are changes
+  not yet saved or exported, and leaving the page then asks first. The saved
+  document is restored when the same video is reopened as the primary (never
+  when it arrives as a follower). **Clear** removes every annotation as one
+  undoable command, keeping layers, classes and event types.
 - Follower videos and their link settings are session-only viewing aids: the
   document's `video` provenance block stays keyed to the primary, so
   version-1 files stay valid. Recording followers in the export would be a
@@ -1071,7 +1079,7 @@ is private to its owner) and deploy with `./deploy-firebase-rules.sh`. The
 Firestore region and other console/setup facts not visible in the code are
 documented in the `exact-video-annotator-firebase` agent skill.
 
-This preference sync is separate from the annotation autosave above, which is
+This preference sync is separate from saving annotations in the browser above, which is
 per-video, local-only, and never synced.
 
 ## Deploy

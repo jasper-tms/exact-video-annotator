@@ -88,6 +88,18 @@ body {
   white-space: nowrap;
 }
 
+/* A group's name, e.g. "Annotations" before its buttons. */
+.toolbar-label {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* Save shows a dot while there are changes not yet saved or exported. */
+#save-annotations-button.has-unsaved-changes::after {
+  content: ' ●';
+  color: var(--accent, #ffb43c);
+}
+
 button {
   background: var(--surface-raised);
   color: var(--text);
