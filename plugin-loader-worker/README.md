@@ -57,9 +57,17 @@ and **on** for the secrets. All six can go in one dialog.
 Plain variables (Secret toggle off):
 - `GITHUB_APP_ID` = `4923976`
 - `GITHUB_APP_CLIENT_ID` = `Iv23liF1OCpXVkMmbKTj`
-- `ALLOWED_ORIGINS` = `https://examine.video,https://www.examine.video,https://exact-video-annotator.pages.dev,http://localhost:8000,http://127.0.0.1:8000`
+- `ALLOWED_ORIGINS` = `https://examine.video,https://www.examine.video,https://exact-video-annotator.pages.dev,https://*.exact-video-annotator.pages.dev,http://localhost:*,http://127.0.0.1:*`
   (comma-separated, no trailing slashes: an entry is an `Origin` header value,
-  scheme + host + port only.)
+  scheme + host + port only.) An entry may use `*` as its first host label
+  (exactly one subdomain label, so `*.exact-video-annotator.pages.dev` covers
+  every branch and per-commit preview but not the bare production domain) and/or
+  as its port (any explicit port, covering whichever port `http_server.py`
+  picks). Every matching origin receives session tokens, so only use patterns
+  covering origins you control — never something like `*.pages.dev`.
+  `www.examine.video` is listed exactly rather than as `*.examine.video` so a
+  future subdomain pointed at a third-party service (where others can publish
+  pages) is not trusted automatically.
 
 Secrets (Secret toggle on — hidden after saving):
 - `GITHUB_APP_CLIENT_SECRET` = generate on the app's **General** page

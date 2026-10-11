@@ -31,7 +31,12 @@
 //   GITHUB_APP_PRIVATE_KEY   secret (the .pem contents, PKCS#8 — see README)
 //   SESSION_HMAC_SECRET      secret (any long random string; signs session tokens)
 //   ALLOWED_ORIGINS          var    comma-separated, e.g.
-//                                   "https://examine.video,https://exact-video-annotator.pages.dev,http://localhost:8000"
+//                                   "https://examine.video,https://*.exact-video-annotator.pages.dev,http://localhost:*"
+//                                   An entry may use "*" as its first host label
+//                                   (any single subdomain, e.g. any branch preview)
+//                                   and/or as its port (any port). Every origin a
+//                                   pattern matches receives session tokens, so only
+//                                   use patterns covering origins you control.
 
 const GITHUB_API = 'https://api.github.com';
 const OAUTH_REDIRECT_PATH = '/oauth/callback';
@@ -79,8 +84,7 @@ async function handleOAuthCallback(request, url, env) {
     nonce = parsed.nonce;
   } catch { /* fall through to origin check below */ }
 
-  const allowed = allowedOrigins(env);
-  if (!origin || !allowed.includes(origin)) {
+  if (!origin || !isAllowedOrigin(origin, env)) {
     // Can't safely postMessage to an unknown origin; show a plain error page.
     return new Response('Unrecognized or missing origin in OAuth state.', { status: 400 });
   }
@@ -290,9 +294,27 @@ function allowedOrigins(env) {
   return (env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+function isAllowedOrigin(origin, env) {
+  return allowedOrigins(env).some((pattern) => originMatchesPattern(origin, pattern));
+}
+
+/* An exact entry must match exactly. A wildcard entry may put "*" in two places
+   only: as the first host label ("https://*.example.com" matches one subdomain
+   label, not the bare domain or nested subdomains) and as the port
+   ("http://localhost:*" matches any explicit port). A "*" anywhere else matches
+   only a literal "*", which no real origin contains. */
+function originMatchesPattern(origin, pattern) {
+  if (!pattern.includes('*')) return origin === pattern;
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const source = escaped
+    .replace(/^([a-z]+):\/\/\\\*\\\./, '$1://[a-z0-9-]+\\.')
+    .replace(/:\\\*$/, ':[0-9]+');
+  return new RegExp(`^${source}$`).test(origin);
+}
+
 function withCors(request, env, response) {
   const origin = request.headers.get('Origin');
-  if (origin && allowedOrigins(env).includes(origin)) {
+  if (origin && isAllowedOrigin(origin, env)) {
     response.headers.set('Access-Control-Allow-Origin', origin);
     response.headers.set('Vary', 'Origin');
   }
