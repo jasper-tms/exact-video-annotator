@@ -64,7 +64,7 @@ function addPointEvent(app, eventType, items, frame) {
     return;
   }
 
-  const item = { id: newId(), eventTypeId: eventType.id, startFrame: frame, endFrame: frame };
+  const item = { id: newId(), eventTypeId: eventType.id, startFrame: frame, endFrame: frame, metadata: {} };
   app.undoHistory.execute({
     label: `Add ${eventType.name}`,
     apply: () => items.push(item),
@@ -95,7 +95,7 @@ function addOrCompleteRangeEvent(app, eventType, items, frame) {
 
   // First press: start recording an in-progress range (endFrame stays null
   // until it is completed, and such items are never exported).
-  const item = { id: newId(), eventTypeId: eventType.id, startFrame: frame, endFrame: null };
+  const item = { id: newId(), eventTypeId: eventType.id, startFrame: frame, endFrame: null, metadata: {} };
   app.undoHistory.execute({
     label: `Start ${eventType.name}`,
     apply: () => items.push(item),

@@ -278,6 +278,37 @@ try {
   check(roundTrip.itemCounts.reduce((total, count) => total + count, 0) === 3,
         'export/import round-trip preserves all items');
 
+  // ---- Item metadata: edited in the annotations table, kept on export ----
+  await page.locator('.show-all-annotations-checkbox').check();
+  await page.locator('.edit-metadata-button').first().click();
+  await page.locator('.metadata-dialog .metadata-text').fill('table: 2\nkeypoint: +-\nnote: "7"');
+  await page.locator('.metadata-dialog .metadata-save').click();
+  const metadataFacts = await page.evaluate(async () => {
+    const documentModule = await import('./js/document.js');
+    const application = window.exactVideoAnnotator;
+    const edited = application.annotationDocument.layers.flatMap((layer) => layer.items)
+      .find((item) => Object.keys(item.metadata ?? {}).length > 0);
+    const exported = documentModule.documentToJson(
+      application.annotationDocument, application.videoInformation);
+    const reparsed = documentModule.documentFromJson(JSON.parse(JSON.stringify(exported)));
+    const reparsedItem = reparsed.layers.flatMap((layer) => layer.items)
+      .find((item) => item.id === edited?.id);
+    const cellText = [...document.querySelectorAll('.metadata-cell')].map((cell) => cell.textContent).join(' ');
+    const editedMetadata = { ...edited?.metadata };
+    application.undoHistory.undo();
+    return { edited: editedMetadata, reparsed: reparsedItem?.metadata, cellText,
+             afterUndo: edited?.metadata };
+  });
+  check(JSON.stringify(metadataFacts.edited) === JSON.stringify({ table: 2, keypoint: '+-', note: '7' }),
+        'the metadata editor stores numbers as numbers and quoted values as text');
+  check(JSON.stringify(metadataFacts.reparsed) === JSON.stringify(metadataFacts.edited),
+        'export/import round-trip preserves item metadata');
+  check(metadataFacts.cellText.includes('table: 2'), 'the annotations table shows item metadata');
+  check(JSON.stringify(metadataFacts.afterUndo) === '{}', 'undo restores the previous metadata');
+  // Leave the panel as it was, with focus off the checkbox so Space plays.
+  await page.locator('.show-all-annotations-checkbox').uncheck();
+  await page.evaluate(() => document.activeElement?.blur());
+
   // ---- Zoom and pan leave annotations anchored to source pixels ----
   const anchorBefore = await readFirstPointVertex();
   await page.mouse.move(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);

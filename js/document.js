@@ -189,6 +189,7 @@ function parseItem(layerType, item) {
       vertices,
       classId: item.classId ?? null,
       name: item.name ?? null,
+      metadata: parseMetadata(item.metadata),
     };
   }
   if (layerType === 'segmentation') {
@@ -202,7 +203,25 @@ function parseItem(layerType, item) {
     eventTypeId: asString(item.eventTypeId, 'event type id reference'),
     startFrame: integerNumber(item.startFrame, 'event startFrame'),
     endFrame: integerNumber(item.endFrame, 'event endFrame'),
+    metadata: parseMetadata(item.metadata),
   };
+}
+
+/** An item's metadata: key → text, number or true/false. Missing means none. */
+export function parseMetadata(metadata) {
+  if (metadata === undefined || metadata === null) return {};
+  if (typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new Error('Expected item metadata to be an object of key-value pairs.');
+  }
+  const parsed = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (!(typeof value === 'string' || typeof value === 'boolean'
+          || (typeof value === 'number' && Number.isFinite(value)))) {
+      throw new Error(`Metadata "${key}" must be text, a number, or true/false.`);
+    }
+    parsed[key] = value;
+  }
+  return parsed;
 }
 
 /* ---------- Validation helpers ---------- */

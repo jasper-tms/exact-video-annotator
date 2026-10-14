@@ -125,6 +125,7 @@ export function createDrawingTool({
       vertices: item.vertices.map((vertex) => [vertex[0], vertex[1]]),
       classId: item.classId,
       name: item.name,
+      metadata: { ...(item.metadata ?? {}) },
     };
     const seedVertices = originalItem.vertices.map((vertex) => [vertex[0], vertex[1]]);
     if (hitVertexIndex === 0) seedVertices.reverse();
@@ -186,6 +187,7 @@ export function createDrawingTool({
       vertices: inProgress.vertices.map((vertex) => [vertex[0], vertex[1]]),
       classId: extending ? extending.originalItem.classId : (app.activeClassId ?? null),
       name: extending ? extending.originalItem.name : null,
+      metadata: extending ? extending.originalItem.metadata : {},
     };
     inProgress = null;
 

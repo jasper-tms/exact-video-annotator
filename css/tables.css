@@ -208,6 +208,55 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* "key: value" per line, after the ✎ button that opens the editor. */
+.annotations-table .metadata-cell {
+  white-space: pre-wrap;
+  max-width: 180px;
+}
+
+.annotations-table .edit-metadata-button {
+  float: right;
+  margin-left: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.annotations-table tr:hover .edit-metadata-button { opacity: 1; }
+
+.metadata-dialog { width: min(420px, 90vw); }
+
+.metadata-dialog .metadata-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.metadata-dialog .metadata-text {
+  box-sizing: border-box;
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.metadata-dialog .metadata-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--error);
+}
+
+.metadata-dialog .metadata-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .annotations-table .frame-cell {
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);

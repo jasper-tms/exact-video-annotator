@@ -3,7 +3,8 @@
 // point" command, unless the layer is a plugin's that claims the double-click
 // through its handleCanvasDoubleClick hook (placing a named point, say). A
 // single click there instead deselects (or, if it turns into a drag, pans the
-// view instead). Pressing an existing annotation of ANY
+// view instead), unless the layer claims it through its handleCanvasClick
+// hook (choosing which of its shapes to work on, say). Pressing an existing annotation of ANY
 // kind selects it, and dragging then moves it — the shared behavior in
 // annotation-dragging.js, unfiltered by kind, so there is no separate select
 // tool and no tool is blind to another kind's annotations. A double-click on
@@ -70,6 +71,8 @@ export const pointTool = {
     if (endDragOnExistingItem(app)) return;
     if (pendingEmptyPress) {
       pendingEmptyPress = null;
+      const layer = app.findAnnotationLayerForType('coordinates');
+      if (layer?.visible && layer.handleCanvasClick?.(app, worldPoint, event)) return;
       app.setSelection(null);
     }
   },
@@ -96,6 +99,7 @@ export const pointTool = {
       vertices: [[localPoint.x, localPoint.y]],
       classId: app.activeClassId,
       name: null,
+      metadata: {},
     };
     app.undoHistory.execute({
       label: 'Add point',

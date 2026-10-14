@@ -2428,7 +2428,12 @@ window.addEventListener('keydown', (event) => {
     else app.undoHistory.undo();
     return;
   }
-  if (commandOrControl) return;   // leave other browser shortcuts alone
+  if (commandOrControl) {
+    // Plugins may claim other Command/Control shortcuts (the court plugin's
+    // copy and paste, say); any they leave alone stay the browser's.
+    if (app.runKeyHandlers(event)) event.preventDefault();
+    return;
+  }
 
   if (event.code === 'Space') {
     event.preventDefault();
@@ -2436,13 +2441,14 @@ window.addEventListener('keydown', (event) => {
     return;
   }
   // Shift+arrows nudge the selected point or shape by one pixel (Shift+Alt by
-  // a tenth, on layers that allow fractional coordinates).
+  // a tenth, on layers that allow fractional coordinates). With nothing
+  // selected, plugins may use them (the court plugin moves its active table).
   const nudgeDirections = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   if (event.shiftKey && event.key in nudgeDirections) {
     event.preventDefault();
     const step = event.altKey ? 0.1 : 1;
     const [directionX, directionY] = nudgeDirections[event.key];
-    app.nudgeSelection(directionX * step, directionY * step);
+    if (!app.nudgeSelection(directionX * step, directionY * step)) app.runKeyHandlers(event);
     return;
   }
   if (event.key === '[' || event.key === ']') {

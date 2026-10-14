@@ -2,16 +2,20 @@
 // columns, click-to-select / jump-to-frame, and a per-row delete button. By
 // default it lists only the layer selected in the tab bar; the "Show all
 // annotations" checkbox in the panel's top right corner widens it to every
-// annotation layer. The rebuilt region holds no text inputs (the checkbox
-// lives in the static header), so it is safe to rebuild wholesale on
-// document/layer/selection changes; only the per-frame highlight is updated
-// cheaply (toggling a class) as playback moves, never a full rebuild.
+// annotation layer. Each row shows the item's metadata (key-value pairs that
+// plugins or people attach to it), edited through a dialog opened from the
+// row's ✎ button. The rebuilt region holds no text inputs (the checkbox
+// lives in the static header and the metadata editor in its own dialog), so
+// it is safe to rebuild wholesale on document/layer/selection changes; only
+// the per-frame highlight is updated cheaply (toggling a class) as playback
+// moves, never a full rebuild.
 
 const COLUMNS = [
   { key: 'layer', label: 'Layer', sortable: true },
   { key: 'kind', label: 'Kind', sortable: true },
   { key: 'data', label: 'Data (x,y)', sortable: false },
   { key: 'label', label: 'Label', sortable: true },
+  { key: 'metadata', label: 'Metadata', sortable: true },
   { key: 'frame', label: 'Frame(s)', sortable: true },
 ];
 
@@ -48,8 +52,8 @@ export function initializeAnnotationsTable(app, containerElement) {
   // Multi-key sort with recency, in the spirit of the reference tool: the most
   // recently clicked column is primary, earlier clicks act as tiebreakers.
   // Default: frame ascending.
-  const sortRecency = ['frame', 'layer', 'kind', 'label'];
-  const sortDirection = { layer: 1, kind: 1, label: 1, frame: 1 };
+  const sortRecency = ['frame', 'layer', 'kind', 'label', 'metadata'];
+  const sortDirection = { layer: 1, kind: 1, label: 1, metadata: 1, frame: 1 };
 
   // Rows currently rendered, kept so 'frame-changed' can re-highlight cheaply
   // without rebuilding: each entry pairs a <tr> with a frame-membership test.
@@ -175,6 +179,8 @@ function describeSpatialItem(app, layer, item) {
     kindText: item.kind,
     vertices: item.vertices,
     labelText: className ?? item.name ?? '',
+    item,
+    metadataText: formatMetadata(item.metadata),
     framesText: isFrameAgnostic ? 'all' : String(item.frame),
     includesFrame: isFrameAgnostic ? () => true : (frame) => frame === item.frame,
     selectable: true,
@@ -194,6 +200,8 @@ function describeEvent(app, layer, item) {
     kindText: eventTypeName,
     vertices: [],
     labelText: '',
+    item,
+    metadataText: formatMetadata(item.metadata),
     framesText: formatEventFrames(item),
     includesFrame: (frame) => frame >= item.startFrame
       && (inProgress || frame <= item.endFrame),
@@ -248,6 +256,18 @@ function buildTableRow(app, rowData, coordinatePadWidth) {
   tableRow.appendChild(textCell(rowData.kindText, 'kind-cell'));
   tableRow.appendChild(textCell(formatCoordinatesCell(rowData.vertices, coordinatePadWidth), 'data-cell'));
   tableRow.appendChild(textCell(rowData.labelText, 'label-cell'));
+  const metadataCell = textCell(rowData.metadataText, 'metadata-cell');
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.className = 'edit-metadata-button';
+  editButton.title = 'Edit metadata';
+  editButton.textContent = '✎';
+  editButton.addEventListener('click', (event) => {
+    event.stopPropagation();   // editing must not also select / jump
+    openMetadataEditor(app, rowData.item);
+  });
+  metadataCell.prepend(editButton);
+  tableRow.appendChild(metadataCell);
   tableRow.appendChild(textCell(rowData.framesText, 'frame-cell'));
 
   const deleteCell = document.createElement('td');
@@ -307,6 +327,7 @@ function compareByColumn(column, a, b) {
     case 'layer': return compareText(a.layerName, b.layerName);
     case 'kind': return compareText(a.kindText, b.kindText);
     case 'label': return compareText(a.labelText, b.labelText);
+    case 'metadata': return compareText(a.metadataText, b.metadataText);
     default: return 0;
   }
 }
@@ -320,4 +341,92 @@ function compareText(a, b) {
 function findName(entries, id) {
   if (id === null || id === undefined) return null;
   return entries.find((entry) => entry.id === id)?.name ?? null;
+}
+
+/* ---------- Metadata ---------- */
+
+/** "key: value" per line. Text that would read back as a number or true/false
+    is quoted, so the editor round-trips it as text. */
+export function formatMetadata(metadata) {
+  return Object.entries(metadata ?? {})
+    .map(([key, value]) => `${key}: ${typeof value === 'string' && typeof parseMetadataValue(value) !== 'string'
+      ? JSON.stringify(value) : value}`)
+    .join('\n');
+}
+
+/** A value typed in the editor: true/false, a number, "quoted text", or text. */
+function parseMetadataValue(text) {
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  if (/^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(text)) return Number(text);
+  if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+    try { return JSON.parse(text); } catch { /* not a JSON string: keep as typed */ }
+  }
+  return text;
+}
+
+/** The editor's text as metadata; throws Error with a message for the user. */
+export function parseMetadataText(text) {
+  const metadata = {};
+  for (const [index, rawLine] of text.split('\n').entries()) {
+    const line = rawLine.trim();
+    if (line === '') continue;
+    const separator = line.indexOf(':');
+    if (separator <= 0) throw new Error(`Line ${index + 1} needs the form "key: value".`);
+    const key = line.slice(0, separator).trim();
+    if (key in metadata) throw new Error(`"${key}" appears twice.`);
+    metadata[key] = parseMetadataValue(line.slice(separator + 1).trim());
+  }
+  return metadata;
+}
+
+let metadataDialog = null;
+
+function openMetadataEditor(app, item) {
+  if (metadataDialog === null) {
+    metadataDialog = document.createElement('dialog');
+    metadataDialog.className = 'settings-dialog metadata-dialog';
+    metadataDialog.innerHTML = `
+      <h2>Metadata</h2>
+      <p class="metadata-hint">One <code>key: value</code> per line. Numbers and true/false are
+        stored as such; put a value in quotes to keep it as text.</p>
+      <textarea class="metadata-text" rows="6" spellcheck="false"></textarea>
+      <p class="metadata-error" hidden></p>
+      <div class="metadata-buttons">
+        <button type="button" class="metadata-cancel">Cancel</button>
+        <button type="button" class="metadata-save">Save</button>
+      </div>`;
+    document.body.appendChild(metadataDialog);
+    metadataDialog.querySelector('.metadata-cancel').addEventListener('click', () => metadataDialog.close());
+  }
+  const textArea = metadataDialog.querySelector('.metadata-text');
+  const errorElement = metadataDialog.querySelector('.metadata-error');
+  const saveButton = metadataDialog.querySelector('.metadata-save');
+  textArea.value = formatMetadata(item.metadata);
+  errorElement.hidden = true;
+  const save = () => {
+    let after;
+    try {
+      after = parseMetadataText(textArea.value);
+    } catch (error) {
+      errorElement.textContent = error.message;
+      errorElement.hidden = false;
+      return;
+    }
+    const before = { ...(item.metadata ?? {}) };
+    metadataDialog.close();
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    app.undoHistory.execute({
+      label: 'Edit metadata',
+      apply: () => { item.metadata = { ...after }; },
+      revert: () => { item.metadata = { ...before }; },
+    });
+  };
+  saveButton.onclick = save;
+  // Command/Control+Enter saves without reaching for the mouse.
+  textArea.onkeydown = (event) => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); save(); }
+  };
+  metadataDialog.showModal();
+  textArea.focus();
 }

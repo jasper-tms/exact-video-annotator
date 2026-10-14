@@ -303,7 +303,7 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
       allowFractionalCoordinates,
       plugin: { id: 'line-fitter', options: { … } },   // optional, see "Plugins"
       items: [ { id, frame, kind: 'point' | 'line' | 'polyline',
-                 vertices: [[x, y], ...], classId, name } ] },
+                 vertices: [[x, y], ...], classId, name, metadata } ] },
       // frame: integer (anchored to that frame) or null (frame-agnostic —
       //        applies across every frame; drawn full-strength on all frames)
       // a point item's vertices array always has exactly one [x, y] pair
@@ -317,14 +317,18 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
       // stub: pixel-wise segmentation is not implemented yet, so items is
       // always empty — nothing produces or parses items for this type
     { id, type: 'frames', name,
-      items: [ { id, eventTypeId, startFrame, endFrame } ] },
+      items: [ { id, eventTypeId, startFrame, endFrame, metadata } ] },
       // point events: endFrame === startFrame
       // an in-progress range has endFrame === null (never exported)
   ],
 }
 ```
 
-`classId` and `name` on items are both optional (`null`). Colors are CSS color
+`classId` and `name` on items are both optional (`null`). `metadata` is an
+item's own key-value pairs (`{ key: text | number | true/false }`, `{}` when
+missing): plugins keep structured labels there (the court plugin's
+`{ keypoint: '+-', table: 2 }`), and people can view and edit them in the
+annotations table (its ✎ button). Colors are CSS color
 strings. A new document starts with one Coordinates layer and one Frames
 layer (Segmentation is opt-in from the ＋ menu, since it's not usable yet).
 
@@ -546,7 +550,16 @@ layer.handleCanvasDoubleClick(app, worldPoint, event); // → true claims a
                                                  // double-click with the point
                                                  // tool (which otherwise adds a
                                                  // new unnamed point)
+layer.handleCanvasClick(app, worldPoint, event); // → true claims a single
+                                                 // click on empty canvas with
+                                                 // the point tool (which
+                                                 // otherwise deselects)
 ```
+
+Keyboard: `app.addKeyHandler(handler)` registers a handler that returns
+true to claim a key. Handlers see keys the app itself leaves alone, Command/
+Control shortcuts other than undo and redo (those they don't claim stay the
+browser's), and Shift+arrows when nothing is selected to nudge.
 
 ### Loading plugins from a URL
 
