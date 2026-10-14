@@ -1437,6 +1437,21 @@ function offerAutosaveRestore(mediaInformation) {
 async function loadImageSource(source, { name, sizeBytes, replaceMediaLayer = null }) {
   let bitmap;
   try {
+    // A File the browser is blocked from reading would otherwise reach the toast
+    // as a decode error, so check it can be read first (as the video engine does).
+    if (typeof source !== 'string') {
+      try {
+        await source.slice(0, 1).arrayBuffer();
+      } catch (readError) {
+        console.error('Image could not be read.', readError);
+        app.showToast(readError?.name === 'NotFoundError'
+          ? 'This file could not be found. It may have been moved, renamed, or deleted.'
+          : 'The browser was blocked from reading this file. If it\'s a link or a '
+            + 'shortcut, try loading the original file instead.',
+        { kind: 'error', sticky: true });
+        return;
+      }
+    }
     // A Blob/File decodes directly; a URL string is fetched first. Images are
     // small next to the byte-range videos, so reading the whole file is fine.
     const blob = typeof source === 'string' ? await (await fetch(source)).blob() : source;
