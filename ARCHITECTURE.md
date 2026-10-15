@@ -550,10 +550,9 @@ layer.handleCanvasDoubleClick(app, worldPoint, event); // → true claims a
                                                  // double-click with the point
                                                  // tool (which otherwise adds a
                                                  // new unnamed point)
-layer.handleCanvasClick(app, worldPoint, event); // → true claims a single
-                                                 // click on empty canvas with
-                                                 // the point tool (which
-                                                 // otherwise deselects)
+layer.handleCanvasClick(app, worldPoint, event); // a single click on empty
+                                                 // canvas, with any tool, after
+                                                 // the tool's own handling
 ```
 
 Keyboard: `app.addKeyHandler(handler)` registers a handler that returns

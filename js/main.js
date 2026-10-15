@@ -21,6 +21,7 @@ import { getInstalledPlugins, subscribeInstalledPlugins }
   from './sync/installed-plugins-preference.js';
 import { refitSelectedItem } from './plugins/refit.js';
 import { pointTool } from './tools/point-tool.js';
+import { hitTestLayer } from './tools/annotation-dragging.js';
 import { polylineTool } from './tools/polyline-tool.js';
 import { lineTool } from './tools/line-tool.js';
 import { initializeEventHotkeys } from './tools/event-hotkeys.js';
@@ -1229,6 +1230,30 @@ app.viewer.toolDelegate = {
   onPointerCancel: (worldPoint, event) => app.activeTool?.onPointerCancel?.(app, worldPoint, event),
   onDoubleClick: (worldPoint, event) => app.activeTool?.onDoubleClick?.(app, worldPoint, event),
 };
+
+// A single click on empty canvas (one that neither moved far enough to pan
+// nor landed on an annotation) goes to the coordinates layer's
+// handleCanvasClick hook whatever the active tool, after the tool has handled
+// the press itself: tools decide what a double-click adds, and plugins'
+// clicks work the same with every tool.
+const CLICK_MOVEMENT_LIMIT_SCREEN_PIXELS = 4;
+let canvasPress = null;   // { clientX, clientY, onAnnotation }, or null
+stageCanvas.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || !event.isPrimary) { canvasPress = null; return; }
+  const layer = app.findAnnotationLayerForType('coordinates');
+  const worldPoint = app.viewer.worldFromPointerEvent(event);
+  canvasPress = { clientX: event.clientX, clientY: event.clientY,
+                  onAnnotation: Boolean(layer?.visible && hitTestLayer(app, layer, worldPoint)) };
+}, { capture: true });
+stageCanvas.addEventListener('click', (event) => {
+  const press = canvasPress;
+  canvasPress = null;
+  if (!press || press.onAnnotation || event.button !== 0) return;
+  if (Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY)
+      > CLICK_MOVEMENT_LIMIT_SCREEN_PIXELS) return;
+  const layer = app.findAnnotationLayerForType('coordinates');
+  if (layer?.visible) layer.handleCanvasClick?.(app, app.viewer.worldFromPointerEvent(event), event);
+});
 /* ---------- Pixel shape ---------- */
 
 // World units are the loaded media's stored pixels. When every loaded video and
