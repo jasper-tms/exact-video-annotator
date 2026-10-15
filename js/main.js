@@ -875,7 +875,8 @@ class Application extends EventTarget {
 
   /** Seek to the nearest frame after (direction 1) or before (direction -1)
       the current one that has an annotation — on the selected annotation
-      layer, or on any annotation layer when none is selected. Returns whether
+      layer, or on any annotation layer when none is selected — wrapping
+      around from the last such frame to the first and back. Returns whether
       there was one to go to. */
   jumpToAnnotatedFrame(direction) {
     if (!this.engine) return false;
@@ -890,9 +891,9 @@ class Application extends EventTarget {
     }
     const sorted = [...frames].sort((first, second) => first - second);
     const target = direction > 0
-      ? sorted.find((frame) => frame > this.currentFrame)
-      : sorted.reverse().find((frame) => frame < this.currentFrame);
-    if (target === undefined) return false;
+      ? sorted.find((frame) => frame > this.currentFrame) ?? sorted[0]
+      : sorted.reverse().find((frame) => frame < this.currentFrame) ?? sorted[0];
+    if (target === undefined || target === this.currentFrame) return false;
     if (this.isPlaying) this.pausePlayback();
     this.seekToFrame(target);
     return true;

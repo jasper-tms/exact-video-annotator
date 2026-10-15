@@ -713,7 +713,7 @@ drive it with synthetic edges and stripes.
 | --- | --- |
 | `Space` | play/pause |
 | `ArrowLeft` / `,` , `ArrowRight` / `.` | step one frame |
-| `[` , `]` | jump to the previous / next frame with an annotation (on the selected annotation layer, else on any) |
+| `[` , `]` | jump to the previous / next frame with an annotation (on the selected annotation layer, else on any), wrapping around past the last or first |
 | `Shift`+arrows | nudge the selected point, vertex or shape by one pixel (`Shift`+`Alt`+arrows: a tenth, where the layer allows fractional coordinates) |
 | `1`–`9` | activate the Nth tool-rail button from the top (currently: `1` pan, `2` point, `3` line, `4` polyline) |
 | `0` | scroll to/from the details section (same button, bottom of the tool rail) |
