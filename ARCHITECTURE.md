@@ -256,9 +256,16 @@ CoordinatesLayer(documentLayer, app)`) — kept only so `snapLocalPoint` can rea
 the document's integer-coordinate convention; the other constructors ignore
 a second argument if passed one.
 
-Frame binding for drawing: an item whose `frame` equals `renderState.frame`
-draws at full strength; other frames draw dimmed at reduced alpha (the
-movim-website "off-frame" convention) so nearby context stays visible. A
+Frame binding for drawing: a coordinates layer has two independent opacities,
+both in the layer panel. Items whose `frame` equals `renderState.frame` (and
+frame-agnostic ones) draw at the layer's `opacity`, "opacity (on current
+frame)"; items of other frames draw at `offFrameOpacity`, "opacity (on other
+frames)" — 25% by default (the movim-website "off-frame" convention), so
+nearby context stays visible. Any item at zero opacity is skipped entirely:
+not drawn, not hit-tested (so not clickable or hoverable), and not picked by
+`s`. Since other frames' items can show while `opacity` is 0, the viewer asks
+a layer's `hasVisibleContent` rather than testing `opacity` to decide whether
+to draw it. A
 **frame-agnostic** item (`frame === null`) applies across every frame and so
 always draws (and hit-tests) at full strength. The tool rail's anchored/agnostic
 mode toggle (`app.annotationMode`, `app.newItemFrame`) decides which kind the
@@ -302,7 +309,7 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
   integerCoordinateOffset: 0 | 0.5,
   layers: [
     { id, type: 'coordinates', name, visible, opacity, transform,
-      allowFractionalCoordinates,
+      allowFractionalCoordinates, offFrameOpacity,
       plugin: { id: 'line-fitter', options: { … } },   // optional, see "Plugins"
       items: [ { id, frame, kind: 'point' | 'line' | 'polyline',
                  vertices: [[x, y], ...], classId, name, metadata } ] },
@@ -315,6 +322,11 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
       //   moved vertex snaps per integerCoordinateOffset (floor for 0, round
       //   for 0.5) — see CoordinatesLayer.snapLocalPoint. A live per-layer
       //   toggle, never locked, freely mixed with fractional annotations.
+      // offFrameOpacity: 0–1, the opacity of items bound to other frames,
+      //   independent of opacity, which on this layer type is the current
+      //   frame's (default 0.25, or the plugin's default when absent from
+      //   the file). Items at 0 are neither drawn nor hit-testable, nor
+      //   picked by s.
     { id, type: 'segmentation', name, visible, opacity, transform, items: [] },
       // stub: pixel-wise segmentation is not implemented yet, so items is
       // always empty — nothing produces or parses items for this type
@@ -744,7 +756,7 @@ drive it with synthetic edges and stripes.
 | `a` | toggle frame-agnostic mode for new annotations |
 | `f` | fit the view to the content |
 | `r` | re-fit the selected annotation (plugin layers that fit; see "Plugins") |
-| `s` | select the current-frame vertex (point, or line/polyline corner) nearest the cursor on the active coordinates layer, as if clicked — only when it is within 60 screen pixels and less than half as far as the next-nearest vertex, else deselect. Vertices outside the visible canvas are ignored. An event type or plugin bound to `s` takes precedence |
+| `s` | select the vertex (point, or line/polyline corner) nearest the cursor on the active coordinates layer, as if clicked — only when it is within 60 screen pixels and less than half as far as the next-nearest vertex, else deselect. The current frame's vertices are searched first; other frames' are searched only when none of the current frame's is within 60 pixels. Vertices at zero opacity or outside the visible canvas are ignored. An event type or plugin bound to `s` takes precedence |
 | `Delete`/`Backspace` | delete selected item (or selected vertex) — works in any tool |
 | `Escape` | commit an in-progress line/polyline as an open shape (or cancel outright if too few vertices), else clear the selection |
 | `Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z` | undo, redo |

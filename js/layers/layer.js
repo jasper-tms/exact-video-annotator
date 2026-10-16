@@ -29,6 +29,10 @@ export class Layer extends EventTarget {
   /** Draw in layer-local coordinates; the canvas transform is already set. */
   draw(context, renderState) {}  // eslint-disable-line no-unused-vars
 
+  /** Whether anything could show at the layer's opacity; the viewer skips
+      drawing a layer without. */
+  get hasVisibleContent() { return this.opacity > 0; }
+
   /** Bounding box of the layer's content in local coordinates, or null. */
   contentBounds() { return null; }
 

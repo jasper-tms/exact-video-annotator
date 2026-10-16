@@ -98,10 +98,36 @@ export function initializeLayerDetail(app, containerElement) {
       opacityValue.textContent = `${opacitySlider.value}%`;
       layer.setOpacity(Number(opacitySlider.value) / 100);
     });
-    opacityLabel.append('opacity ', opacitySlider, opacityValue);
+    // Points, lines and polylines layers have a second opacity for the
+    // annotations marked on other frames, so this one is the current frame's.
+    opacityLabel.append(layer.type === 'coordinates' ? 'opacity (on current frame) ' : 'opacity ',
+      opacitySlider, opacityValue);
     controlsRow.appendChild(opacityLabel);
 
     containerElement.appendChild(controlsRow);
+
+    if (layer.type === 'coordinates') {
+      const offFrameRow = document.createElement('div');
+      offFrameRow.className = 'layer-detail-row';
+      const offFrameLabel = document.createElement('label');
+      offFrameLabel.className = 'layer-detail-opacity';
+      offFrameLabel.title = 'The opacity of annotations marked on other frames. At 0% '
+        + "they are hidden and can't be clicked or selected with s.";
+      const offFrameSlider = document.createElement('input');
+      offFrameSlider.type = 'range';
+      offFrameSlider.min = '0';
+      offFrameSlider.max = '100';
+      offFrameSlider.value = String(Math.round(layer.offFrameOpacity * 100));
+      const offFrameValue = document.createElement('span');
+      offFrameValue.textContent = `${Math.round(layer.offFrameOpacity * 100)}%`;
+      offFrameSlider.addEventListener('input', () => {
+        offFrameValue.textContent = `${offFrameSlider.value}%`;
+        layer.setOffFrameOpacity(Number(offFrameSlider.value) / 100);
+      });
+      offFrameLabel.append('opacity (on other frames) ', offFrameSlider, offFrameValue);
+      offFrameRow.appendChild(offFrameLabel);
+      containerElement.appendChild(offFrameRow);
+    }
 
     /* ---- Transform (scale/offset into world coordinates) ---- */
 
@@ -146,6 +172,7 @@ export function initializeLayerDetail(app, containerElement) {
       fractionalLabel.append(fractionalCheckbox, ' allow fractional coordinates');
       fractionalRow.appendChild(fractionalLabel);
       containerElement.appendChild(fractionalRow);
+
     }
 
     /* ---- Video layer: primary/follower link controls ---- */

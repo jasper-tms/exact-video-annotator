@@ -241,6 +241,12 @@ layer.options;        // your settings; replace the object, then dispatch
                       // 'layer-changed' to save them into the file
 layer.getItem(itemId);
 layer.draw(context, renderState);   // override, and call super.draw first
+layer.offFrameOpacity; // 0–1, the opacity of other frames' items (default
+                       // 0.25; layer.opacity is the current frame's). At 0
+                       // they are hidden and can't be clicked.
+                       // People adjust it in the layer panel; to change the
+                       // default, set it in your constructor only when
+                       // documentLayer.offFrameOpacity is undefined
 ```
 
 An item of a coordinates layer looks like this (positions are in the video's

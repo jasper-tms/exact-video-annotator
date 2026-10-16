@@ -39,25 +39,47 @@ const SELECT_NEAREST_DISTANCE_RATIO = 0.5;
 const SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS = 60;
 
 /**
- * Select the vertex nearest to worldPoint among the layer's current-frame
- * items, as clicking it would, or deselect when none is clearly nearest:
- * it must be within SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS of the cursor and
- * less than half as far as the next-nearest vertex. Distances are measured on
- * screen, and vertices outside the visible canvas are ignored entirely, so
- * they can neither be picked nor make a visible one ambiguous. A closed
- * polyline's closing duplicate of vertex 0 is skipped, or the two would
- * always tie. Returns true if something was selected.
+ * Select the vertex nearest to worldPoint, as clicking it would, or deselect
+ * when none is clearly nearest: it must be within
+ * SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS of the cursor and less than half as far
+ * as the next-nearest vertex. The current frame's items (and frame-agnostic
+ * ones) are searched first; only when none of their vertices is within range
+ * are other frames' visible items searched the same way, so the faint copies
+ * of a point labeled on neighboring frames never make the current frame's own
+ * point ambiguous. Items at zero opacity are never candidates. Distances are
+ * measured on screen, and vertices outside the visible canvas are ignored
+ * entirely, so they can neither be picked nor make a visible one ambiguous.
+ * Returns true if something was selected.
  */
 export function selectNearestVertex(app, layer, worldPoint) {
+  const isOnCurrentFrame = (item) => item.frame === null || item.frame === app.currentFrame;
+  let candidate = nearestVertexAmong(app, layer, worldPoint, isOnCurrentFrame);
+  if (!candidate || candidate.distance > SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS) {
+    candidate = nearestVertexAmong(app, layer, worldPoint, (item) => !isOnCurrentFrame(item));
+  }
+  if (!candidate
+      || candidate.distance > SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS
+      || candidate.distance >= SELECT_NEAREST_DISTANCE_RATIO * candidate.secondNearestDistance) {
+    app.setSelection(null);
+    return false;
+  }
+  app.setSelection({ layerId: layer.id, itemId: candidate.itemId, vertexIndex: candidate.vertexIndex });
+  return true;
+}
+
+/** The on-canvas vertex nearest worldPoint, in screen pixels, among the
+    layer's shown items that pass itemFilter: { itemId, vertexIndex, distance,
+    secondNearestDistance }, or null when there is none. A closed polyline's
+    closing duplicate of vertex 0 is skipped, or the two would always tie. */
+function nearestVertexAmong(app, layer, worldPoint, itemFilter) {
   const { scaleX, scaleY, offsetX, offsetY } = app.viewer.stageTransformForLayer(layer);
   const { width: stageWidth, height: stageHeight } = app.viewer.stageCanvas.getBoundingClientRect();
   const localPoint = app.localFromWorld(layer, worldPoint);
   const cursorX = localPoint.x * scaleX + offsetX;
   const cursorY = localPoint.y * scaleY + offsetY;
   let nearest = null;
-  let secondNearestDistance = Infinity;
   for (const item of layer.items) {
-    if (item.frame !== null && item.frame !== app.currentFrame) continue;
+    if (!itemFilter(item) || !layer.isItemShown(item, app.currentFrame)) continue;
     const vertexCount = isClosedPolyline(item) ? item.vertices.length - 1 : item.vertices.length;
     for (let index = 0; index < vertexCount; index++) {
       const stageX = item.vertices[index][0] * scaleX + offsetX;
@@ -65,21 +87,14 @@ export function selectNearestVertex(app, layer, worldPoint) {
       if (stageX < 0 || stageX > stageWidth || stageY < 0 || stageY > stageHeight) continue;
       const distance = Math.hypot(stageX - cursorX, stageY - cursorY);
       if (!nearest || distance < nearest.distance) {
-        if (nearest) secondNearestDistance = nearest.distance;
-        nearest = { itemId: item.id, vertexIndex: index, distance };
-      } else if (distance < secondNearestDistance) {
-        secondNearestDistance = distance;
+        nearest = { itemId: item.id, vertexIndex: index, distance,
+                    secondNearestDistance: nearest ? nearest.distance : Infinity };
+      } else if (distance < nearest.secondNearestDistance) {
+        nearest.secondNearestDistance = distance;
       }
     }
   }
-  if (!nearest
-      || nearest.distance > SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS
-      || nearest.distance >= SELECT_NEAREST_DISTANCE_RATIO * secondNearestDistance) {
-    app.setSelection(null);
-    return false;
-  }
-  app.setSelection({ layerId: layer.id, itemId: nearest.itemId, vertexIndex: nearest.vertexIndex });
-  return true;
+  return nearest;
 }
 
 /** Select the hit item and, if it was already selected before this press, arm

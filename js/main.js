@@ -1078,6 +1078,13 @@ class Application extends EventTarget {
     const viewLayer = plugin
       ? plugin.createViewLayer(documentLayer, this)
       : new ANNOTATION_LAYER_CONSTRUCTORS[documentLayer.type](documentLayer, this);
+    // Record the layer's own default for showing other frames' items (a
+    // plugin's, say) in the document straight away, so a file saved before
+    // the setting is ever touched keeps it — even when opened later without
+    // the plugin.
+    if (documentLayer.type === 'coordinates') {
+      documentLayer.offFrameOpacity = viewLayer.offFrameOpacity;
+    }
     // Panel edits (name/visibility/opacity/transform, plugin options) flow back
     // to the document.
     viewLayer.addEventListener('layer-changed', () => {
@@ -1087,6 +1094,7 @@ class Application extends EventTarget {
       documentLayer.transform = { ...viewLayer.transform };
       if (documentLayer.type === 'coordinates') {
         documentLayer.allowFractionalCoordinates = viewLayer.allowFractionalCoordinates;
+        documentLayer.offFrameOpacity = viewLayer.offFrameOpacity;
       }
       if (viewLayer.plugin) {
         documentLayer.plugin = {

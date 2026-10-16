@@ -140,6 +140,11 @@ export function documentFromJson(jsonObject) {
     };
     if (layer.type === 'coordinates') {
       parsedLayer.allowFractionalCoordinates = layer.allowFractionalCoordinates === true;
+      // Left out when the file doesn't say, so the layer (or its plugin) picks
+      // the default rather than this parser.
+      if (layer.offFrameOpacity !== undefined) {
+        parsedLayer.offFrameOpacity = clampNumber(layer.offFrameOpacity, 0, 1);
+      }
     }
     // A plugin layer stores its annotations as the plain type above and names
     // its plugin here, so a build without that plugin can still read the file.

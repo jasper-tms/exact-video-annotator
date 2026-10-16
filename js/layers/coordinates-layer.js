@@ -31,7 +31,9 @@ const HIT_TOLERANCE_SCREEN_PIXELS = 8;
 const LABEL_FONT_SCREEN_PIXELS = 12;
 
 const FILL_ALPHA = 0.15;
-const OFF_FRAME_ALPHA_MULTIPLIER = 0.25;
+// The opacity of items bound to other frames, unless the layer (or its
+// plugin, or its saved document layer) says otherwise. See offFrameOpacity.
+export const DEFAULT_OFF_FRAME_OPACITY = 0.25;
 const HOVER_STROKE_MULTIPLIER = 1.75;
 const ACTIVE_VERTEX_SIZE_MULTIPLIER = 1.4;
 
@@ -60,9 +62,38 @@ export class CoordinatesLayer extends Layer {
     // integer-coordinate convention names — this is a live per-layer toggle,
     // not an undoable command, and never locks (unlike that document setting).
     this.allowFractionalCoordinates = documentLayer.allowFractionalCoordinates ?? false;
+    // The opacity of items bound to other frames, from 0 to 1, independent of
+    // `opacity`, which is the current frame's (and frame-agnostic items').
+    // An item at zero opacity is not drawn and cannot be clicked, hovered or
+    // picked with s. A plugin may change the default before the document has
+    // saved a value (the court keypoints plugin uses 0).
+    this.offFrameOpacity = documentLayer.offFrameOpacity ?? DEFAULT_OFF_FRAME_OPACITY;
   }
 
   get isEditable() { return true; }
+
+  setOffFrameOpacity(opacity) {
+    this.offFrameOpacity = Math.min(1, Math.max(0, opacity));
+    this.dispatchEvent(new CustomEvent('layer-changed'));
+  }
+
+  /** An item's opacity: `opacity` on the current frame (or frame-agnostic),
+      `offFrameOpacity` on any other. */
+  opacityForItem(item, frame) {
+    return item.frame === null || item.frame === frame ? this.opacity : this.offFrameOpacity;
+  }
+
+  /** Whether an item is drawn at all, i.e. its opacity is above zero. Items
+      that aren't drawn are never hit-tested or picked. */
+  isItemShown(item, frame) {
+    return this.opacityForItem(item, frame) > 0;
+  }
+
+  /** Other frames' items may still show while the current frame's opacity is
+      zero, so the viewer must not skip this layer on `opacity` alone. */
+  get hasVisibleContent() {
+    return this.opacity > 0 || this.offFrameOpacity > 0;
+  }
 
   setAllowFractionalCoordinates(value) {
     this.allowFractionalCoordinates = value;
@@ -90,27 +121,27 @@ export class CoordinatesLayer extends Layer {
   // units are stretched on screen (an anamorphic video's pixels are not
   // square), and lets every size below be a plain on-screen pixel count.
   draw(context, renderState) {
+    // Each item sets its own opacity (opacityForItem) rather than inheriting
+    // the layer opacity the viewer put on the context.
     const baseAlpha = context.globalAlpha;
     renderState.drawInStagePixels(() => {
       for (const item of this.items) {
-        if (item.vertices.length === 0) continue;
+        if (item.vertices.length === 0 || !this.isItemShown(item, renderState.frame)) continue;
         const stageVertices = item.vertices.map(
           ([x, y]) => renderState.stageFromLocal({ x, y }));
-        if (item.kind === 'point') this.#drawPoint(context, renderState, item, stageVertices[0], baseAlpha);
-        else this.#drawPath(context, renderState, item, stageVertices, baseAlpha);
+        const itemAlpha = this.opacityForItem(item, renderState.frame);
+        if (item.kind === 'point') this.#drawPoint(context, renderState, item, stageVertices[0], itemAlpha);
+        else this.#drawPath(context, renderState, item, stageVertices, itemAlpha);
       }
     });
     context.globalAlpha = baseAlpha;
   }
 
-  #drawPoint(context, renderState, item, { x, y }, baseAlpha) {
+  #drawPoint(context, renderState, item, { x, y }, itemAlpha) {
     const radius = POINT_RADIUS_SCREEN_PIXELS;
-    // A frame-agnostic item (frame === null) applies to every frame, so it
-    // always draws at full strength rather than the dimmed off-frame alpha.
-    const onCurrentFrame = item.frame === null || item.frame === renderState.frame;
     const color = colorForItem(item, renderState);
 
-    context.globalAlpha = onCurrentFrame ? baseAlpha : baseAlpha * OFF_FRAME_ALPHA_MULTIPLIER;
+    context.globalAlpha = itemAlpha;
 
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
@@ -145,11 +176,9 @@ export class CoordinatesLayer extends Layer {
     }
   }
 
-  #drawPath(context, renderState, item, stageVertices, baseAlpha) {
+  #drawPath(context, renderState, item, stageVertices, itemAlpha) {
     const strokeWidth = STROKE_WIDTH_SCREEN_PIXELS;
     const handleSize = VERTEX_HANDLE_SCREEN_PIXELS;
-    const isCurrentFrame = item.frame === null || item.frame === renderState.frame;
-    const frameAlpha = isCurrentFrame ? 1 : OFF_FRAME_ALPHA_MULTIPLIER;
     const color = colorForItem(item, renderState);
     const isSelected = matchesItem(renderState.selection, this.id, item.id);
     const isHovered = matchesItem(renderState.hover, this.id, item.id);
@@ -167,22 +196,22 @@ export class CoordinatesLayer extends Layer {
     if (closed) context.closePath();
 
     if (closed) {
-      context.globalAlpha = baseAlpha * frameAlpha * FILL_ALPHA;
+      context.globalAlpha = itemAlpha * FILL_ALPHA;
       context.fillStyle = color;
       context.fill();
     }
 
-    context.globalAlpha = baseAlpha * frameAlpha;
+    context.globalAlpha = itemAlpha;
     context.strokeStyle = color;
     context.lineWidth = isHovered ? strokeWidth * HOVER_STROKE_MULTIPLIER : strokeWidth;
     context.stroke();
 
     if (isSelected) {
-      this.#drawVertexHandles(context, stageVertices, renderState, handleSize, strokeWidth, color, baseAlpha);
+      this.#drawVertexHandles(context, stageVertices, renderState, handleSize, strokeWidth, color, itemAlpha);
     }
 
     if (item.name) {
-      context.globalAlpha = baseAlpha * frameAlpha;
+      context.globalAlpha = itemAlpha;
       context.fillStyle = color;
       context.font = `${LABEL_FONT_SCREEN_PIXELS}px system-ui, -apple-system, sans-serif`;
       context.textBaseline = 'bottom';
@@ -192,9 +221,9 @@ export class CoordinatesLayer extends Layer {
     context.restore();
   }
 
-  #drawVertexHandles(context, stageVertices, renderState, handleSize, strokeWidth, color, baseAlpha) {
+  #drawVertexHandles(context, stageVertices, renderState, handleSize, strokeWidth, color, itemAlpha) {
     const activeVertexIndex = renderState.selection?.vertexIndex ?? null;
-    context.globalAlpha = baseAlpha;
+    context.globalAlpha = itemAlpha;
     context.lineWidth = strokeWidth * 0.75;
     for (let index = 0; index < stageVertices.length; index++) {
       const { x, y } = stageVertices[index];
@@ -233,10 +262,12 @@ export class CoordinatesLayer extends Layer {
     const stageVertex = ([x, y]) => renderState.stageFromLocal({ x, y });
 
     // Prefer current-frame items over off-frame ones, and within each group
-    // prefer topmost-drawn (later items sit visually on top).
+    // prefer topmost-drawn (later items sit visually on top). Items that
+    // aren't drawn at all can't be hit.
     const currentFrameItems = [];
     const offFrameItems = [];
     for (const item of this.items) {
+      if (!this.isItemShown(item, renderState.frame)) continue;
       const onCurrentFrame = item.frame === null || item.frame === renderState.frame;
       (onCurrentFrame ? currentFrameItems : offFrameItems).push(item);
     }

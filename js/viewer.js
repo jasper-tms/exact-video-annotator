@@ -292,7 +292,7 @@ export class Viewer extends EventTarget {
       layer.isMedia ? reversedMediaLayers[nextReversedMedia++] : layer);
 
     for (const layer of paintOrder) {
-      if (!layer.visible || layer.opacity === 0) continue;
+      if (!layer.visible || !layer.hasVisibleContent) continue;
       const layerTransform = this.stageTransformForLayer(layer);
       context.save();
       context.globalAlpha = layer.opacity;

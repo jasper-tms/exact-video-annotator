@@ -283,6 +283,56 @@ try {
   check(await readSelection() === null, 'clicking empty canvas with the pan tool deselects');
   await page.keyboard.press('2');
 
+  // ---- Items drawn at zero strength can't be clicked or picked with s ----
+  const setCoordinatesLayerOpacities = (opacities) => page.evaluate(({ opacity, offFrameOpacity }) => {
+    const layer = window.exactVideoAnnotator.findAnnotationLayerForType('coordinates');
+    if (opacity !== undefined) layer.setOpacity(opacity);
+    if (offFrameOpacity !== undefined) layer.setOffFrameOpacity(offFrameOpacity);
+  }, opacities);
+  await page.keyboard.press('ArrowRight');   // the point is now on another frame
+  await page.mouse.click(stageCenterX, stageCenterY);
+  check((await readSelection())?.itemId === pointFacts.item.id,
+        "another frame's point, drawn dimmed, can still be clicked");
+  await page.keyboard.press('Escape');
+  await page.mouse.move(stageCenterX + 8, stageCenterY - 5);
+  await page.keyboard.press('s');
+  check((await readSelection())?.itemId === pointFacts.item.id,
+        "s picks another frame's point when this frame has nothing in range");
+  // A point on this frame 20 pixels away: with the cursor halfway between it
+  // and the other frame's point, this frame's point wins rather than tying.
+  await page.mouse.dblclick(stageCenterX + 20, stageCenterY);
+  const currentFramePointId = await page.evaluate(() => window.exactVideoAnnotator.selection?.itemId);
+  await page.mouse.move(stageCenterX + 10, stageCenterY);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('s');
+  check((await readSelection())?.itemId === currentFramePointId
+        && currentFramePointId !== pointFacts.item.id,
+        "s prefers this frame's point over an equally near point on another frame");
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+  await page.keyboard.press('Escape');
+  await setCoordinatesLayerOpacities({ offFrameOpacity: 0 });
+  await page.mouse.click(stageCenterX, stageCenterY);
+  check(await readSelection() === null,
+        "another frame's point can't be clicked once other frames are at 0%");
+  const savedOffFrameOpacity = await page.evaluate(() => window.exactVideoAnnotator
+    .annotationDocument.layers.find((layer) => layer.type === 'coordinates').offFrameOpacity);
+  check(savedOffFrameOpacity === 0, "the layer's other-frames opacity is saved in the document");
+  await setCoordinatesLayerOpacities({ offFrameOpacity: 0.25 });
+  await page.keyboard.press('ArrowLeft');    // back to the point's own frame
+  await setCoordinatesLayerOpacities({ opacity: 0 });
+  await page.mouse.click(stageCenterX, stageCenterY);
+  check(await readSelection() === null, "a point on a 0%-opacity layer can't be clicked");
+  await page.mouse.move(stageCenterX + 8, stageCenterY - 5);
+  await page.keyboard.press('s');
+  check(await readSelection() === null, "s doesn't pick a point on a 0%-opacity layer");
+  await page.keyboard.press('ArrowRight');
+  await page.mouse.click(stageCenterX, stageCenterY);
+  check((await readSelection())?.itemId === pointFacts.item.id,
+        "another frame's point stays clickable when only the current frame's opacity is 0%");
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowLeft');
+  await setCoordinatesLayerOpacities({ opacity: 1 });
+
   // ---- Event hotkey (create an event type, press its key) ----
   await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
