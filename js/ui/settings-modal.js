@@ -569,10 +569,16 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   closeButton.addEventListener('click', () => dialogElement.close());
   dialogElement.appendChild(closeButton);
 
-  // A click that lands on the dialog element itself (rather than one of its
-  // children) is a click on the backdrop area outside the panel's content box.
+  // A click on the backdrop closes the panel. The backdrop reports the dialog
+  // element as its target, but so does a click on the panel's own padding or
+  // on a child's margin (such as the empty strip left of Close), so only a
+  // click outside the panel's rectangle counts.
   dialogElement.addEventListener('click', (event) => {
-    if (event.target === dialogElement) dialogElement.close();
+    if (event.target !== dialogElement) return;
+    const panel = dialogElement.getBoundingClientRect();
+    const outsidePanel = event.clientX < panel.left || event.clientX > panel.right
+      || event.clientY < panel.top || event.clientY > panel.bottom;
+    if (outsidePanel) dialogElement.close();
   });
 
   document.body.appendChild(dialogElement);
