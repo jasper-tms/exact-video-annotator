@@ -1236,8 +1236,52 @@ const stageCanvas = document.getElementById('stage-canvas');
 const stageContainer = document.getElementById('stage-container');
 const videoHost = document.getElementById('video-host');
 const dropHint = document.getElementById('drop-hint');
+const dropHintContent = document.getElementById('drop-hint-content');
 const indexingStatus = document.getElementById('indexing-status');
 const hoveredPixelLabel = document.getElementById('hovered-pixel-label');
+
+// The drop hint is shown at its largest font size unless that would take up
+// more than these fractions of the canvas's width or height, in which case
+// it shrinks just enough to fit. Less of the height, so a short, wide canvas
+// still leaves room above and below it; phones get more of both, having so
+// little room to begin with.
+const DROP_HINT_LARGEST_FONT_SIZE_PIXELS = 30;
+const DROP_HINT_LARGEST_CANVAS_WIDTH_FRACTION = 0.75;
+const DROP_HINT_LARGEST_CANVAS_HEIGHT_FRACTION = 0.6;
+const DROP_HINT_LARGEST_CANVAS_FRACTION_ON_TOUCH_DEVICES = 0.9;
+const touchDeviceQuery = window.matchMedia('(hover: none) and (pointer: coarse)');
+
+// Shrinking in proportion to the overflow lands close but not exactly on
+// target: system fonts set small text slightly wider for its size than large
+// text. A few more measured corrections settle it.
+const DROP_HINT_FITTING_PASSES = 4;
+
+/** Size the drop hint to the canvas. Everything in it scales with its font
+    size (see #drop-hint-content in style.css), so measuring it at the
+    largest size says roughly how far it has to shrink. Sized to the whole
+    canvas, not just the part the sliding panel leaves in view, so raising
+    the panel moves the hint without resizing it. */
+function fitDropHintToStage() {
+  const onTouchDevice = touchDeviceQuery.matches;
+  const largestWidth = stageContainer.clientWidth * (onTouchDevice
+    ? DROP_HINT_LARGEST_CANVAS_FRACTION_ON_TOUCH_DEVICES : DROP_HINT_LARGEST_CANVAS_WIDTH_FRACTION);
+  const largestHeight = stageContainer.clientHeight * (onTouchDevice
+    ? DROP_HINT_LARGEST_CANVAS_FRACTION_ON_TOUCH_DEVICES : DROP_HINT_LARGEST_CANVAS_HEIGHT_FRACTION);
+  let fontSize = DROP_HINT_LARGEST_FONT_SIZE_PIXELS;
+  for (let pass = 0; pass < DROP_HINT_FITTING_PASSES; pass++) {
+    dropHintContent.style.fontSize = `${fontSize}px`;
+    const contentWidth = dropHintContent.offsetWidth;
+    const contentHeight = dropHintContent.offsetHeight;
+    if (contentWidth === 0 || contentHeight === 0) return;   // hidden
+    const shrinkFactor = Math.min(largestWidth / contentWidth, largestHeight / contentHeight);
+    if (shrinkFactor >= 1) return;
+    fontSize *= shrinkFactor;
+  }
+  dropHintContent.style.fontSize = `${fontSize}px`;
+}
+new ResizeObserver(fitDropHintToStage).observe(stageContainer);
+touchDeviceQuery.addEventListener('change', fitDropHintToStage);
+document.fonts.ready.then(fitDropHintToStage);
 
 app.viewer = new Viewer(stageCanvas);
 
@@ -1245,6 +1289,8 @@ app.viewer = new Viewer(stageCanvas);
     not of whatever media layer happens to be loaded, so it shows regardless
     of whether a video is open. Cleared on pointerleave, below. */
 function updateHoveredPixelLabel(worldPoint) {
+  // Before any media is open there are no pixels to point at.
+  if (app.mediaLayers.length === 0) { hoveredPixelLabel.textContent = ''; return; }
   const pixelX = Math.floor(worldPoint.x);
   const pixelY = Math.floor(worldPoint.y);
   hoveredPixelLabel.textContent = `x=${pixelX}, y=${pixelY}`;
@@ -1476,10 +1522,18 @@ app.setActiveTool('pan');
 /* ---------- Video loading ---------- */
 
 /** Whether the drop hint invites a first piece of media: shown only while
-    nothing — no video and no image — is open. */
+    nothing — no video and no image — is open. Panning and zooming, and the
+    hovered pixel readout, are off for that same stretch, as there is
+    nothing yet to look around in. */
 function updateDropHint() {
-  dropHint.classList.toggle('hidden', app.mediaLayers.length > 0);
+  const anyMediaOpen = app.mediaLayers.length > 0;
+  dropHint.classList.toggle('hidden', anyMediaOpen);
+  // Hidden, it could not be measured when the canvas last changed size.
+  if (!anyMediaOpen) fitDropHintToStage();
+  app.viewer.navigationEnabled = anyMediaOpen;
+  if (!anyMediaOpen) hoveredPixelLabel.textContent = '';
 }
+updateDropHint();
 
 /* ---------- Media loading: shared across video and image ----------
 
@@ -2370,8 +2424,9 @@ const layerTabsContainer = document.getElementById('layer-tabs-container');
 function reflectSlidingPanelHeaderHeight() {
   const headerHeight = layerTabsContainer.getBoundingClientRect().bottom
     - transportContainer.getBoundingClientRect().top;
-  document.getElementById('viewport-section').style.setProperty(
-    '--sliding-panel-header-height', `${headerHeight}px`);
+  const viewportSection = document.getElementById('viewport-section');
+  viewportSection.style.setProperty('--sliding-panel-header-height', `${headerHeight}px`);
+  viewportSection.classList.add('sliding-panel-header-measured');
 }
 const slidingPanelHeaderObserver = new ResizeObserver(reflectSlidingPanelHeaderHeight);
 slidingPanelHeaderObserver.observe(transportContainer);
@@ -2523,8 +2578,22 @@ window.addEventListener('resize', reflectScrollToggle);
 window.visualViewport?.addEventListener('resize', reflectScrollToggle);
 reflectScrollToggle();
 
+// The drop hint stays centered on whatever part of the canvas the panel has
+// not slid up over (see #drop-hint in style.css).
+function reflectStageCoveredByPanel() {
+  const coveredHeight = Math.max(0,
+    stageContainer.getBoundingClientRect().bottom - slidingPanel.getBoundingClientRect().top);
+  stageContainer.style.setProperty('--stage-covered-by-panel-height', `${coveredHeight}px`);
+}
+window.addEventListener('scroll', reflectStageCoveredByPanel, { passive: true });
+window.addEventListener('resize', reflectStageCoveredByPanel);
+window.visualViewport?.addEventListener('resize', reflectStageCoveredByPanel);
+reflectStageCoveredByPanel();
+
 const mediaFileInput = document.getElementById('media-file-input');
 document.getElementById('open-media-button').addEventListener('click', () => mediaFileInput.click());
+document.getElementById('drop-hint-open-media-button')
+  .addEventListener('click', () => mediaFileInput.click());
 mediaFileInput.addEventListener('change', () => {
   const file = mediaFileInput.files?.[0];
   if (file) {

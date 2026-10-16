@@ -52,6 +52,10 @@ export class Viewer extends EventTarget {
     this.toolDelegate = null;
     // Optional painter drawn above all layers, in world coordinates.
     this.overlayPainter = null;
+    // Whether the user can pan and zoom (wheel, pinch, middle-drag, tool
+    // drags on empty space). Turned off by main.js while no media is open,
+    // when there is nothing to look around in.
+    this.navigationEnabled = true;
 
     this.#needsRender = true;
     this.#activePan = null;
@@ -355,7 +359,7 @@ export class Viewer extends EventTarget {
     const canvas = this.stageCanvas;
 
     canvas.addEventListener('pointerdown', (event) => {
-      if (event.pointerType === 'touch') {
+      if (event.pointerType === 'touch' && this.navigationEnabled) {
         this.#touchStagePoints.set(event.pointerId, this.stagePointFromPointerEvent(event));
         if (this.#touchStagePoints.size === 2 && !this.#touchGesture) this.#beginTouchGesture(event);
         if (this.#touchGesture) {
@@ -407,6 +411,13 @@ export class Viewer extends EventTarget {
     canvas.addEventListener('pointercancel', endPointer);
 
     canvas.addEventListener('wheel', (event) => {
+      // With navigation off, a plain wheel scrolls the page (moving the
+      // sliding panel) as it would anywhere else, but a trackpad pinch still
+      // must not zoom the whole browser page.
+      if (!this.navigationEnabled) {
+        if (event.ctrlKey) event.preventDefault();
+        return;
+      }
       event.preventDefault();
       // Trackpad pinch arrives as wheel with ctrlKey; both gestures zoom.
       const zoomFactor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.002));
@@ -426,6 +437,7 @@ export class Viewer extends EventTarget {
   /** Start panning with the given pointer (used for middle-drag here, and by
       tools for left-drags that start on empty space). */
   beginPanFromPointerEvent(event) {
+    if (!this.navigationEnabled) return;
     this.#activePan = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
     this.stageCanvas.setPointerCapture(event.pointerId);
   }

@@ -904,19 +904,53 @@ button:focus:not(:focus-visible) { outline: none; }
   /* Centered as if a mobile browser's bottom bar were showing, so the hint
      holds still while the stage grows and shrinks with that bar (see
      js/ui/first-screen-fit.js): leave out whatever part of the first screen
-     reaches below the small viewport height. Zero on desktop. */
-  bottom: max(0px, calc(var(--first-screen-bottom, 100svh) - 100svh));
+     reaches below the small viewport height. Zero on desktop. Once the
+     sliding panel is raised over the canvas, leave out the part it covers
+     instead (--stage-covered-by-panel-height is set by js/main.js), so the
+     hint stays centered on the canvas that is still in view. */
+  bottom: max(0px, calc(var(--first-screen-bottom, 100svh) - 100svh),
+              var(--stage-covered-by-panel-height, 0px));
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* Safe, so that with the panel nearly covering the canvas the hint sticks
+     to the top of the canvas rather than spilling up past it. */
+  justify-content: safe center;
   color: var(--text-dim);
   text-align: center;
   pointer-events: none;
 }
 
+/* Every length in here is in em and no line wraps, so the whole hint scales
+   in proportion to its font size, which js/main.js sets (see
+   fitDropHintToStage). */
+#drop-hint-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1em;
+  width: max-content;
+  white-space: nowrap;
+}
+#drop-hint-content p { margin: 0; }
+
+/* Does what the toolbar's Open Media button does. The one part of the hint
+   that takes clicks; sized in em to scale with the rest of it. */
+#drop-hint-open-media-button {
+  pointer-events: auto;
+  font-size: 1em;
+  padding: 0.35em 0.45em;
+  margin-left: 0.15em;
+  border-radius: 0.3em;
+}
+
+/* Until js/main.js has measured the transport and layer tabs, the canvas
+   still extends down behind where they will be, so the hint would show
+   lower down and then jump up once they appear. */
+#viewport-section:not(.sliding-panel-header-measured) #drop-hint { visibility: hidden; }
+
 #drop-hint.hidden { display: none; }
-.drop-hint-details { font-size: 12px; max-width: 500px; padding: 0 16px; }
+.drop-hint-details { font-size: 0.85em; }
 
 .drop-hint-for-touch { display: none; }
 @media (hover: none) and (pointer: coarse) {
