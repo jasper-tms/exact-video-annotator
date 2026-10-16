@@ -327,7 +327,7 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
 `classId` and `name` on items are both optional (`null`). `metadata` is an
 item's own key-value pairs (`{ key: text | number | true/false }`, `{}` when
 missing): plugins keep structured labels there (the court plugin's
-`{ keypoint: '+-', table: 2 }`), and people can view and edit them in the
+`{ keypoint: '+-', court: 2 }`), and people can view and edit them in the
 annotations table (its ✎ button). Colors are CSS color
 strings. A new document starts with one Coordinates layer and one Frames
 layer (Segmentation is opt-in from the ＋ menu, since it's not usable yet).
@@ -503,6 +503,11 @@ app events; they never poll.
   deletes the event overlapping the current frame).
 
 ## Plugins
+
+(For people writing their own plugin, the guide is the
+`building-video-examiner-plugins` skill in `agent-skills/`, published as the
+wiki's "Building plugins" page by `publish-plugin-guide-to-wiki.sh`, which the
+Settings "Instructions" link opens. This section is the internal reference.)
 
 A plugin is an annotation layer type with extra annotation logic baked in. It
 is added from the tab bar's ＋ menu under **Plugins ›**, appears as its own

@@ -243,6 +243,18 @@ button:focus:not(:focus-visible) { outline: none; }
   color: var(--text-dim);
 }
 
+/* A note beside a section heading, such as the Plugins instructions link, in
+   ordinary case rather than the heading's capitals. */
+.settings-section-heading-aside {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: normal;
+}
+
+.settings-section-heading-aside a {
+  color: var(--accent);
+}
+
 .settings-section-hint {
   margin: 0 0 10px;
   font-size: 12px;

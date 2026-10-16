@@ -174,17 +174,26 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   pluginsSection.className = 'settings-section';
   pluginsSection.id = 'settings-plugins-section';
 
+  // The heading links to the wiki's guide to building, publishing and adding
+  // plugins (the same text as the building-video-examiner-plugins skill).
   const pluginsHeading = document.createElement('h3');
   pluginsHeading.className = 'settings-section-heading';
-  pluginsHeading.textContent = 'Plugins';
+  const pluginsInstructions = document.createElement('span');
+  pluginsInstructions.className = 'settings-section-heading-aside';
+  const pluginsInstructionsLink = document.createElement('a');
+  pluginsInstructionsLink.href =
+    'https://github.com/jasper-tms/exact-video-annotator/wiki/Building-plugins';
+  pluginsInstructionsLink.target = '_blank';
+  pluginsInstructionsLink.rel = 'noopener';
+  pluginsInstructionsLink.textContent = 'Instructions';
+  pluginsInstructions.append('(see ', pluginsInstructionsLink, ')');
+  pluginsHeading.append('Plugins ', pluginsInstructions);
   pluginsSection.appendChild(pluginsHeading);
 
   const pluginsHint = document.createElement('p');
   pluginsHint.className = 'settings-section-hint';
   pluginsHint.textContent =
-    'Add a plugin by the URL of its folder (the one holding plugin.json). '
-    + 'Plugins in this list load whenever the app starts, and the list is saved to '
-    + 'your account.';
+    'Plugins in this list load whenever the app starts, and the list is saved to your account.';
   pluginsSection.appendChild(pluginsHint);
 
   // Shown while the list holds private-repository plugins but there is no live
