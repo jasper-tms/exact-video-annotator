@@ -156,9 +156,31 @@ try {
         && Number.isFinite(pointFacts.item.vertices[0][1]),
         'point has one finite source-pixel vertex');
 
-  // ---- Drag the point with the same tool (there is no separate select tool) ----
+  // ---- The press that selects a point never drags it ----
   const stageCenterX = stageBox.x + stageBox.width / 2;
   const stageCenterY = stageBox.y + stageBox.height / 2;
+  await page.mouse.click(stageBox.x + 10, stageBox.y + 10);
+  const deselected = await page.evaluate(() => window.exactVideoAnnotator.selection === null);
+  check(deselected, 'clicking empty space deselects the new point');
+  await page.mouse.move(stageCenterX, stageCenterY);
+  await page.mouse.down();
+  await page.mouse.move(stageCenterX + 40, stageCenterY + 25, { steps: 5 });
+  await page.mouse.up();
+  const selectingPressFacts = await page.evaluate(() => {
+    const application = window.exactVideoAnnotator;
+    const coordinatesLayer =
+      application.annotationDocument.layers.find((layer) => layer.type === 'coordinates');
+    const point = coordinatesLayer.items.find((item) => item.kind === 'point');
+    return { vertex: [...point.vertices[0]], selectedItemId: application.selection?.itemId ?? null };
+  });
+  check(selectingPressFacts.selectedItemId === pointFacts.item.id,
+        'pressing an unselected point selects it');
+  check(selectingPressFacts.vertex[0] === pointFacts.item.vertices[0][0]
+        && selectingPressFacts.vertex[1] === pointFacts.item.vertices[0][1],
+        'dragging on the press that selects a point does not move it');
+
+  // ---- Drag the now-selected point with the same tool (there is no
+  // separate select tool) ----
   await page.mouse.move(stageCenterX, stageCenterY);
   await page.mouse.down();
   await page.mouse.move(stageCenterX + 40, stageCenterY + 25, { steps: 5 });

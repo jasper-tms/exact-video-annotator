@@ -1,8 +1,10 @@
 // Shared "grab what's already there" behavior for the pan, point, line, and
 // polyline tools — there is no separate select tool; each of them selects,
-// drags, and edits existing annotations. Pressing an existing item selects it,
-// dragging moves the whole item or the grabbed vertex, and hovering highlights
-// what a press would grab. Drags mutate geometry live for preview (bypassing
+// drags, and edits existing annotations. Pressing an existing item selects it;
+// once it is selected, a later press-and-drag moves the whole item or the
+// grabbed vertex; and hovering highlights what a press would grab. The press
+// that selects an item never drags it, so a click that wobbles slightly
+// can't nudge an annotation by accident. Drags mutate geometry live for preview (bypassing
 // undo on purpose) and are committed as one undo command, built from
 // before/after snapshots, on pointer up. It is generic over every annotation
 // layer through the editing contract in ARCHITECTURE.md (hitTest +
@@ -25,14 +27,18 @@ export function hitTestLayer(app, layer, worldPoint) {
   });
 }
 
-/** Select the hit item and arm a drag on it (vertex drags move that vertex;
-    body/segment drags translate the whole item). */
+/** Select the hit item and, if it was already selected before this press, arm
+    a drag on it (vertex drags move that vertex; body/segment drags translate
+    the whole item). A press that newly selects an item only selects it. */
 export function beginDragOnExistingItem(app, layer, hitResult, worldPoint) {
+  const wasAlreadySelected = app.selection?.layerId === layer.id
+    && app.selection?.itemId === hitResult.itemId;
   app.setSelection({
     layerId: layer.id,
     itemId: hitResult.itemId,
     vertexIndex: hitResult.part === 'vertex' ? hitResult.vertexIndex : null,
   });
+  if (!wasAlreadySelected) return;
   dragState = {
     layer,
     itemId: hitResult.itemId,
