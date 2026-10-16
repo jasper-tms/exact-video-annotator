@@ -12,6 +12,7 @@
 // repo stays dependency-free.
 
 import { spawn, execSync } from 'node:child_process';
+import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -35,9 +36,48 @@ const applicationUrl = deployedUrl ?? `http://127.0.0.1:${port}/index.html`;
 // needs its own static server first.
 let server = null;
 if (!testingDeployedApp) {
+  // A server left over on the port (say, from another worktree) would make
+  // ours fail to start while the test quietly ran against whatever that one
+  // serves, so refuse to run instead.
+  if (await portIsAcceptingConnections(port)) {
+    console.error(`Port ${port} is already in use, so the smoke test cannot start its own `
+      + `server there. Find what is listening with: lsof -nP -iTCP:${port} -sTCP:LISTEN`);
+    process.exit(2);
+  }
   server = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'],
     { cwd: repositoryRoot, stdio: 'ignore' });
-  await new Promise((resolve) => setTimeout(resolve, 800));
+  // Stop the server however this process ends — a crash before the finally
+  // block below, Ctrl+C, or a kill from a timeout — so it never outlives the
+  // test.
+  process.on('exit', () => server.kill());
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(signal, () => process.exit(1));
+  }
+  await waitForServerToStart(server, port);
+}
+
+function portIsAcceptingConnections(portToCheck) {
+  return new Promise((resolve) => {
+    const socket = net.connect(portToCheck, '127.0.0.1');
+    socket.once('connect', () => { socket.destroy(); resolve(true); });
+    socket.once('error', () => resolve(false));
+  });
+}
+
+async function waitForServerToStart(serverProcess, portToCheck) {
+  let exitCode = null;
+  serverProcess.once('exit', (code) => { exitCode = code; });
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (exitCode !== null) {
+      console.error(`The local server exited (code ${exitCode}) before it started serving.`);
+      process.exit(2);
+    }
+    if (await portIsAcceptingConnections(portToCheck)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  console.error(`The local server did not start serving on port ${portToCheck} within 10 seconds.`);
+  process.exit(2);
 }
 
 const failures = [];
