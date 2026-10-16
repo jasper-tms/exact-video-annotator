@@ -14,7 +14,7 @@ import {
 } from '../sync/installed-plugins-preference.js';
 import {
   connectPrivateGitHub, installUrl, canonicalPluginUrl, hasSession, hadSession,
-  listRepositoryPlugins, parsePrivatePluginUrl, gitHubWebUrl,
+  listConnectedInstallations, listRepositoryPlugins, parsePrivatePluginUrl, gitHubWebUrl,
 } from '../plugins/private-github-loader.js';
 import { rememberedPluginName } from '../plugins/plugin-loader.js';
 import { pluginRegistryEvents } from '../plugins/registry.js';
@@ -201,10 +201,13 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   gitHubReconnectBanner.append(gitHubReconnectMessage, gitHubReconnectButton);
   pluginsSection.appendChild(gitHubReconnectBanner);
 
-  function reflectGitHubReconnectBanner() {
+  /** Show the reconnect banner while private plugins wait for a connection,
+      and the connect button while there is no connection and no banner. */
+  function reflectGitHubConnection() {
     const needsConnection = getInstalledPlugins().some((url) => parsePrivatePluginUrl(url))
       && !hasSession();
     gitHubReconnectBanner.hidden = !needsConnection;
+    privateGitHubRow.hidden = hasSession() || needsConnection;
     if (!needsConnection) return;
     gitHubReconnectMessage.textContent = hadSession()
       ? 'Your GitHub connection has expired. Reconnect to load your private plugins.'
@@ -224,13 +227,14 @@ export function initializeSettingsModal(app, triggerButtonElement) {
       const { installations } = await connectPrivateGitHub();
       app.dispatchEvent(new CustomEvent('plugin-sources-changed'));
       app.showToast('Connected to GitHub.');
+      renderPrivateGitHubPicker(installations);
       return installations;
     } catch (error) {
       app.showToast(error.message || 'GitHub connection failed.', { kind: 'warning' });
       return null;
     } finally {
       gitHubReconnectButton.disabled = false;
-      reflectGitHubReconnectBanner();
+      reflectGitHubConnection();
     }
   }
   app.reconnectGitHub = reconnectGitHub;
@@ -240,7 +244,7 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   pluginsSection.appendChild(pluginsList);
 
   function renderPluginsList() {
-    reflectGitHubReconnectBanner();
+    reflectGitHubConnection();
     pluginsList.replaceChildren();
     const urls = getInstalledPlugins();
     if (urls.length === 0) {
@@ -323,14 +327,16 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   pluginsAddRow.append(pluginUrlInput, pluginAddButton);
   pluginsSection.appendChild(pluginsAddRow);
 
-  /* ---- Add from a private GitHub repository ---- */
+  /* ---- Plugins from private GitHub repositories ---- */
 
   // Loads plugins from the user's PRIVATE repos via the "Video Examiner" GitHub
   // App (see the github-app-integration-for-private-plugin-access skill).
-  // Connecting opens a GitHub popup; each repository it comes back with gets a
-  // dropdown of the plugins found in it (at its top level or one folder down)
-  // and an "Add" that stores the chosen plugin's canonical tokenless
-  // plugins.examine.video URL in the list above.
+  // While the GitHub connection is live, every opening of Settings lists the
+  // repositories it can read (fetched with the stored token, no popup), each
+  // with a dropdown of the plugins found in it (at its top level or one folder
+  // down) and an "Add" that stores the chosen plugin's canonical tokenless
+  // plugins.examine.video URL in the list above. Without a live connection the
+  // button below (or the reconnect banner) runs the GitHub popup first.
   const privateGitHubRow = document.createElement('div');
   privateGitHubRow.className = 'plugins-github-row';
   const privateGitHubButton = document.createElement('button');
@@ -347,14 +353,34 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   privateGitHubPicker.hidden = true;
   pluginsSection.appendChild(privateGitHubPicker);
 
+  // Each listed repository's dropdown and Add button, so they can follow the
+  // plugins list as plugins are added and removed.
+  let repositoryPickers = [];
+
   function pluginOptionLabel(plugin) {
     const place = plugin.folder ? `${plugin.folder}/` : 'whole repository';
     return plugin.name ? `${plugin.name} (${place})` : place;
   }
 
+  /** Grey out (and make unpickable) every dropdown entry already in the
+      plugins list, and bring back any that has left it. */
+  function reflectInstalledPluginsInPickers() {
+    const installed = new Set(getInstalledPlugins());
+    for (const { select, addButton } of repositoryPickers) {
+      const pluginOptions = [...select.options].filter((option) => option.value);
+      if (pluginOptions.length === 0) continue;   // still looking, or none found
+      for (const option of pluginOptions) {
+        option.disabled = installed.has(option.value);
+        option.textContent = option.dataset.label + (option.disabled ? ' — already added' : '');
+      }
+      const firstAvailable = pluginOptions.find((option) => !option.disabled);
+      if (select.selectedOptions[0]?.disabled && firstAvailable) select.value = firstAvailable.value;
+      addButton.disabled = !firstAvailable;
+    }
+  }
+
   /** Fill one repository's dropdown with the plugins found in it; "None" (and a
-      disabled Add) when there are none. Plugins already in the list are shown
-      but cannot be picked again. */
+      disabled Add) when there are none. */
   async function fillRepositoryPluginSelect(repository, select, addButton) {
     const setOnlyOption = (text) => {
       const option = document.createElement('option');
@@ -375,30 +401,23 @@ export function initializeSettingsModal(app, triggerButtonElement) {
     }
     if (plugins.length === 0) { setOnlyOption('None'); return; }
 
-    const installed = new Set(getInstalledPlugins());
     select.replaceChildren();
     for (const plugin of plugins) {
-      const url = canonicalPluginUrl({
+      const option = document.createElement('option');
+      option.value = canonicalPluginUrl({
         installationId: repository.installationId,
         owner: repository.owner,
         repo: repository.name,
         folder: plugin.folder,
       });
-      const option = document.createElement('option');
-      option.value = url;
       option.dataset.label = pluginOptionLabel(plugin);
-      const alreadyAdded = installed.has(url);
-      option.textContent = option.dataset.label + (alreadyAdded ? ' — already added' : '');
-      option.disabled = alreadyAdded;
       select.appendChild(option);
     }
-    const firstAvailable = [...select.options].find((option) => !option.disabled);
     select.disabled = false;
-    if (firstAvailable) select.value = firstAvailable.value;
-    addButton.disabled = !firstAvailable;
+    reflectInstalledPluginsInPickers();
   }
 
-  function addPrivatePlugin(repository, select, addButton) {
+  function addPrivatePlugin(repository, select) {
     const option = select.selectedOptions[0];
     if (!option || option.disabled || !option.value) return;
     if (!addInstalledPlugin(option.value)) {
@@ -406,15 +425,11 @@ export function initializeSettingsModal(app, triggerButtonElement) {
       return;
     }
     app.showToast(`Added ${option.dataset.label} from ${repository.fullName}.`);
-    option.textContent = `${option.dataset.label} — already added`;
-    option.disabled = true;
-    const nextAvailable = [...select.options].find((candidate) => !candidate.disabled);
-    if (nextAvailable) select.value = nextAvailable.value;
-    addButton.disabled = !nextAvailable;
   }
 
   function renderPrivateGitHubPicker(installations) {
     privateGitHubPicker.replaceChildren();
+    repositoryPickers = [];
 
     const repositories = [];
     for (const installation of installations) {
@@ -429,22 +444,22 @@ export function initializeSettingsModal(app, triggerButtonElement) {
       }
     }
 
+    const installLink = document.createElement('a');
+    installLink.className = 'plugins-github-install-link';
+    installLink.href = installUrl;
+    installLink.target = '_blank';
+    installLink.rel = 'noopener';
+
     if (repositories.length === 0) {
-      // Authorized, but the app isn't installed on any repositories yet. A
+      // Connected, but the app isn't installed on any repositories yet. A
       // window.open() here would be popup-blocked — this runs after an await, so
       // it has lost the button's user activation — so show a link the user
       // clicks (their click carries activation) instead of opening it for them.
       const message = document.createElement('p');
       message.className = 'settings-section-hint';
       message.textContent =
-        'Authorized, but Video Examiner has no repositories yet. Install it on '
-        + 'the repositories you want to load plugins from, then click '
-        + '“Add from private GitHub repository…” again.';
-      const installLink = document.createElement('a');
-      installLink.className = 'plugins-github-install-link';
-      installLink.href = installUrl;
-      installLink.target = '_blank';
-      installLink.rel = 'noopener';
+        'Connected, but Video Examiner has no repositories yet. Install it on '
+        + 'the repositories you want to load plugins from, then reopen Settings.';
       installLink.textContent = 'Install Video Examiner on GitHub →';
       privateGitHubPicker.append(message, installLink);
       privateGitHubPicker.hidden = false;
@@ -453,7 +468,8 @@ export function initializeSettingsModal(app, triggerButtonElement) {
 
     const pickerHint = document.createElement('p');
     pickerHint.className = 'settings-section-hint';
-    pickerHint.textContent = 'Repositories shared with Video Examiner. Pick a plugin in one to add it:';
+    pickerHint.textContent = 'Private GitHub repositories shared with Video Examiner. '
+      + 'Pick a plugin in one to add it:';
     privateGitHubPicker.appendChild(pickerHint);
 
     for (const repository of repositories) {
@@ -477,21 +493,42 @@ export function initializeSettingsModal(app, triggerButtonElement) {
       addButton.type = 'button';
       addButton.className = 'plugins-github-add';
       addButton.textContent = 'Add';
-      addButton.addEventListener('click', () => addPrivatePlugin(repository, pluginSelect, addButton));
+      addButton.addEventListener('click', () => addPrivatePlugin(repository, pluginSelect));
 
       repoRow.append(nameElement, pluginSelect, addButton);
       privateGitHubPicker.appendChild(repoRow);
+      repositoryPickers.push({ select: pluginSelect, addButton });
       fillRepositoryPluginSelect(repository, pluginSelect, addButton);
     }
 
-    const doneButton = document.createElement('button');
-    doneButton.type = 'button';
-    doneButton.className = 'plugins-github-done';
-    doneButton.textContent = 'Done';
-    doneButton.addEventListener('click', () => { privateGitHubPicker.hidden = true; });
-    privateGitHubPicker.appendChild(doneButton);
-
+    installLink.textContent = 'Share more repositories with Video Examiner on GitHub →';
+    privateGitHubPicker.appendChild(installLink);
     privateGitHubPicker.hidden = false;
+  }
+
+  /** List the live connection's repositories with the stored token (no popup).
+      Without a live connection, or if the Worker refuses the token, the picker
+      hides and the connect button or reconnect banner takes its place. */
+  async function showConnectedRepositories() {
+    reflectGitHubConnection();
+    if (!hasSession()) { privateGitHubPicker.hidden = true; return; }
+    if (privateGitHubPicker.hidden) {
+      const lookingMessage = document.createElement('p');
+      lookingMessage.className = 'settings-section-hint';
+      lookingMessage.textContent = 'Looking up your private GitHub repositories…';
+      privateGitHubPicker.replaceChildren(lookingMessage);
+      privateGitHubPicker.hidden = false;
+    }
+    try {
+      renderPrivateGitHubPicker(await listConnectedInstallations());
+    } catch (error) {
+      privateGitHubPicker.hidden = true;
+      if (hasSession()) {
+        app.showToast(`Could not list your GitHub repositories: ${error.message ?? error}`,
+          { kind: 'warning' });
+      }
+    }
+    reflectGitHubConnection();
   }
 
   privateGitHubButton.addEventListener('click', async () => {
@@ -508,16 +545,20 @@ export function initializeSettingsModal(app, triggerButtonElement) {
     } finally {
       privateGitHubButton.disabled = false;
       privateGitHubButton.textContent = originalText;
-      reflectGitHubReconnectBanner();
+      reflectGitHubConnection();
     }
   });
 
   dialogElement.appendChild(pluginsSection);
 
-  // Keep the list live: local edits and updates synced from another device both
-  // flow through the preference's subscribe.
+  // Keep the list (and the dropdowns' greyed-out entries) live: local edits and
+  // updates synced from another device both flow through the preference's
+  // subscribe.
   renderPluginsList();
-  subscribeInstalledPlugins(renderPluginsList);
+  subscribeInstalledPlugins(() => {
+    renderPluginsList();
+    reflectInstalledPluginsInPickers();
+  });
 
   /* ---- Close ---- */
 
@@ -542,6 +583,7 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   function openSettings({ flashPlugins } = {}) {
     secondMediaSelect.value = getSecondMediaBehavior();
     renderPluginsList();
+    showConnectedRepositories();
     if (!dialogElement.open) dialogElement.showModal();
     if (flashPlugins) {
       pluginsSection.classList.remove('settings-flash');

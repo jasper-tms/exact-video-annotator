@@ -14,6 +14,8 @@
 //   hasSession() / clearSession() -> session-token state (hasSession is false
 //                                    once the token has expired or the Worker
 //                                    refused it; hadSession says one existed)
+//   listConnectedInstallations()  -> the live session's installations+repos,
+//                                    without the popup
 //   listRepositoryPlugins(...)    -> the plugin folders in a shared repository
 //   parsePrivatePluginUrl(url)    -> a canonical URL's parts, or null
 //   gitHubWebUrl(...)             -> the repository folder's github.com address
@@ -153,6 +155,20 @@ export function authorizedPluginBaseUrl({ installationId, owner, repo, folder = 
  */
 export function canonicalPluginUrl({ installationId, owner, repo, folder = '' }) {
   return `${WORKER_BASE}/${pluginPath({ installationId, owner, repo, folder })}`;
+}
+
+/**
+ * The installations and repositories the live session can read, shaped as
+ * connectPrivateGitHub resolves them, fetched with the stored token (no
+ * popup). Requires a live session.
+ */
+export async function listConnectedInstallations() {
+  const token = getSessionToken();
+  if (!token) throw new Error('Not connected to GitHub.');
+  const response = await fetch(`${WORKER_BASE}/s/${encodeURIComponent(token)}/repositories`);
+  if (response.status === 401) markSessionRefused();
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()).installations ?? [];
 }
 
 /**

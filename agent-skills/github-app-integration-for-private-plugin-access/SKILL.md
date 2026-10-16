@@ -130,8 +130,10 @@ visit — is the planned v2 (see "Future: permanent authorization"), not built.
   (`connectPrivateGitHub()`, `authorizedPluginBaseUrl()`, `canonicalPluginUrl()`).
 - `js/ui/settings-modal.js` — the Settings modal's Plugins section, where the
   "Add from private GitHub repository…" button drives the helper: connect →
-  list the shared repos → store each chosen repo's canonical tokenless URL in
-  the installed-plugins list.
+  list the shared repos, each with a dropdown of the plugins in it → store the
+  chosen plugin's canonical tokenless URL in the installed-plugins list. While
+  the session token is live, opening Settings lists the repos again through the
+  Worker's `/s/<token>/repositories` route (installation tokens, no popup).
 - `js/plugins/plugin-loader.js` — fetches and runs a plugin from its folder URL
   (any public URL, or a canonical private one through a fresh `/s/<token>/`
   URL); `js/main.js` loads every installed URL at startup and retries private

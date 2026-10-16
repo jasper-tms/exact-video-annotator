@@ -19,6 +19,10 @@ in the `github-app-integration-for-private-plugin-access` agent skill.
   file's raw bytes with the right `Content-Type` + CORS so the browser can
   `import()` it. Relative imports keep the `/s/<token>/` prefix, so multi-file
   plugins resolve their siblings.
+- `GET /s/<sessionToken>/repositories` — lists the repositories of the
+  installations the session token grants (`{ installations: [{ id, account,
+  repositories }] }`, the callback's shape), so Settings can list them on
+  every visit without rerunning the OAuth popup.
 - `GET /s/<sessionToken>/plugins/<installationId>/<owner>/<repo>` — lists the
   plugins in the repository's default branch (a `plugin.json` at its top level
   or one folder down) as `{ plugins: [{ folder, id, name }] }`, for the

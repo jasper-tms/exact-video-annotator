@@ -19,7 +19,11 @@
 //      fetches the file, and returns its raw bytes with a correct Content-Type
 //      and CORS so the browser can import() it.
 //
-//   3. /s/<sessionToken>/plugins/<installationId>/<owner>/<repo>
+//   3. /s/<sessionToken>/repositories
+//      — lists the repositories of the installations the session token grants,
+//      so a later visit can list them without rerunning the OAuth popup.
+//
+//   4. /s/<sessionToken>/plugins/<installationId>/<owner>/<repo>
 //      — lists the plugins in a repository (a plugin.json at its top level or
 //      one folder down), as JSON, so the app can offer them in a dropdown. Same
 //      session-token check as the proxy.
@@ -158,7 +162,13 @@ async function handleProxy(request, url, env) {
 
   // /s/<sessionToken>/gh/<installationId>/<owner>/<repo>/<path...>
   // /s/<sessionToken>/plugins/<installationId>/<owner>/<repo>
+  // /s/<sessionToken>/repositories
   const parts = url.pathname.split('/').filter(Boolean); // drops empty segments
+  if (parts.length === 3 && parts[0] === 's' && parts[2] === 'repositories') {
+    const granted = await verifySessionToken(decodeURIComponent(parts[1]), env);
+    if (!granted) return withCors(request, env, new Response('Session expired', { status: 401 }));
+    return withCors(request, env, await listGrantedRepositories(granted, env));
+  }
   if (parts.length < 6 || parts[0] !== 's' || (parts[2] !== 'gh' && parts[2] !== 'plugins')) {
     return withCors(request, env, new Response('Bad plugin path', { status: 400 }));
   }
@@ -199,6 +209,38 @@ async function handleProxy(request, url, env) {
   headers.set('Content-Type', contentTypeFor(filePath));
   headers.set('Cache-Control', 'no-store');
   return withCors(request, env, new Response(bytes, { status: 200, headers }));
+}
+
+/** The repositories of each installation a session token grants, shaped like
+    the OAuth callback's installations, so the app can list them again on a
+    later visit without rerunning the GitHub popup. Each installation's own
+    repository list is no wider than what its session token can already read
+    through the proxy. Responds { installations: [{ id, account, repositories }] }. */
+async function listGrantedRepositories(installationIds, env) {
+  const installations = [];
+  for (const installationId of installationIds) {
+    const installationToken = await getInstallationToken(installationId, env);
+    const response = await fetch(`${GITHUB_API}/installation/repositories?per_page=100`, {
+      headers: {
+        'Authorization': `Bearer ${installationToken}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': USER_AGENT,
+      },
+    });
+    if (!response.ok) continue;   // e.g. uninstalled since connecting
+    const repositories = ((await response.json()).repositories || []).map((repository) => ({
+      full_name: repository.full_name,
+      owner: repository.owner ? repository.owner.login : null,
+      name: repository.name,
+      private: repository.private,
+      default_branch: repository.default_branch,
+    }));
+    installations.push({ id: installationId, account: repositories[0]?.owner ?? null, repositories });
+  }
+  return new Response(JSON.stringify({ installations }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
 }
 
 /** The plugins in a repository's default branch: a plugin.json at the top level

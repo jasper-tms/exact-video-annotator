@@ -598,8 +598,10 @@ Where plugins load from:
   remembered in `localStorage` so the question is asked once per URL.
 - **Private GitHub repositories**: canonical
   `https://plugins.examine.video/gh/…` folder URLs (added through Settings →
-  "Add from private GitHub repository…", which lists each shared repository's
-  plugins, at its top level or one folder down, in a dropdown; see the
+  "Add from private GitHub repository…", which connects; while connected,
+  every opening of Settings lists the shared repositories, fetched with the
+  stored token and no popup, each with a dropdown of its plugins at its top
+  level or one folder down, greying out those already in the list; see the
   `github-app-integration-for-private-plugin-access` skill) are fetched through
   a fresh session-token URL, and Settings shows them as their github.com
   folder. The session lasts 7 days. Without a live one (never connected here,
