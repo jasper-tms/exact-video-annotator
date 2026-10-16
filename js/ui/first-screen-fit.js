@@ -1,7 +1,7 @@
-// Sizes the first screenful (tool rail, canvas, transport, layer tabs) so its
-// bottom edge never hides under a mobile browser's bottom bar while the page
-// is scrolled to the top, without making the page jump around once the user
-// has scrolled down to the details below.
+// Sizes the first screenful (canvas, then the sliding panel's transport and
+// layer tabs) so its bottom edge never hides under a mobile browser's bottom
+// bar while the page is scrolled to the top, without making the page jump
+// around once the user has scrolled the panel up over the canvas.
 //
 // Mobile Chrome's bottom bar slides in and out as the user scrolls. The
 // "large" viewport height is the visible height with that bar hidden; the
@@ -12,7 +12,7 @@
 //     following the bar as it appears and disappears;
 //   - scrolled down past the bar's height, it is at its full (large) size and
 //     stays there, and the bar simply covers and uncovers a strip of the
-//     details section below;
+//     sliding panel;
 //   - in between, it keeps the layer tabs pinned just above the bar.
 // On a desktop browser the two heights are equal, so it is always the full
 // window height.

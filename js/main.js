@@ -2334,50 +2334,128 @@ function reflectAnnotationMode() {
 app.addEventListener('annotation-mode-changed', reflectAnnotationMode);
 reflectAnnotationMode();
 
-/* ---------- Scroll-to-details toggle (bottom of the tool rail) ---------- */
+/* ---------- Sliding panel toggle (bottom of the tool rail) ---------- */
 
+// The panel opens by scrolling the page (see #viewport-section in style.css),
+// so "open" just means scrolled down.
 const firstScreenFit = initializeFirstScreenFit(document.getElementById('viewport-section'));
+const slidingPanel = document.getElementById('sliding-panel');
 const scrollToggleButton = document.getElementById('scroll-toggle-button');
-// "Scrolled to the top" means only the first screen is in view, give or take
-// a few pixels. That is not the same as a scroll position of 0: on mobile,
-// the first screen stays pinned above the browser's bottom bar for a little
-// way down the page (see first-screen-fit.js).
+
+// The canvas fills whatever the panel's transport and layer tabs leave of
+// the first screen (see #stage-container in style.css).
+const transportContainer = document.getElementById('transport-container');
+const layerTabsContainer = document.getElementById('layer-tabs-container');
+function reflectSlidingPanelHeaderHeight() {
+  const headerHeight = layerTabsContainer.getBoundingClientRect().bottom
+    - transportContainer.getBoundingClientRect().top;
+  document.getElementById('viewport-section').style.setProperty(
+    '--sliding-panel-header-height', `${headerHeight}px`);
+}
+const slidingPanelHeaderObserver = new ResizeObserver(reflectSlidingPanelHeaderHeight);
+slidingPanelHeaderObserver.observe(transportContainer);
+slidingPanelHeaderObserver.observe(layerTabsContainer);
+
+// "Closed" means only the first screen is in view, give or take a few
+// pixels. That is not the same as a scroll position of 0: on mobile, the
+// first screen stays pinned above the browser's bottom bar for a little way
+// down the page (see first-screen-fit.js).
 const SCROLL_TOP_THRESHOLD_PIXELS = 4;
 
-function isScrolledToTop() {
+function isSlidingPanelClosed() {
   return firstScreenFit.pixelsScrolledPastFirstScreen() <= SCROLL_TOP_THRESHOLD_PIXELS;
 }
 
+/** The scroll position at which the panel covers the whole canvas, its top
+    edge just below the sticky toolbar. Aims for where the panel will be once
+    scrolling has grown the first screen to its full height (see
+    first-screen-fit.js), not where it is now. */
+function fullyOpenScrollTop() {
+  const toolbarHeight = document.getElementById('toolbar').offsetHeight;
+  return slidingPanel.getBoundingClientRect().top + window.scrollY
+    + firstScreenFit.pixelsLeftToGrow() - toolbarHeight;
+}
+
+// How far open the panel was (0 to 1 of the way to covering the whole
+// canvas) when the toggle last closed it, so the next press reopens it to the
+// same place. A fraction rather than pixels so it survives window resizes.
+// Null until the toggle has closed it once: then the panel opens to half the
+// window (see halfWindowScrollTop).
+let openFractionWhenLastClosed = null;
+
+// However little was remembered, the toggle opens the panel at least this
+// far: a bit more than the transport and layer tabs are tall together.
+const MINIMUM_TOGGLE_OPENING_PIXELS = 100;
+
+/** The scroll position at which the panel's top edge sits halfway down the
+    window. */
+function halfWindowScrollTop() {
+  const toolbarHeight = document.getElementById('toolbar').offsetHeight;
+  return Math.max(0, fullyOpenScrollTop() + toolbarHeight - window.innerHeight / 2);
+}
+
 function reflectScrollToggle() {
-  const atTop = isScrolledToTop();
-  // The arrow SVG points down by default; rotate it 180° to point up.
-  scrollToggleButton.classList.toggle('pointing-up', !atTop);
-  scrollToggleButton.title = atTop ? 'Scroll down to the details (0)' : 'Scroll back to the top (0)';
+  const closed = isSlidingPanelClosed();
+  // The arrow SVG points down by default; rotate it 180° to point up, the
+  // way the panel will move.
+  scrollToggleButton.classList.toggle('pointing-up', closed);
+  scrollToggleButton.title = closed ? 'Show the details panel (0)' : 'Hide the details panel (0)';
 }
 
 scrollToggleButton.addEventListener('click', () => {
-  if (isScrolledToTop()) {
-    // Reveal the details section, leaving it just below the sticky toolbar.
-    // Aim for where it will be once scrolling has grown the first screen to
-    // its full height (see first-screen-fit.js), not where it is now.
-    const details = document.getElementById('details-section');
-    const toolbarHeight = document.getElementById('toolbar').offsetHeight;
-    const target = details.getBoundingClientRect().top + window.scrollY
-      + firstScreenFit.pixelsLeftToGrow() - toolbarHeight;
-    window.scrollTo({ top: target, behavior: 'smooth' });
+  if (isSlidingPanelClosed()) {
+    const fullyOpen = fullyOpenScrollTop();
+    const target = openFractionWhenLastClosed === null
+      ? halfWindowScrollTop()
+      : openFractionWhenLastClosed * fullyOpen;
+    window.scrollTo({
+      top: Math.min(fullyOpen, Math.max(MINIMUM_TOGGLE_OPENING_PIXELS, target)),
+      behavior: 'smooth',
+    });
   } else {
+    openFractionWhenLastClosed = Math.min(1, window.scrollY / fullyOpenScrollTop());
     scrollToTop();
   }
 });
+
+// Dragging the empty part of the layer tab bar, or the transport's Frame/Time
+// readout, up or down moves the panel with the mouse, as scrolling does. Not
+// the scrubber, whose horizontal drag picks a frame. Touch is left alone: a
+// vertical swipe there already scrolls the page natively, with momentum.
+function makeSlidingPanelDragHandle(element, isHandle) {
+  let drag = null;
+  element.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'touch' || event.button !== 0 || !isHandle(event.target)) return;
+    event.preventDefault();
+    element.setPointerCapture(event.pointerId);
+    drag = { pointerId: event.pointerId, startY: event.clientY, startScrollTop: window.scrollY };
+  });
+  element.addEventListener('pointermove', (event) => {
+    if (drag?.pointerId !== event.pointerId) return;
+    window.scrollTo({ top: drag.startScrollTop - (event.clientY - drag.startY), behavior: 'instant' });
+  });
+  const endDrag = (event) => {
+    if (drag?.pointerId === event.pointerId) drag = null;
+  };
+  element.addEventListener('pointerup', endDrag);
+  element.addEventListener('pointercancel', endDrag);
+}
+// The bar itself and the strip's empty space past the last tab (when the
+// tabs overflow, the strip has no empty space and only the bar's own gaps are
+// left).
+makeSlidingPanelDragHandle(layerTabsContainer, (target) =>
+  target === layerTabsContainer || target.classList.contains('layer-tabs-strip'));
+makeSlidingPanelDragHandle(transportContainer, (target) =>
+  target.closest('.transport-readout') !== null && !target.closest('input'));
 
 // Below this distance from the top, scroll up in steps of our own (see
 // scrollToTop).
 const STEPPED_SCROLL_TO_TOP_MAXIMUM_PIXELS = 200;
 const STEPPED_SCROLL_TO_TOP_MILLISECONDS = 250;
 
-/** Smoothly scroll back to the top of the page. On iPhone (WebKit, in every
-    iPhone browser) with the browser's bars collapsed, a request to scroll
-    straight to 0 from within roughly a bar's height of the top is silently
+/** Smoothly scroll back to the top of the page, closing the sliding panel.
+    On iPhone (WebKit, in every iPhone browser) with the browser's bars
+    collapsed, a request to scroll straight to 0 from within roughly a bar's height of the top is silently
     ignored, smooth or instant, although small upward scrolls from there work
     and scrolling to 0 from further down works. So short distances are
     animated here as a series of instant small steps, ending 2 → 1 → 0: even

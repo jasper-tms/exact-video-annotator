@@ -2,8 +2,8 @@
 // selected in the tab bar — visibility, opacity, and scale/offset transform;
 // playback facts for the video layer. (Stack order is changed by dragging
 // tabs in the tab bar, and layers are deleted with the tab bar's ✕ button.)
-// This is deliberately below the fold: the wheel zooms over the canvas, and
-// scrolls the page down to here everywhere else.
+// This deliberately lives in the sliding panel below the canvas: the wheel zooms
+// over the canvas, and slides the panel up over it everywhere else.
 
 const ANNOTATION_LAYER_TYPES = new Set(['coordinates', 'segmentation', 'frames']);
 

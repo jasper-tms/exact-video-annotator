@@ -487,29 +487,42 @@ button:focus:not(:focus-visible) { outline: none; }
   gap: 8px;
 }
 
-/* ---------- First screenful: tool rail + canvas + transport + tabs ---------- */
+/* ---------- Tool rail + canvas, with the sliding panel below the canvas ---------- */
 
+/* Scrolling the page never moves the toolbar, rail or canvas: they are all
+   sticky, and the sliding panel (transport, layer tabs, details) is the only
+   thing that scrolls, up over the canvas. Both sticky elements' parents span
+   the whole page, so they stay stuck however far down it goes. */
 #viewport-section {
-  /* --first-screen-bottom is set by js/ui/first-screen-fit.js so that, on
-     mobile, the transport and layer tabs stay above the browser's bottom bar
-     while scrolled to the top; 100vh is only the value before it runs. */
-  height: calc(var(--first-screen-bottom, 100vh) - var(--toolbar-height));
   display: flex;
-  min-height: 0;
+  align-items: flex-start;
 }
 
 #canvas-column {
   flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
   min-width: 0;
-  min-height: 0;
+}
+
+#sliding-panel {
+  position: relative;
+  z-index: 1;   /* above the sticky stage */
+  background: var(--background);
+  /* Tall enough that the page can scroll until the panel covers the whole
+     canvas, however little the details hold. */
+  min-height: calc(100vh - var(--toolbar-height));
+  min-height: calc(100lvh - var(--toolbar-height));
 }
 
 /* ---------- Tool rail (Illustrator-style icon column) ---------- */
 
 #tool-rail {
   flex: 0 0 44px;
+  position: sticky;
+  top: var(--toolbar-height);
+  /* The visible height right now, so the panel toggle at its bottom stays
+     above a mobile browser's bottom bar whenever that bar shows. */
+  height: calc(100vh - var(--toolbar-height));
+  height: calc(100dvh - var(--toolbar-height));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -588,7 +601,7 @@ button:focus:not(:focus-visible) { outline: none; }
   color: #fff;
 }
 
-/* Pinned to the very bottom of the rail (the page-scroll toggle). */
+/* Pinned to the very bottom of the rail (the sliding panel toggle). */
 .rail-button-bottom {
   margin-top: auto;
 }
@@ -600,8 +613,8 @@ button:focus:not(:focus-visible) { outline: none; }
   opacity: 0.45;
 }
 
-/* The scroll toggle's arrow: large, thick-stroked, and flipped to point up
-   once the page has scrolled away from the top. */
+/* The panel toggle's arrow: large, thick-stroked, and flipped to point up
+   while the sliding panel is closed. */
 #scroll-toggle-button .scroll-arrow {
   display: block;
   transition: transform 0.15s ease;
@@ -622,6 +635,7 @@ button:focus:not(:focus-visible) { outline: none; }
 #layer-tabs-container {
   flex: 0 0 auto;
   display: flex;
+  cursor: ns-resize;   /* its empty space drags the sliding panel (js/main.js) */
   align-items: stretch;
   background: var(--surface);
   border-top: 1px solid var(--border);
@@ -783,7 +797,7 @@ button:focus:not(:focus-visible) { outline: none; }
   margin: 4px 0;
 }
 
-/* ---------- Below the fold: details sections ---------- */
+/* ---------- Details sections (bottom of the sliding panel) ---------- */
 
 #details-section {
   display: grid;
@@ -853,17 +867,17 @@ button:focus:not(:focus-visible) { outline: none; }
 
 /* ---------- Stage ---------- */
 
-#stage-section {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
 #stage-container {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
+  position: sticky;
+  top: var(--toolbar-height);
+  z-index: 0;
+  /* The rest of the first screen once the panel's transport and layer tabs
+     are below it. --first-screen-bottom is set by js/ui/first-screen-fit.js
+     so that, on mobile, those stay above the browser's bottom bar while the
+     panel is closed (100vh is only the value before it runs), and
+     --sliding-panel-header-height by js/main.js. */
+  height: calc(var(--first-screen-bottom, 100vh) - var(--toolbar-height)
+               - var(--sliding-panel-header-height, 0px));
   background: #101014;
 }
 
@@ -1045,6 +1059,7 @@ button:focus:not(:focus-visible) { outline: none; }
 #transport-container .transport-scrubber:disabled::-moz-range-thumb { background: var(--text-dim); }
 
 #transport-container .transport-readout {
+  cursor: ns-resize;   /* drags the sliding panel (js/main.js) */
   /* Grows only when it has a line to itself: beside the scrubber, the
      scrubber's far larger grow factor takes all but a sliver of the spare
      width. */
@@ -1106,6 +1121,7 @@ button:focus:not(:focus-visible) { outline: none; }
 .index-waiting[hidden] { display: none; }
 
 #transport-container .transport-frame-input {
+  cursor: text;   /* not the readout's drag cursor */
   background: var(--surface-raised);
   color: var(--text);
   border: 1px solid var(--border);

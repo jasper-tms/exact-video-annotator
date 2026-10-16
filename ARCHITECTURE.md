@@ -730,7 +730,7 @@ drive it with synthetic edges and stripes.
 | `[` , `]` | jump to the previous / next frame with an annotation (on the selected annotation layer, else on any), wrapping around past the last or first |
 | `Shift`+arrows | nudge the selected point, vertex or shape by one pixel (`Shift`+`Alt`+arrows: a tenth, where the layer allows fractional coordinates) |
 | `1`–`9` | activate the Nth tool-rail button from the top (currently: `1` pan, `2` point, `3` line, `4` polyline) |
-| `0` | scroll to/from the details section (same button, bottom of the tool rail) |
+| `0` | slide the details panel up over the canvas, or back down (same button, bottom of the tool rail); reopening returns it to where it was when last closed this way |
 | `v` | toggle the selected layer's visibility |
 | `a` | toggle frame-agnostic mode for new annotations |
 | `f` | fit the view to the content |
@@ -743,7 +743,7 @@ drive it with synthetic edges and stripes.
 Tool number keys are assigned by position, not written statically per tool —
 see the `toolHotkeys` map built in `main.js` from `#tool-rail button[data-tool]`
 order. Only the first 9 tool-rail buttons get one; `0` is reserved for the
-scroll-to-details button regardless of how many tools exist. A tool hotkey (or
+sliding panel toggle regardless of how many tools exist. A tool hotkey (or
 button click) for the tool that is already active does not deselect it back to
 pan — every tool pans on its own now (an empty-space drag always pans), so
 there is nothing useful to fall back to — it just **blinks** the button
