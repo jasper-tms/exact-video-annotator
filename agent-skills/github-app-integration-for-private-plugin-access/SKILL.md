@@ -110,9 +110,15 @@ stored in that existing list; at load time the client swaps in a fresh
 for the picker) but is NOT the security boundary, so no new Firestore rules or
 service account are needed for v1.
 
-**Known v1 limitation:** the session token expires (8h); getting a fresh one
-re-runs the OAuth popup (fast, since GitHub auto-approves an already-authorized
-app). Making it silent — the plugins list loading already-authorized on every
+**Known v1 limitation:** the session token expires after 7 days (it was 8 hours
+until October 2026); getting a fresh one re-runs the OAuth popup (fast, since
+GitHub auto-approves an already-authorized app). A browser blocks a popup that
+no click started, so the app cannot renew on its own: when the installed list
+holds private plugins and the token is missing, expired or refused (HTTP 401),
+it skips those plugins without an error and opens Settings with a "Reconnect
+GitHub" banner, and opening a document whose layers need a missing plugin asks
+first (log in, reconnect GitHub, or add the plugin) before falling back to
+plain layers. Making it silent — the plugins list loading already-authorized on every
 visit — is the planned v2 (see "Future: permanent authorization"), not built.
 
 ## Where the code lives
@@ -143,7 +149,7 @@ visit — is the planned v2 (see "Future: permanent authorization"), not built.
 
 Goal: once a user has installed the app on their GitHub account, their private
 plugins load already-authorized on every signed-in visit to examine.video — no
-8-hour re-popup.
+7-day re-popup.
 
 The popup today is only for *discovery* — confirming which installations a user
 may see. File serving already uses the app private key + installation id

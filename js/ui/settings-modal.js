@@ -12,8 +12,12 @@ import { isLoadedFramesHighlightEnabled, setLoadedFramesHighlightEnabled }
 import {
   getInstalledPlugins, addInstalledPlugin, removeInstalledPlugin, subscribeInstalledPlugins,
 } from '../sync/installed-plugins-preference.js';
-import { connectPrivateGitHub, installUrl, canonicalPluginUrl }
-  from '../plugins/private-github-loader.js';
+import {
+  connectPrivateGitHub, installUrl, canonicalPluginUrl, hasSession, hadSession,
+  listRepositoryPlugins, parsePrivatePluginUrl, gitHubWebUrl,
+} from '../plugins/private-github-loader.js';
+import { rememberedPluginName } from '../plugins/plugin-loader.js';
+import { pluginRegistryEvents } from '../plugins/registry.js';
 
 export function initializeSettingsModal(app, triggerButtonElement) {
   const dialogElement = document.createElement('dialog');
@@ -164,9 +168,8 @@ export function initializeSettingsModal(app, triggerButtonElement) {
 
   // The list of "installed" plugins, by URL. This is the authoritative place a
   // user adds or removes one; the ＋ menu's Plugins page sends them here (with a
-  // flash on this section) via its "New…" entry. Fetching and running a plugin
-  // from its URL is not wired up yet — for now the list is simply persisted and
-  // synced across devices when signed in.
+  // flash on this section) via its "New…" entry. main.js loads every plugin in
+  // the list at startup and whenever it changes.
   const pluginsSection = document.createElement('div');
   pluginsSection.className = 'settings-section';
   pluginsSection.id = 'settings-plugins-section';
@@ -184,11 +187,60 @@ export function initializeSettingsModal(app, triggerButtonElement) {
     + 'your account.';
   pluginsSection.appendChild(pluginsHint);
 
+  // Shown while the list holds private-repository plugins but there is no live
+  // GitHub connection (never made in this browser, expired, or refused). A
+  // browser blocks a GitHub popup that no click started, so reconnecting waits
+  // for this button.
+  const gitHubReconnectBanner = document.createElement('div');
+  gitHubReconnectBanner.className = 'plugins-github-reconnect';
+  gitHubReconnectBanner.hidden = true;
+  const gitHubReconnectMessage = document.createElement('span');
+  const gitHubReconnectButton = document.createElement('button');
+  gitHubReconnectButton.type = 'button';
+  gitHubReconnectButton.addEventListener('click', () => reconnectGitHub());
+  gitHubReconnectBanner.append(gitHubReconnectMessage, gitHubReconnectButton);
+  pluginsSection.appendChild(gitHubReconnectBanner);
+
+  function reflectGitHubReconnectBanner() {
+    const needsConnection = getInstalledPlugins().some((url) => parsePrivatePluginUrl(url))
+      && !hasSession();
+    gitHubReconnectBanner.hidden = !needsConnection;
+    if (!needsConnection) return;
+    gitHubReconnectMessage.textContent = hadSession()
+      ? 'Your GitHub connection has expired. Reconnect to load your private plugins.'
+      : 'Connect GitHub to load your private plugins.';
+    if (!gitHubReconnectButton.disabled) {
+      gitHubReconnectButton.textContent = hadSession() ? 'Reconnect GitHub' : 'Connect GitHub';
+    }
+  }
+
+  /** Run the GitHub popup to renew the connection, then load the private
+      plugins that were waiting for it. Must be called from a click. Resolves to
+      the installations, or null if it failed or was cancelled. */
+  async function reconnectGitHub() {
+    gitHubReconnectButton.disabled = true;
+    gitHubReconnectButton.textContent = 'Connecting to GitHub…';
+    try {
+      const { installations } = await connectPrivateGitHub();
+      app.dispatchEvent(new CustomEvent('plugin-sources-changed'));
+      app.showToast('Connected to GitHub.');
+      return installations;
+    } catch (error) {
+      app.showToast(error.message || 'GitHub connection failed.', { kind: 'warning' });
+      return null;
+    } finally {
+      gitHubReconnectButton.disabled = false;
+      reflectGitHubReconnectBanner();
+    }
+  }
+  app.reconnectGitHub = reconnectGitHub;
+
   const pluginsList = document.createElement('ul');
   pluginsList.className = 'plugins-url-list';
   pluginsSection.appendChild(pluginsList);
 
   function renderPluginsList() {
+    reflectGitHubReconnectBanner();
     pluginsList.replaceChildren();
     const urls = getInstalledPlugins();
     if (urls.length === 0) {
@@ -201,20 +253,50 @@ export function initializeSettingsModal(app, triggerButtonElement) {
     for (const url of urls) {
       const item = document.createElement('li');
       item.className = 'plugins-url-item';
-      const urlText = document.createElement('span');
-      urlText.className = 'plugins-url-text';
-      urlText.textContent = url;
-      urlText.title = url;
+
+      // A private plugin shows (and links to) its github.com folder rather
+      // than the plugins.examine.video URL the list stores for it.
+      const description = document.createElement('span');
+      description.className = 'plugins-url-description';
+      const name = rememberedPluginName({ url });
+      if (name) {
+        const nameElement = document.createElement('span');
+        nameElement.className = 'plugins-url-name';
+        nameElement.textContent = name;
+        description.appendChild(nameElement);
+      }
+      const privateParts = parsePrivatePluginUrl(url);
+      const { href, text } = privateParts
+        ? gitHubWebUrl(privateParts) : { href: url, text: url };
+      const link = document.createElement('a');
+      link.className = 'plugins-url-text';
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = text;
+      link.title = href;
+      description.appendChild(link);
+      if (privateParts) {
+        const privateTag = document.createElement('span');
+        privateTag.className = 'plugins-url-private';
+        privateTag.textContent = 'private';
+        description.appendChild(privateTag);
+      }
+
       const removeButton = document.createElement('button');
       removeButton.type = 'button';
       removeButton.className = 'plugins-url-remove';
       removeButton.textContent = 'Remove';
-      removeButton.title = `Remove ${url}`;
+      removeButton.title = `Remove ${name ?? text}`;
       removeButton.addEventListener('click', () => removeInstalledPlugin(url));
-      item.append(urlText, removeButton);
+      item.append(description, removeButton);
       pluginsList.appendChild(item);
     }
   }
+  // A plugin that loads for the first time teaches the list its name.
+  pluginRegistryEvents.addEventListener('plugin-registered', () => {
+    if (dialogElement.open) renderPluginsList();
+  });
 
   const pluginsAddRow = document.createElement('div');
   pluginsAddRow.className = 'plugins-url-add-row';
@@ -245,9 +327,10 @@ export function initializeSettingsModal(app, triggerButtonElement) {
 
   // Loads plugins from the user's PRIVATE repos via the "Video Examiner" GitHub
   // App (see the github-app-integration-for-private-plugin-access skill).
-  // Connecting opens a GitHub popup; the repos it comes back with each get an
-  // "Add" that stores the canonical tokenless plugins.examine.video URL in the
-  // list above.
+  // Connecting opens a GitHub popup; each repository it comes back with gets a
+  // dropdown of the plugins found in it (at its top level or one folder down)
+  // and an "Add" that stores the chosen plugin's canonical tokenless
+  // plugins.examine.video URL in the list above.
   const privateGitHubRow = document.createElement('div');
   privateGitHubRow.className = 'plugins-github-row';
   const privateGitHubButton = document.createElement('button');
@@ -264,21 +347,70 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   privateGitHubPicker.hidden = true;
   pluginsSection.appendChild(privateGitHubPicker);
 
-  function addPrivatePlugin(repository, folderInput) {
-    const folder = folderInput.value.trim().replace(/^\/+|\/+$/g, '');
-    const url = canonicalPluginUrl({
-      installationId: repository.installationId,
-      owner: repository.owner,
-      repo: repository.name,
-      folder,
-    });
-    if (addInstalledPlugin(url)) {
-      const suffix = folder ? ` /${folder}` : '';
-      app.showToast(`Added ${repository.fullName}${suffix}.`, { kind: 'info' });
-      folderInput.value = '';
-    } else {
-      app.showToast('That plugin is already in your list.', { kind: 'warning' });
+  function pluginOptionLabel(plugin) {
+    const place = plugin.folder ? `${plugin.folder}/` : 'whole repository';
+    return plugin.name ? `${plugin.name} (${place})` : place;
+  }
+
+  /** Fill one repository's dropdown with the plugins found in it; "None" (and a
+      disabled Add) when there are none. Plugins already in the list are shown
+      but cannot be picked again. */
+  async function fillRepositoryPluginSelect(repository, select, addButton) {
+    const setOnlyOption = (text) => {
+      const option = document.createElement('option');
+      option.textContent = text;
+      select.replaceChildren(option);
+      select.disabled = true;
+      addButton.disabled = true;
+    };
+    setOnlyOption('Looking for plugins…');
+    let plugins;
+    try {
+      plugins = await listRepositoryPlugins({
+        installationId: repository.installationId, owner: repository.owner, repo: repository.name,
+      });
+    } catch (error) {
+      setOnlyOption(`Could not list plugins (${error.message ?? error})`);
+      return;
     }
+    if (plugins.length === 0) { setOnlyOption('None'); return; }
+
+    const installed = new Set(getInstalledPlugins());
+    select.replaceChildren();
+    for (const plugin of plugins) {
+      const url = canonicalPluginUrl({
+        installationId: repository.installationId,
+        owner: repository.owner,
+        repo: repository.name,
+        folder: plugin.folder,
+      });
+      const option = document.createElement('option');
+      option.value = url;
+      option.dataset.label = pluginOptionLabel(plugin);
+      const alreadyAdded = installed.has(url);
+      option.textContent = option.dataset.label + (alreadyAdded ? ' — already added' : '');
+      option.disabled = alreadyAdded;
+      select.appendChild(option);
+    }
+    const firstAvailable = [...select.options].find((option) => !option.disabled);
+    select.disabled = false;
+    if (firstAvailable) select.value = firstAvailable.value;
+    addButton.disabled = !firstAvailable;
+  }
+
+  function addPrivatePlugin(repository, select, addButton) {
+    const option = select.selectedOptions[0];
+    if (!option || option.disabled || !option.value) return;
+    if (!addInstalledPlugin(option.value)) {
+      app.showToast('That plugin is already in your list.', { kind: 'warning' });
+      return;
+    }
+    app.showToast(`Added ${option.dataset.label} from ${repository.fullName}.`);
+    option.textContent = `${option.dataset.label} — already added`;
+    option.disabled = true;
+    const nextAvailable = [...select.options].find((candidate) => !candidate.disabled);
+    if (nextAvailable) select.value = nextAvailable.value;
+    addButton.disabled = !nextAvailable;
   }
 
   function renderPrivateGitHubPicker(installations) {
@@ -321,35 +453,35 @@ export function initializeSettingsModal(app, triggerButtonElement) {
 
     const pickerHint = document.createElement('p');
     pickerHint.className = 'settings-section-hint';
-    pickerHint.textContent =
-      'Repositories shared with Video Examiner. Add one, optionally naming a folder within it:';
+    pickerHint.textContent = 'Repositories shared with Video Examiner. Pick a plugin in one to add it:';
     privateGitHubPicker.appendChild(pickerHint);
 
     for (const repository of repositories) {
       const repoRow = document.createElement('div');
       repoRow.className = 'plugins-github-repo';
 
-      const nameElement = document.createElement('span');
+      const { href, text } = gitHubWebUrl({ owner: repository.owner, repo: repository.name });
+      const nameElement = document.createElement('a');
       nameElement.className = 'plugins-github-repo-name';
+      nameElement.href = href;
+      nameElement.target = '_blank';
+      nameElement.rel = 'noopener';
       nameElement.textContent = repository.fullName;
-      nameElement.title = repository.fullName;
+      nameElement.title = text;
 
-      const folderInput = document.createElement('input');
-      folderInput.type = 'text';
-      folderInput.className = 'plugins-github-folder';
-      folderInput.placeholder = 'folder (optional)';
+      const pluginSelect = document.createElement('select');
+      pluginSelect.className = 'plugins-github-plugin-select';
+      pluginSelect.title = 'Plugins found at the top of this repository or one folder down';
 
       const addButton = document.createElement('button');
       addButton.type = 'button';
       addButton.className = 'plugins-github-add';
       addButton.textContent = 'Add';
-      addButton.addEventListener('click', () => addPrivatePlugin(repository, folderInput));
-      folderInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') { event.preventDefault(); addPrivatePlugin(repository, folderInput); }
-      });
+      addButton.addEventListener('click', () => addPrivatePlugin(repository, pluginSelect, addButton));
 
-      repoRow.append(nameElement, folderInput, addButton);
+      repoRow.append(nameElement, pluginSelect, addButton);
       privateGitHubPicker.appendChild(repoRow);
+      fillRepositoryPluginSelect(repository, pluginSelect, addButton);
     }
 
     const doneButton = document.createElement('button');
@@ -376,6 +508,7 @@ export function initializeSettingsModal(app, triggerButtonElement) {
     } finally {
       privateGitHubButton.disabled = false;
       privateGitHubButton.textContent = originalText;
+      reflectGitHubReconnectBanner();
     }
   });
 
@@ -409,7 +542,7 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   function openSettings({ flashPlugins } = {}) {
     secondMediaSelect.value = getSecondMediaBehavior();
     renderPluginsList();
-    dialogElement.showModal();
+    if (!dialogElement.open) dialogElement.showModal();
     if (flashPlugins) {
       pluginsSection.classList.remove('settings-flash');
       void pluginsSection.offsetWidth; // reflow so the animation restarts
@@ -418,6 +551,11 @@ export function initializeSettingsModal(app, triggerButtonElement) {
     }
   }
   app.openSettings = openSettings;
+  /** Resolves when Settings next closes (at once if it is not open). */
+  app.whenSettingsClosed = () => new Promise((resolve) => {
+    if (!dialogElement.open) { resolve(); return; }
+    dialogElement.addEventListener('close', () => resolve(), { once: true });
+  });
 
   triggerButtonElement.addEventListener('click', () => openSettings());
 }

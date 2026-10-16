@@ -16,6 +16,16 @@ import {
 } from './firebase.js';
 
 let unsubscribeLiveUpdates = null;
+// Settles once the signed-in user's cloud preferences have been merged in (at
+// once while signed out).
+let reconciliation = Promise.resolve();
+
+/** Resolves once the current user's cloud preferences have been merged into
+    the local ones — for example so a just-signed-in user's plugin list is
+    here before deciding a plugin is missing. Resolves at once when signed out. */
+export function whenPreferencesSynced() {
+  return reconciliation;
+}
 
 /** Reconcile one signed-in user's cloud preferences with the local ones,
     keeping the newer of each pair and copying it to whichever side is behind. */
@@ -77,7 +87,7 @@ export function initializeSync() {
       writeUserPreference(uid, key, envelope).catch(() => {});
     });
     // Merge in whatever the cloud already has, then watch for other devices.
-    reconcile(uid).finally(() => {
+    reconciliation = reconcile(uid).finally(() => {
       unsubscribeLiveUpdates = subscribeUserPreferences(uid, applyLiveSnapshot);
     });
   });

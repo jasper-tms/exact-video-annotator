@@ -19,6 +19,11 @@
 //      fetches the file, and returns its raw bytes with a correct Content-Type
 //      and CORS so the browser can import() it.
 //
+//   3. /s/<sessionToken>/plugins/<installationId>/<owner>/<repo>
+//      — lists the plugins in a repository (a plugin.json at its top level or
+//      one folder down), as JSON, so the app can offer them in a dropdown. Same
+//      session-token check as the proxy.
+//
 // The isolation guarantee: a session token is minted ONLY from installations
 // GitHub confirmed the OAuth'd user can access, and the proxy serves ONLY
 // installations named in the presented token. So user A's token can never read
@@ -40,7 +45,7 @@
 
 const GITHUB_API = 'https://api.github.com';
 const OAUTH_REDIRECT_PATH = '/oauth/callback';
-const SESSION_TTL_SECONDS = 8 * 60 * 60; // 8 hours
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const USER_AGENT = 'video-examiner-plugin-loader';
 
 export default {
@@ -152,16 +157,15 @@ async function handleProxy(request, url, env) {
   if (request.method === 'OPTIONS') return corsPreflight(request, env);
 
   // /s/<sessionToken>/gh/<installationId>/<owner>/<repo>/<path...>
+  // /s/<sessionToken>/plugins/<installationId>/<owner>/<repo>
   const parts = url.pathname.split('/').filter(Boolean); // drops empty segments
-  if (parts.length < 6 || parts[0] !== 's' || parts[2] !== 'gh') {
-    return new Response('Bad plugin path', { status: 400 });
+  if (parts.length < 6 || parts[0] !== 's' || (parts[2] !== 'gh' && parts[2] !== 'plugins')) {
+    return withCors(request, env, new Response('Bad plugin path', { status: 400 }));
   }
   const sessionToken = decodeURIComponent(parts[1]);
   const installationId = parts[3];
   const owner = parts[4];
   const repo = parts[5];
-  const filePath = parts.slice(6).map(decodeURIComponent).join('/');
-  if (!filePath) return new Response('Missing file path', { status: 400 });
 
   const grantedInstallations = await verifySessionToken(sessionToken, env);
   if (!grantedInstallations) return withCors(request, env, new Response('Session expired', { status: 401 }));
@@ -170,6 +174,12 @@ async function handleProxy(request, url, env) {
   }
 
   const installationToken = await getInstallationToken(installationId, env);
+  if (parts[2] === 'plugins') {
+    return withCors(request, env, await listRepositoryPlugins(owner, repo, installationToken));
+  }
+
+  const filePath = parts.slice(6).map(decodeURIComponent).join('/');
+  if (!filePath) return withCors(request, env, new Response('Missing file path', { status: 400 }));
   const ref = url.searchParams.get('ref'); // optional branch/tag/sha
   const contentsUrl = `${GITHUB_API}/repos/${owner}/${repo}/contents/${filePath}`
     + (ref ? `?ref=${encodeURIComponent(ref)}` : '');
@@ -189,6 +199,53 @@ async function handleProxy(request, url, env) {
   headers.set('Content-Type', contentTypeFor(filePath));
   headers.set('Cache-Control', 'no-store');
   return withCors(request, env, new Response(bytes, { status: 200, headers }));
+}
+
+/** The plugins in a repository's default branch: a plugin.json at the top level
+    (folder '') or one folder down (folder 'name'), each with its manifest's id
+    and name. Responds { plugins: [{ folder, id, name }] }. */
+async function listRepositoryPlugins(owner, repo, installationToken) {
+  const headers = {
+    'Authorization': `Bearer ${installationToken}`,
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': USER_AGENT,
+  };
+  const repositoryResponse = await fetch(`${GITHUB_API}/repos/${owner}/${repo}`, { headers });
+  if (!repositoryResponse.ok) {
+    return new Response(`GitHub ${repositoryResponse.status}`, { status: repositoryResponse.status });
+  }
+  const branch = (await repositoryResponse.json()).default_branch;
+  const treeResponse = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`, { headers });
+  if (!treeResponse.ok) {
+    return new Response(`GitHub ${treeResponse.status}`, { status: treeResponse.status });
+  }
+  const tree = (await treeResponse.json()).tree || [];
+  const folders = tree
+    .filter((entry) => entry.type === 'blob' && /^([^/]+\/)?plugin\.json$/.test(entry.path))
+    .map((entry) => entry.path.replace(/\/?plugin\.json$/, ''))
+    .sort()
+    .slice(0, 40); // stays well under the Worker's limit on outgoing requests
+
+  const plugins = await Promise.all(folders.map(async (folder) => {
+    const manifestPath = folder ? `${folder}/plugin.json` : 'plugin.json';
+    let manifest = {};
+    try {
+      const manifestResponse = await fetch(
+        `${GITHUB_API}/repos/${owner}/${repo}/contents/${manifestPath}?ref=${encodeURIComponent(branch)}`,
+        { headers: { ...headers, 'Accept': 'application/vnd.github.raw' } });
+      if (manifestResponse.ok) manifest = await manifestResponse.json();
+    } catch { /* listed without a name */ }
+    return {
+      folder,
+      id: typeof manifest.id === 'string' ? manifest.id : null,
+      name: typeof manifest.name === 'string' ? manifest.name : null,
+    };
+  }));
+  return new Response(JSON.stringify({ plugins }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
 }
 
 /* ------------------------------------------------------------------ *

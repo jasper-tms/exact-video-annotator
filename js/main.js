@@ -16,7 +16,11 @@ import {
 import { getSyncedPlaybackPacing } from './synced-playback-preference.js';
 import { panTool } from './tools/pan-tool.js';
 import { findPlugin, pluginRegistryEvents, pluginUrl } from './plugins/registry.js';
-import { loadPluginFromUrl } from './plugins/plugin-loader.js';
+import {
+  loadPluginFromUrl, GitHubConnectionNeededError, rememberedPluginName, rememberedPluginUrl,
+} from './plugins/plugin-loader.js';
+import { displayPluginAddress } from './plugins/private-github-loader.js';
+import { resolveMissingPlugins } from './ui/missing-plugins-prompt.js';
 import { getInstalledPlugins, subscribeInstalledPlugins }
   from './sync/installed-plugins-preference.js';
 import { refitSelectedItem } from './plugins/refit.js';
@@ -1044,18 +1048,29 @@ class Application extends EventTarget {
     });
   }
 
+  #layersWarnedAboutMissingPlugin = new WeakSet();
+
   #createViewLayer(documentLayer) {
     const pluginId = documentLayer.plugin?.id ?? null;
     const plugin = pluginId === null ? null : findPlugin(pluginId);
-    if (pluginId !== null && !plugin) {
+    // Warned about once per layer: the toast stays until dismissed, and layers
+    // are rebuilt whenever any plugin arrives.
+    if (pluginId !== null && !plugin && !this.#layersWarnedAboutMissingPlugin.has(documentLayer)) {
+      this.#layersWarnedAboutMissingPlugin.add(documentLayer);
       // A document written by a build that had this plugin. Its annotations are
       // ordinary items, so open them on a plain layer of the storage type and
       // keep the plugin field so re-exporting does not drop it.
-      const source = documentLayer.plugin.url
-        ? ` Add ${documentLayer.plugin.url} in Settings → Plugins to use it.` : '';
-      this.showToast(`Layer "${documentLayer.name}" was made by the "${pluginId}" plugin, `
-        + `which is not available here — opening it as a plain layer.${source}`,
-      { kind: 'warning' });
+      const sourceUrl = documentLayer.plugin.url ?? rememberedPluginUrl(pluginId);
+      const pluginName = rememberedPluginName({ url: sourceUrl, id: pluginId });
+      const details = [pluginName ? pluginId : null,
+        sourceUrl ? `from ${displayPluginAddress(sourceUrl)}` : null].filter(Boolean).join(', ');
+      this.showToast(`Layer "${documentLayer.name}" needs the "${pluginName ?? pluginId}" plugin`
+        + `${details ? ` (${details})` : ''}, which is not loaded, so it opened as a plain layer. `
+        + 'Open Settings and check your plugins list.',
+      {
+        kind: 'warning',
+        action: { label: 'Open Settings', onSelect: () => this.openSettings({ flashPlugins: true }) },
+      });
     }
     // The extra `this` (app) argument is only read by CoordinatesLayer (to look
     // up the document's integer-coordinate convention); the other constructors,
@@ -1161,6 +1176,18 @@ class Application extends EventTarget {
         layers.forEach((layer, index) => { layer.items.length = 0; layer.items.push(...removedItems[index]); });
       },
     });
+  }
+
+  /** Replace the document with one being opened (imported or restored), first
+      offering to bring in any plugin its layers need that is not loaded (see
+      missing-plugins-prompt.js); layers whose plugin still is not here open as
+      plain layers. */
+  async openDocument(annotationDocument) {
+    await resolveMissingPlugins(this, {
+      findMissing: () => missingPluginsOf(annotationDocument),
+      waitForPluginLoads,
+    });
+    this.replaceDocument(annotationDocument);
   }
 
   replaceDocument(annotationDocument) {
@@ -1325,18 +1352,67 @@ app.addKeyHandler((event) => {
 // whenever the list gains one. A `?plugin=<folder URL>` parameter (repeatable)
 // loads one for this visit only, after the user agrees to run its code — a
 // link should not be able to run code here unasked. See plugin-loader.js.
-const loadedOrLoadingPluginUrls = new Set();
+const pluginLoads = new Map();        // url -> the promise of its load, while loading or loaded
+const pluginLoadErrors = new Map();   // url -> the message of its last failed load
 const APPROVED_PLUGIN_URLS_KEY = 'exact-video-annotator.approvedPluginUrls';
+let offeredGitHubReconnect = false;
 
-async function loadPluginAndReport(url) {
-  if (loadedOrLoadingPluginUrls.has(url)) return;
-  loadedOrLoadingPluginUrls.add(url);
-  try {
-    await loadPluginFromUrl(app, url);
-  } catch (error) {
-    loadedOrLoadingPluginUrls.delete(url);   // so it is retried, e.g. after connecting GitHub
-    app.showToast(`Could not load the plugin at ${url}: ${error.message ?? error}`, { kind: 'error' });
+function loadPluginAndReport(url) {
+  if (pluginLoads.has(url)) return pluginLoads.get(url);
+  const load = (async () => {
+    try {
+      await loadPluginFromUrl(app, url);
+      pluginLoadErrors.delete(url);
+    } catch (error) {
+      pluginLoads.delete(url);   // so it is retried, e.g. after connecting GitHub
+      if (error instanceof GitHubConnectionNeededError) {
+        // Not an error to report: ask once per visit to reconnect instead.
+        pluginLoadErrors.set(url, 'the GitHub connection has expired');
+        offerGitHubReconnect();
+        return;
+      }
+      const message = error.message ?? String(error);
+      pluginLoadErrors.set(url, message);
+      const name = rememberedPluginName({ url });
+      app.showToast(`Could not load the ${name ? `"${name}" ` : ''}plugin from `
+        + `${displayPluginAddress(url)}: ${message}`, { kind: 'error' });
+    }
+  })();
+  pluginLoads.set(url, load);
+  return load;
+}
+
+/** Settles once no plugin is mid-load. */
+async function waitForPluginLoads() {
+  await Promise.allSettled([...pluginLoads.values()]);
+}
+
+/** The plugins a document's layers need that are not registered, each with the
+    names of its layers, where it comes from, and why it last failed to load. */
+function missingPluginsOf(annotationDocument) {
+  const missing = new Map();
+  for (const layer of annotationDocument.layers) {
+    const id = layer.plugin?.id;
+    if (!id || findPlugin(id)) continue;
+    if (!missing.has(id)) {
+      // A document need not record where its plugin comes from; this browser
+      // may remember.
+      const url = layer.plugin.url ?? rememberedPluginUrl(id);
+      missing.set(id, { id, url, layerNames: [], error: url ? pluginLoadErrors.get(url) ?? null : null });
+    }
+    missing.get(id).layerNames.push(layer.name);
   }
+  return [...missing.values()];
+}
+
+/** Private plugins in the installed list are waiting for a GitHub connection.
+    A browser blocks a popup no click started, so open Settings, whose banner
+    asks to reconnect — once per visit, and not over another open dialog (the
+    missing-plugins box makes the same offer itself). */
+function offerGitHubReconnect() {
+  if (offeredGitHubReconnect || document.querySelector('dialog[open]')) return;
+  offeredGitHubReconnect = true;
+  app.openSettings();
 }
 
 function loadInstalledPlugins() {
@@ -1447,9 +1523,10 @@ function offerAutosaveRestore(mediaInformation) {
   if (documentHasItems) return;
   const autosaved = loadAutosave(autosaveKey(mediaInformation));
   if (autosaved && autosaved.document.layers.some((layer) => layer.items.length > 0)) {
-    app.replaceDocument(autosaved.document);
-    app.setHasUnsavedChanges(false);
-    app.showToast(`Restored the annotations saved in this browser (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
+    app.openDocument(autosaved.document).then(() => {
+      app.setHasUnsavedChanges(false);
+      app.showToast(`Restored the annotations saved in this browser (${autosaved.savedAt ?? 'unknown time'}). Import a file to replace them.`);
+    });
   }
 }
 
@@ -2374,7 +2451,7 @@ async function importAnnotationsFile(file) {
         && !window.confirm('Importing replaces the current annotations. Continue?')) {
       return;
     }
-    app.replaceDocument(parsed);
+    await app.openDocument(parsed);
     app.setHasUnsavedChanges(false);
     app.showToast(`Imported annotations from ${file.name}.`);
   } catch (error) {

@@ -10,8 +10,8 @@ in the `github-app-integration-for-private-plugin-access` agent skill.
 
 - `GET /oauth/callback` — finishes GitHub OAuth: exchanges the code (with the
   client secret) for a user token, asks GitHub which installations +
-  repositories the user may access, mints a short-lived Worker-signed **session
-  token** naming exactly those installation ids, and `postMessage`s it to the
+  repositories the user may access, mints a Worker-signed **session token**
+  (valid for 7 days) naming exactly those installation ids, and `postMessage`s it to the
   app popup.
 - `GET /s/<sessionToken>/gh/<installationId>/<owner>/<repo>/<path...>` — the
   file proxy: verifies the session token, checks the installation is granted,
@@ -19,6 +19,10 @@ in the `github-app-integration-for-private-plugin-access` agent skill.
   file's raw bytes with the right `Content-Type` + CORS so the browser can
   `import()` it. Relative imports keep the `/s/<token>/` prefix, so multi-file
   plugins resolve their siblings.
+- `GET /s/<sessionToken>/plugins/<installationId>/<owner>/<repo>` — lists the
+  plugins in the repository's default branch (a `plugin.json` at its top level
+  or one folder down) as `{ plugins: [{ folder, id, name }] }`, for the
+  Settings dropdown. Same session-token check as the proxy.
 
 **Isolation:** a session token is minted only from installations GitHub
 confirmed the OAuth'd user can access, and the proxy serves only installations
@@ -86,7 +90,7 @@ re-provisioning. Keep only the GitHub-issued `.pem` (on the Pi):
 - `SESSION_HMAC_SECRET` — the Worker both signs and verifies session tokens with
   it, so nothing outside the Worker needs it. If lost, generate a new one;
   outstanding session tokens stop verifying and users re-run the OAuth popup
-  once (same effect as the 8-hour expiry). Nothing to keep.
+  once (same effect as the 7-day expiry). Nothing to keep.
 - `GITHUB_APP_CLIENT_SECRET` — regenerate on the app's General page if needed
   (GitHub allows multiple, revoke the old). No copy required.
 - `GITHUB_APP_PRIVATE_KEY` — re-derive by re-running the `openssl pkcs8` command

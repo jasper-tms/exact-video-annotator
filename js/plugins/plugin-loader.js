@@ -18,7 +18,10 @@
 // Folder URLs of private GitHub repositories (canonical
 // https://plugins.examine.video/gh/… URLs, see private-github-loader.js) are
 // fetched through a fresh session-token URL; any other URL is used as is, so
-// it must serve JavaScript with CORS headers allowing this app's origin.
+// it must serve JavaScript with CORS headers allowing this app's origin. A
+// private folder with no live GitHub connection fails with a
+// GitHubConnectionNeededError, which the app answers by asking the user to
+// reconnect rather than by reporting an error.
 
 import { Layer } from '../layers/layer.js';
 import { CoordinatesLayer } from '../layers/coordinates-layer.js';
@@ -27,14 +30,53 @@ import { FramesLayer } from '../layers/frames-layer.js';
 import { newId } from '../document.js';
 import { createFloatingWindow } from '../ui/floating-window.js';
 import { registerPlugin } from './registry.js';
-import { authorizedPluginBaseUrl, hasSession } from './private-github-loader.js';
+import {
+  authorizedPluginBaseUrl, hasSession, markSessionRefused, parsePrivatePluginUrl,
+} from './private-github-loader.js';
 
 /** The host API's major version; a plugin's manifest names the one it was
     written against, and a mismatch is refused rather than half-loaded. */
 export const HOST_API_VERSION = 1;
 
-const PRIVATE_PLUGIN_PATTERN =
-  /^https:\/\/plugins\.examine\.video\/gh\/(\d+)\/([^/]+)\/([^/]+)\/?(.*)$/;
+const PLUGIN_NAMES_KEY = 'exact-video-annotator.pluginNames';
+
+/** Thrown for a private plugin when the GitHub connection is missing, expired
+    or refused, so the caller can offer to reconnect instead of an error. */
+export class GitHubConnectionNeededError extends Error {
+  constructor(folderUrl) {
+    super('the GitHub connection has expired or was never made here');
+    this.name = 'GitHubConnectionNeededError';
+    this.folderUrl = folderUrl;
+  }
+}
+
+/** The display name of a plugin this browser has loaded before, looked up by
+    its folder URL or its id; null if it never loaded here. Lets messages name a
+    plugin that cannot be fetched right now. */
+export function rememberedPluginName({ url = null, id = null } = {}) {
+  let names = {};
+  try { names = JSON.parse(localStorage.getItem(PLUGIN_NAMES_KEY)) ?? {}; } catch { /* none */ }
+  const folderUrl = url ? normalizePluginFolderUrl(url) : null;
+  return (folderUrl && names[`url:${folderUrl}`]) || (id && names[`id:${id}`]) || null;
+}
+
+/** The folder URL a plugin with this id last loaded from in this browser, or
+    null — for a document that names a plugin's id but not where it comes from. */
+export function rememberedPluginUrl(id) {
+  try { return JSON.parse(localStorage.getItem(PLUGIN_NAMES_KEY))?.[`folder:${id}`] ?? null; } catch { return null; }
+}
+
+function rememberPluginName(folderUrl, id, name) {
+  try {
+    const names = JSON.parse(localStorage.getItem(PLUGIN_NAMES_KEY)) ?? {};
+    names[`folder:${id}`] = folderUrl;
+    if (typeof name === 'string' && name) {
+      names[`url:${folderUrl}`] = name;
+      names[`id:${id}`] = name;
+    }
+    localStorage.setItem(PLUGIN_NAMES_KEY, JSON.stringify(names));
+  } catch { /* not remembered; messages fall back to the id */ }
+}
 
 /** A folder URL with exactly one trailing slash, so relative URLs resolve inside it. */
 export function normalizePluginFolderUrl(url) {
@@ -47,14 +89,10 @@ export function normalizePluginFolderUrl(url) {
 /** Where to fetch a plugin folder's files from: a private-repository folder
     gets the current GitHub session token spliced in. */
 function fetchableFolderUrl(folderUrl) {
-  const match = PRIVATE_PLUGIN_PATTERN.exec(folderUrl);
-  if (!match) return folderUrl;
-  if (!hasSession()) {
-    throw new Error('Connect GitHub first (Settings → Plugins → '
-      + '"Add from private GitHub repository…").');
-  }
-  const [, installationId, owner, repo, folder] = match;
-  return authorizedPluginBaseUrl({ installationId, owner, repo, folder });
+  const privateParts = parsePrivatePluginUrl(folderUrl);
+  if (!privateParts) return folderUrl;
+  if (!hasSession()) throw new GitHubConnectionNeededError(folderUrl);
+  return authorizedPluginBaseUrl(privateParts);
 }
 
 function makeHostApi(app, baseUrl) {
@@ -79,6 +117,10 @@ export async function loadPluginFromUrl(app, url) {
   const baseUrl = fetchableFolderUrl(folderUrl);
 
   const manifestResponse = await fetch(new URL('plugin.json', baseUrl));
+  if (manifestResponse.status === 401 && baseUrl !== folderUrl) {
+    markSessionRefused();
+    throw new GitHubConnectionNeededError(folderUrl);
+  }
   if (!manifestResponse.ok) {
     throw new Error(`no plugin.json at ${folderUrl} (HTTP ${manifestResponse.status})`);
   }
@@ -100,6 +142,7 @@ export async function loadPluginFromUrl(app, url) {
   if (descriptor?.id !== manifest.id) {
     throw new Error(`the descriptor's id "${descriptor?.id}" differs from plugin.json's "${manifest.id}"`);
   }
+  rememberPluginName(folderUrl, manifest.id, descriptor.name ?? manifest.name);
   registerPlugin(descriptor, { url: folderUrl });
   return descriptor;
 }

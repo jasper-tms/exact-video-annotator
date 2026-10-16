@@ -598,16 +598,30 @@ Where plugins load from:
   remembered in `localStorage` so the question is asked once per URL.
 - **Private GitHub repositories**: canonical
   `https://plugins.examine.video/gh/…` folder URLs (added through Settings →
-  "Add from private GitHub repository…", see the
+  "Add from private GitHub repository…", which lists each shared repository's
+  plugins, at its top level or one folder down, in a dropdown; see the
   `github-app-integration-for-private-plugin-access` skill) are fetched through
-  a fresh session-token URL. Without a session they fail with a hint to
-  connect, and connecting fires `plugin-sources-changed`, which retries them.
+  a fresh session-token URL, and Settings shows them as their github.com
+  folder. The session lasts 7 days. Without a live one (never connected here,
+  expired, or refused with HTTP 401) they fail with a
+  `GitHubConnectionNeededError`, which is not reported as an error: Settings
+  opens once per visit with a "Reconnect GitHub" banner (a popup needs a click,
+  so the app cannot reconnect on its own), and reconnecting fires
+  `plugin-sources-changed`, which retries them.
 
 Any other URL is fetched as is, so its host must send CORS headers allowing
 this app's origin. A layer made by a loaded plugin records the plugin's folder
-in `plugin.url`, so a document opened where the plugin is missing names where
-to get it. Layers opened before their plugin finished loading are rebuilt as
-the plugin's when it arrives.
+in `plugin.url`, and the browser remembers each plugin's name and folder by id
+(`rememberedPluginName`, `rememberedPluginUrl`), so messages can name a plugin
+that cannot be fetched. Opening a document (`app.openDocument`: Import, or a
+restore from the browser) whose layers need a plugin that is not loaded first
+waits for plugins still loading, then shows the missing-plugins box
+(`js/ui/missing-plugins-prompt.js`), which offers the next step that can bring
+the plugin in: reconnect GitHub, log in (the plugins list comes with the
+account), add the plugin the document names, or open Settings. Cancelling at
+any point opens those layers as plain layers of their storage type, with a
+warning naming the plugin. Layers opened before their plugin finished loading
+are rebuilt as the plugin's when it arrives.
 
 ### Floating windows
 
