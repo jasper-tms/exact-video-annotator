@@ -1,16 +1,21 @@
-// The account control in the top bar's right group. Signed out it reads
+// The account control in the top bar's left group. Signed out it reads
 // "Log in" and starts a Google sign-in popup; signed in it shows the account
 // email and, on hover, opens a small menu whose only entry is "Log out". On a
 // build with no Firebase config it is disabled with an explanatory tooltip, so
 // the bar looks the same everywhere but the feature is inert where it cannot work.
+// The container (the button plus its separator) stays hidden until the sign-in
+// state is known, so a signed-in user never sees "Log in" flash first.
 
 import { isFirebaseConfigured } from '../firebase-config.js';
-import { onUserChanged, signInWithGoogle, signOut, currentUser } from '../sync/firebase.js';
+import {
+  onUserChanged, signInWithGoogle, signOut, currentUser, isAuthStateKnown,
+} from '../sync/firebase.js';
 
-export function initializeAccountControl(app, buttonElement) {
+export function initializeAccountControl(app, containerElement, buttonElement) {
   if (!isFirebaseConfigured()) {
     buttonElement.disabled = true;
     buttonElement.title = 'Sign-in is not configured for this build.';
+    containerElement.hidden = false;
     return;
   }
 
@@ -65,17 +70,21 @@ export function initializeAccountControl(app, buttonElement) {
     menuElement.appendChild(logOutButton);
 
     // Anchored to the button with fixed viewport coordinates, opening downward
-    // from just below the top bar and aligned to the button's right edge.
+    // from just below the top bar and aligned to the button's left edge.
     document.body.appendChild(menuElement);
     const buttonRect = buttonElement.getBoundingClientRect();
     menuElement.style.top = `${buttonRect.bottom + 4}px`;
-    menuElement.style.right = `${window.innerWidth - buttonRect.right}px`;
+    menuElement.style.left = `${buttonRect.left}px`;
 
     window.addEventListener('pointerdown', dismissMenu, true);
   }
 
   function reflectUser(user) {
     closeMenu();
+    // onUserChanged reports null straight away, before the SDK has said
+    // whether a session will be restored; that null is not "signed out" yet.
+    if (!isAuthStateKnown()) return;
+    containerElement.hidden = false;
     if (user) {
       buttonElement.textContent = user.email || user.displayName || 'Account';
       buttonElement.title = 'Account — hover to log out';

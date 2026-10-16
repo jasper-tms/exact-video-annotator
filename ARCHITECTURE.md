@@ -1119,7 +1119,7 @@ from gstatic, so a blocked CDN or an offline start never breaks the app.
   `localStorage` keys are unchanged. `js/sync/installed-plugins-preference.js`
   adds the plugin URL list (whole-list last-write-wins); each URL in it is
   loaded at startup — see [Plugins](#plugins).
-- `js/ui/account-control.js` — the top bar's right-hand Log in / account control
+- `js/ui/account-control.js` — the top bar's Log in / account control, beside the app name
   (disabled when no config is present).
 
 Security rules live in `firebase/firestore.rules` (each `users/{uid}` document

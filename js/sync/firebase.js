@@ -35,14 +35,17 @@ function loadServices() {
 
 /* ---------- Auth observer ---------- */
 
-// The current signed-in user, or null. Undefined until the first auth state is
-// known (SDK still resolving); observers are only ever called with user|null.
+// The current signed-in user, or null — which is also what it reads while the
+// first auth state is still unknown (SDK still resolving); authStateKnown tells
+// the two apart. Observers are only ever called with user|null.
 let currentUserValue = null;
+let authStateKnown = false;
 let authStarted = false;
 const userListeners = new Set();
 
 function setCurrentUser(user) {
   currentUserValue = user;
+  authStateKnown = true;
   for (const listener of userListeners) {
     try { listener(user); } catch { /* one listener must not break the others */ }
   }
@@ -58,7 +61,16 @@ async function startAuthObserver() {
     authModule.onAuthStateChanged(auth, (user) => setCurrentUser(user ?? null));
   } catch {
     authStarted = false; // allow a later retry
+    // The SDK could not load, so no session can be restored: settle on
+    // signed out rather than leaving the state unknown forever.
+    if (!authStateKnown) setCurrentUser(null);
   }
+}
+
+/** Whether the first auth state has arrived (or the SDK failed to load), so
+    currentUser()'s null really means signed out. */
+export function isAuthStateKnown() {
+  return authStateKnown;
 }
 
 /** The current user, or null. */

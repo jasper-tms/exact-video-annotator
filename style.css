@@ -77,24 +77,26 @@ body {
 .toolbar-right { justify-self: end; }
 
 /* The "｜" separators from the layout spec: a thin vertical rule between the
-   text/button elements of a group. */
+   text/button elements of a group. The dim text color rather than the border
+   color, which is nearly invisible against the bar. */
 .toolbar-separator {
   width: 1px;
   align-self: stretch;
   margin: 8px 0;
-  background: var(--border);
+  background: var(--text-dim);
 }
 
 #application-title {
   flex: 0 0 auto;
   font-weight: 600;
-  color: var(--text-dim);
+  color: var(--text);
   white-space: nowrap;
 }
 
 /* A group's name, e.g. "Annotations" before its buttons. */
 .toolbar-label {
-  color: var(--text-dim);
+  font-weight: 600;
+  color: var(--text);
   white-space: nowrap;
 }
 
@@ -142,6 +144,16 @@ button:focus:not(:focus-visible) { outline: none; }
 #hovered-pixel-label:empty { display: none; }
 
 /* ---------- Account control (Log in / signed-in menu) ---------- */
+
+/* The separator and button together, laid out like the rest of the group. An
+   explicit display would override the hidden attribute, so restate it. */
+#account-control {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 8px;
+}
+#account-control[hidden] { display: none; }
 
 /* Signed-in state: the button carries the account email; keep it from growing
    the bar without bound on a long address. */

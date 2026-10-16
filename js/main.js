@@ -1395,7 +1395,8 @@ initializeLayerDetail(app, document.getElementById('layer-detail-container'));
 initializeClassManager(app, document.getElementById('class-manager-container'));
 initializeAnnotationsTable(app, document.getElementById('annotations-table-container'));
 initializeSettingsModal(app, document.getElementById('settings-button'));
-initializeAccountControl(app, document.getElementById('login-button'));
+initializeAccountControl(app, document.getElementById('account-control'),
+  document.getElementById('login-button'));
 initializeEventHotkeys(app);
 
 // Start syncing preferences to the Firebase backend when signed in. Purely
