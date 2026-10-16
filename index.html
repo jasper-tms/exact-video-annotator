@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>exact-video-annotator</title>
+  <title>Video Examiner</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="css/panels.css">
   <link rel="stylesheet" href="css/tables.css">
@@ -22,7 +22,7 @@
        used to sit at the far right here; it now overlays the canvas corner. -->
   <header id="toolbar">
     <div class="toolbar-side toolbar-left">
-      <span id="application-title">exact-video-annotator</span>
+      <span id="application-title">Video Examiner</span>
       <span class="toolbar-separator" aria-hidden="true"></span>
       <button id="open-media-button" title="Open a video or image file">Open Media</button>
     </div>
@@ -55,27 +55,28 @@
       <!-- Each tool also selects and moves any existing annotation, of any
            kind; pressing a tool's hotkey (or clicking its button) while it is
            already active just blinks the button (every tool pans on its own
-           now, so there's no useful fallback tool to switch to). Hotkeys for
-           these tool buttons ('1', '2', ...) are assigned dynamically by
-           main.js from their position here, not written statically below. -->
-      <button data-tool="pan" class="rail-button" title="Pan the view">
+           now, so there's no useful fallback tool to switch to). The number
+           hotkeys ('1', '2', ...) follow the buttons' order here; they are
+           written out so the corner labels show before main.js runs, and
+           main.js warns if they ever stop matching that order. -->
+      <button data-tool="pan" class="rail-button" data-hotkey="1" title="Pan the view (1)">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
           <polygon points="12,1 15.5,6 13,6 13,18 15.5,18 12,23 8.5,18 11,18 11,6 8.5,6"></polygon>
           <polygon points="1,12 6,8.5 6,11 18,11 18,8.5 23,12 18,15.5 18,13 6,13 6,15.5"></polygon>
         </svg>
       </button>
-      <button data-tool="point" class="rail-button" title="Add points">
+      <button data-tool="point" class="rail-button" data-hotkey="2" title="Add points (2)">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
           <circle cx="12" cy="12" r="6.5"></circle>
         </svg>
       </button>
-      <button data-tool="line" class="rail-button" title="Draw lines">
+      <button data-tool="line" class="rail-button" data-hotkey="3" title="Draw lines (3)">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="5" y1="19" x2="19" y2="5"></line>
         </svg>
       </button>
-      <button data-tool="polyline" class="rail-button" title="Draw polylines">
+      <button data-tool="polyline" class="rail-button" data-hotkey="4" title="Draw polylines (4)">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M5,21 L5,12 L11.36,5.64 L20.36,5.64"></path>
@@ -88,7 +89,7 @@
       </button>
       <!-- Pixel-wise segmentation isn't implemented yet, so this button has no
            backing tool at all — it always shows a "not implemented" message. -->
-      <button id="paint-tool-button" class="rail-button" title="Paint pixels — not implemented yet">
+      <button id="paint-tool-button" class="rail-button rail-button-unavailable" title="Paint pixels — not implemented yet">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
           <!-- A tapered handle and a flame-shaped tip, drawn upright (tip down),
                then turned so the tip points down-left. It is enlarged to fill the
@@ -145,7 +146,7 @@
       <!-- Pinned to the bottom of the rail: slide the panel up over the canvas,
            then back down. Its glyph points the way the panel will move (up
            while the panel is closed, down otherwise). -->
-      <button id="scroll-toggle-button" class="rail-button rail-button-bottom" data-hotkey="0"
+      <button id="scroll-toggle-button" class="rail-button rail-button-bottom pointing-up" data-hotkey="0"
               title="Show the details panel (0)">
         <svg class="scroll-arrow" viewBox="0 0 24 24" width="22" height="22"
              fill="none" stroke="currentColor" stroke-width="4"

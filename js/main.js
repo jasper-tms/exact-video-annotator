@@ -43,10 +43,10 @@ import { getSecondMediaBehavior, setSecondMediaBehavior } from './second-media-p
 import { promptForSecondMediaChoice } from './ui/second-media-prompt.js';
 import { drawPixelGrid } from './pixel-grid.js';
 
-// The Cloudflare Pages project is exact-video-annotator.pages.dev, kept as
-// the default identity; examine.video is a custom domain pointed at the same
-// deployment and gets its own display name, matching subdomains too (e.g.
-// www.examine.video).
+// examine.video (and its subdomains, e.g. www.examine.video) is the live site,
+// so index.html is written with its name, "Video Examiner", and shows it from
+// the first paint. Every other host — the Cloudflare Pages project
+// exact-video-annotator.pages.dev, its previews, localhost — is renamed here.
 const { hostname } = window.location;
 const applicationName = hostname === 'examine.video' || hostname.endsWith('.examine.video')
   ? 'Video Examiner'
@@ -2260,20 +2260,23 @@ redoButton.addEventListener('click', () => app.undoHistory.redo());
 /* ---------- Toolbar ---------- */
 
 const toolButtons = [...document.querySelectorAll('#tool-rail button[data-tool]')];
-// Number keys are assigned by position in the tool rail — '1' for the first
-// button (pan, at the top), increasing going down — rather than written
-// statically per tool, so the assignment always follows the rail's actual
-// order. '0' is reserved for the scroll-to-details button further down the
-// rail (see reflectScrollToggle); a tool rail with more than this many tools
-// simply leaves the rest without a number key.
+// Number keys follow position in the tool rail — '1' for the first button
+// (pan, at the top), increasing going down. index.html writes them out (in
+// data-hotkey and the title) so the corner labels show from the first paint;
+// this warns if a rail edit ever leaves them out of order. '0' is reserved for
+// the scroll-to-details button further down the rail (see
+// reflectScrollToggle); a tool rail with more than this many tools simply
+// leaves the rest without a number key.
 const MAXIMUM_NUMBERED_TOOLS = 9;
 const toolHotkeys = new Map();
 toolButtons.forEach((button, index) => {
-  if (index >= MAXIMUM_NUMBERED_TOOLS) return;
-  const hotkey = String(index + 1);
-  toolHotkeys.set(button.dataset.tool, hotkey);
-  button.dataset.hotkey = hotkey;
-  button.title = `${button.title} (${hotkey})`;
+  const hotkey = button.dataset.hotkey;
+  const expectedHotkey = index < MAXIMUM_NUMBERED_TOOLS ? String(index + 1) : undefined;
+  if (hotkey !== expectedHotkey) {
+    console.warn(`Tool rail button "${button.dataset.tool}" has hotkey "${hotkey}" `
+      + `in index.html, but its position calls for "${expectedHotkey}".`);
+  }
+  if (hotkey) toolHotkeys.set(button.dataset.tool, hotkey);
 });
 // Preserved so an unavailable button's hotkey tooltip can be restored once a
 // matching layer exists again.
@@ -2379,9 +2382,9 @@ reflectToolAvailability();
 /* The paintbrush (segmentation) button has no backing tool yet — pixel-wise
    painting is not implemented, regardless of whether a Segmentation layer
    exists, so it always shows the same message rather than participating in
-   the generic tool-availability machinery above. */
+   the generic tool-availability machinery above (index.html marks it
+   rail-button-unavailable from the start). */
 const paintToolButton = document.getElementById('paint-tool-button');
-paintToolButton.classList.add('rail-button-unavailable');
 function announcePaintNotImplemented() {
   app.showToast("Pixel painting isn't implemented yet.", { kind: 'warning' });
 }
