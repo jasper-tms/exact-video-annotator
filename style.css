@@ -976,10 +976,13 @@ button:focus:not(:focus-visible) { outline: none; }
 
 #indexing-status[hidden] { display: none; }
 
+/* Kept clear of whatever the sliding panel has been raised over, like the
+   drop hint (see #drop-hint), so its bottom edge stays in view. */
 #stage-container.drag-over::after {
   content: "";
   position: absolute;
   inset: 6px;
+  bottom: calc(6px + var(--stage-covered-by-panel-height, 0px));
   border: 2px dashed var(--accent);
   border-radius: 10px;
   pointer-events: none;
