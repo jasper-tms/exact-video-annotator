@@ -132,8 +132,8 @@ hit-test their target layer on pointer-down, so pressing an existing annotation 
 annotations. The press that selects an item never drags it, so a slightly
 wobbly click can't move an annotation by accident. This shared
 behavior lives in `js/tools/annotation-dragging.js`. A click on empty space
-instead **deselects**; if it turns into a drag instead, it **pans** the view
-regardless of which tool is active. Starting a brand-new annotation always
+instead **deselects** (with every tool, and with no tool); if it turns into a
+drag instead, it **pans** the view regardless of which tool is active. Starting a brand-new annotation always
 takes a **double-click** — on empty space, or on an annotation of a different
 kind than the active tool. A double-click on a same-kind annotation is a no-op
 (it was already selected by the two preceding pointer-downs), except
@@ -744,6 +744,7 @@ drive it with synthetic edges and stripes.
 | `a` | toggle frame-agnostic mode for new annotations |
 | `f` | fit the view to the content |
 | `r` | re-fit the selected annotation (plugin layers that fit; see "Plugins") |
+| `s` | select the current-frame vertex (point, or line/polyline corner) nearest the cursor on the active coordinates layer, as if clicked — only when it is within 60 screen pixels and less than half as far as the next-nearest vertex, else deselect. Vertices outside the visible canvas are ignored. An event type or plugin bound to `s` takes precedence |
 | `Delete`/`Backspace` | delete selected item (or selected vertex) — works in any tool |
 | `Escape` | commit an in-progress line/polyline as an open shape (or cancel outright if too few vertices), else clear the selection |
 | `Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z` | undo, redo |

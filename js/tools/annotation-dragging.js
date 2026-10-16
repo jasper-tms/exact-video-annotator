@@ -10,6 +10,8 @@
 // layer through the editing contract in ARCHITECTURE.md (hitTest +
 // snapshot/restore + moveItemBy/moveVertexTo).
 
+import { isClosedPolyline } from '../layers/coordinates-layer.js';
+
 // The in-progress drag, or null: { layer, itemId, part, vertexIndex,
 // lastLocalPoint, beforeSnapshot, moved }. Only one drag can exist at a time
 // across all tools, so module-level state is safe.
@@ -25,6 +27,59 @@ export function hitTestLayer(app, layer, worldPoint) {
     stageFromLocal: (point) => ({ x: point.x * scaleX + offsetX, y: point.y * scaleY + offsetY }),
     document: app.annotationDocument,
   });
+}
+
+// Selecting with the s key only picks a vertex this many times closer to the
+// cursor than every other vertex, so a press between two candidates
+// deselects instead of guessing.
+const SELECT_NEAREST_DISTANCE_RATIO = 0.5;
+// ...and only one at most this far from the cursor, in screen pixels (so the
+// reach is the same at every zoom), so whatever gets selected is close enough
+// to the cursor for the eye to catch it.
+const SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS = 60;
+
+/**
+ * Select the vertex nearest to worldPoint among the layer's current-frame
+ * items, as clicking it would, or deselect when none is clearly nearest:
+ * it must be within SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS of the cursor and
+ * less than half as far as the next-nearest vertex. Distances are measured on
+ * screen, and vertices outside the visible canvas are ignored entirely, so
+ * they can neither be picked nor make a visible one ambiguous. A closed
+ * polyline's closing duplicate of vertex 0 is skipped, or the two would
+ * always tie. Returns true if something was selected.
+ */
+export function selectNearestVertex(app, layer, worldPoint) {
+  const { scaleX, scaleY, offsetX, offsetY } = app.viewer.stageTransformForLayer(layer);
+  const { width: stageWidth, height: stageHeight } = app.viewer.stageCanvas.getBoundingClientRect();
+  const localPoint = app.localFromWorld(layer, worldPoint);
+  const cursorX = localPoint.x * scaleX + offsetX;
+  const cursorY = localPoint.y * scaleY + offsetY;
+  let nearest = null;
+  let secondNearestDistance = Infinity;
+  for (const item of layer.items) {
+    if (item.frame !== null && item.frame !== app.currentFrame) continue;
+    const vertexCount = isClosedPolyline(item) ? item.vertices.length - 1 : item.vertices.length;
+    for (let index = 0; index < vertexCount; index++) {
+      const stageX = item.vertices[index][0] * scaleX + offsetX;
+      const stageY = item.vertices[index][1] * scaleY + offsetY;
+      if (stageX < 0 || stageX > stageWidth || stageY < 0 || stageY > stageHeight) continue;
+      const distance = Math.hypot(stageX - cursorX, stageY - cursorY);
+      if (!nearest || distance < nearest.distance) {
+        if (nearest) secondNearestDistance = nearest.distance;
+        nearest = { itemId: item.id, vertexIndex: index, distance };
+      } else if (distance < secondNearestDistance) {
+        secondNearestDistance = distance;
+      }
+    }
+  }
+  if (!nearest
+      || nearest.distance > SELECT_NEAREST_MAXIMUM_SCREEN_PIXELS
+      || nearest.distance >= SELECT_NEAREST_DISTANCE_RATIO * secondNearestDistance) {
+    app.setSelection(null);
+    return false;
+  }
+  app.setSelection({ layerId: layer.id, itemId: nearest.itemId, vertexIndex: nearest.vertexIndex });
+  return true;
 }
 
 /** Select the hit item and, if it was already selected before this press, arm

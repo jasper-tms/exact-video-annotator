@@ -25,7 +25,7 @@ import { getInstalledPlugins, subscribeInstalledPlugins }
   from './sync/installed-plugins-preference.js';
 import { refitSelectedItem } from './plugins/refit.js';
 import { pointTool } from './tools/point-tool.js';
-import { hitTestLayer } from './tools/annotation-dragging.js';
+import { hitTestLayer, selectNearestVertex } from './tools/annotation-dragging.js';
 import { polylineTool } from './tools/polyline-tool.js';
 import { lineTool } from './tools/line-tool.js';
 import { initializeEventHotkeys } from './tools/event-hotkeys.js';
@@ -1243,6 +1243,15 @@ function updateHoveredPixelLabel(worldPoint) {
 }
 stageCanvas.addEventListener('pointerleave', () => { hoveredPixelLabel.textContent = ''; });
 
+// Where the mouse last was over the canvas, in client coordinates (null once
+// it leaves), for the s key. Kept in client coordinates rather than world
+// ones so a zoom or pan since the last move is still accounted for.
+let lastCanvasPointerClientPosition = null;
+stageCanvas.addEventListener('pointermove', (event) => {
+  lastCanvasPointerClientPosition = { clientX: event.clientX, clientY: event.clientY };
+});
+stageCanvas.addEventListener('pointerleave', () => { lastCanvasPointerClientPosition = null; });
+
 app.viewer.toolDelegate = {
   onPointerDown: (worldPoint, event) => {
     // No tool selected: a canvas drag pans the view (the viewer takes over the
@@ -1263,7 +1272,10 @@ app.viewer.toolDelegate = {
 // nor landed on an annotation) goes to the coordinates layer's
 // handleCanvasClick hook whatever the active tool, after the tool has handled
 // the press itself: tools decide what a double-click adds, and plugins'
-// clicks work the same with every tool.
+// clicks work the same with every tool. With the pan tool or no tool, it
+// first deselects — the drawing tools deselect on such a click themselves
+// (unless they are mid-shape), but the pan tool hands every empty press
+// straight to the viewer's pan and so never sees it end.
 const CLICK_MOVEMENT_LIMIT_SCREEN_PIXELS = 4;
 let canvasPress = null;   // { clientX, clientY, onAnnotation }, or null
 stageCanvas.addEventListener('pointerdown', (event) => {
@@ -1279,6 +1291,7 @@ stageCanvas.addEventListener('click', (event) => {
   if (!press || press.onAnnotation || event.button !== 0) return;
   if (Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY)
       > CLICK_MOVEMENT_LIMIT_SCREEN_PIXELS) return;
+  if (!app.activeTool || app.activeTool.id === 'pan') app.setSelection(null);
   const layer = app.findAnnotationLayerForType('coordinates');
   if (layer?.visible) layer.handleCanvasClick?.(app, app.viewer.worldFromPointerEvent(event), event);
 });
@@ -2683,7 +2696,19 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  if (app.runKeyHandlers(event)) event.preventDefault();
+  if (app.runKeyHandlers(event)) { event.preventDefault(); return; }
+
+  // s selects the vertex nearest the cursor when one is clearly nearest, and
+  // otherwise deselects. It comes after the key handlers so an event type or
+  // plugin bound to s keeps working.
+  if (event.key === 's' && lastCanvasPointerClientPosition) {
+    const layer = app.findAnnotationLayerForType('coordinates');
+    if (layer?.visible) {
+      selectNearestVertex(app, layer, app.viewer.worldFromPointerEvent(lastCanvasPointerClientPosition));
+    } else {
+      app.setSelection(null);
+    }
+  }
 });
 
 // Ends a tool hotkey's blink exactly when the key is released, matching a

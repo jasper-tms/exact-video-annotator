@@ -225,6 +225,64 @@ try {
   check(polygonFacts.item?.kind === 'polyline' && polygonFacts.item?.vertices.length === 4,
         'closing near the first vertex creates a 4-vertex closed polyline');
 
+  // ---- s selects the vertex nearest the cursor, when it is clearly nearest ----
+  const readSelection = () => page.evaluate(() => {
+    const selection = window.exactVideoAnnotator.selection;
+    return selection ? { itemId: selection.itemId, vertexIndex: selection.vertexIndex } : null;
+  });
+  await page.keyboard.press('Escape');
+  await page.mouse.move(stageBox.x + stageBox.width * 0.45, stageBox.y + stageBox.height * 0.3);
+  await page.keyboard.press('s');
+  check(await readSelection() === null,
+        's halfway between two triangle corners selects nothing');
+  await page.mouse.move(stageBox.x + stageBox.width * 0.6 - 6, stageBox.y + stageBox.height * 0.3 + 4);
+  await page.keyboard.press('s');
+  let selectionAfterS = await readSelection();
+  check(selectionAfterS?.itemId === polygonFacts.item.id && selectionAfterS?.vertexIndex === 1,
+        's near a triangle corner selects that corner');
+  await page.mouse.move(triangleFirstVertex.x + 5, triangleFirstVertex.y + 5);
+  await page.keyboard.press('s');
+  selectionAfterS = await readSelection();
+  check(selectionAfterS?.itemId === polygonFacts.item.id && selectionAfterS?.vertexIndex === 0,
+        "s near a closed polyline's first corner selects it, despite its closing duplicate");
+  await page.mouse.move(stageCenterX + 8, stageCenterY - 5);
+  await page.keyboard.press('s');
+  selectionAfterS = await readSelection();
+  check(selectionAfterS?.itemId === pointFacts.item.id, 's near the point selects the point');
+  await page.mouse.move(stageBox.x + stageBox.width * 0.45, stageBox.y + stageBox.height * 0.3);
+  await page.keyboard.press('s');
+  check(await readSelection() === null, 's in an ambiguous spot deselects');
+  await page.mouse.move(stageCenterX + 8, stageCenterY - 5);
+  await page.keyboard.press('s');
+  await page.mouse.move(stageCenterX + 80, stageCenterY);
+  await page.keyboard.press('s');
+  check(await readSelection() === null,
+        's deselects when the nearest vertex is more than 60 screen pixels away');
+  // Pan the view so the point sits just past the canvas's left edge, with the
+  // cursor just inside it: that point is no longer a candidate.
+  const savedViewTransform = await page.evaluate(() => {
+    const viewer = window.exactVideoAnnotator.viewer;
+    const saved = { ...viewer.viewTransform };
+    viewer.viewTransform.offsetX -= viewer.stageCanvas.getBoundingClientRect().width / 2 + 10;
+    viewer.requestRender();
+    return saved;
+  });
+  await page.mouse.move(stageBox.x + 5, stageCenterY);
+  await page.keyboard.press('s');
+  check(await readSelection() === null, 's never selects a vertex outside the visible canvas');
+  await page.evaluate((saved) => {
+    const viewer = window.exactVideoAnnotator.viewer;
+    Object.assign(viewer.viewTransform, saved);
+    viewer.requestRender();
+  }, savedViewTransform);
+  // A click on empty canvas deselects with the pan tool too.
+  await page.mouse.move(stageCenterX + 8, stageCenterY - 5);
+  await page.keyboard.press('s');
+  await page.keyboard.press('1');
+  await page.mouse.click(stageCenterX + 80, stageCenterY);
+  check(await readSelection() === null, 'clicking empty canvas with the pan tool deselects');
+  await page.keyboard.press('2');
+
   // ---- Event hotkey (create an event type, press its key) ----
   await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
