@@ -923,7 +923,7 @@ button:focus:not(:focus-visible) { outline: none; }
 
 /* Every length in here is in em and no line wraps, so the whole hint scales
    in proportion to its font size, which js/main.js sets (see
-   fitDropHintToStage). */
+   fitDropHintToVisibleCanvas). */
 #drop-hint-content {
   display: flex;
   flex-direction: column;

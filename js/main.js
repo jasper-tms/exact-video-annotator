@@ -1245,7 +1245,7 @@ const hoveredPixelLabel = document.getElementById('hovered-pixel-label');
 // it shrinks just enough to fit. Less of the height, so a short, wide canvas
 // still leaves room above and below it; phones get more of both, having so
 // little room to begin with.
-const DROP_HINT_LARGEST_FONT_SIZE_PIXELS = 30;
+const DROP_HINT_LARGEST_FONT_SIZE_PIXELS = 24;
 const DROP_HINT_LARGEST_CANVAS_WIDTH_FRACTION = 0.75;
 const DROP_HINT_LARGEST_CANVAS_HEIGHT_FRACTION = 0.6;
 const DROP_HINT_LARGEST_CANVAS_FRACTION_ON_TOUCH_DEVICES = 0.9;
@@ -1256,16 +1256,16 @@ const touchDeviceQuery = window.matchMedia('(hover: none) and (pointer: coarse)'
 // text. A few more measured corrections settle it.
 const DROP_HINT_FITTING_PASSES = 4;
 
-/** Size the drop hint to the canvas. Everything in it scales with its font
-    size (see #drop-hint-content in style.css), so measuring it at the
-    largest size says roughly how far it has to shrink. Sized to the whole
-    canvas, not just the part the sliding panel leaves in view, so raising
-    the panel moves the hint without resizing it. */
-function fitDropHintToStage() {
+/** Size the drop hint to the canvas still in view: #drop-hint's own box,
+    which leaves out whatever the sliding panel has been raised over (see
+    #drop-hint in style.css), so the hint shrinks as the panel rises.
+    Everything in it scales with its font size (see #drop-hint-content), so
+    measuring it at the largest size says roughly how far it has to shrink. */
+function fitDropHintToVisibleCanvas() {
   const onTouchDevice = touchDeviceQuery.matches;
-  const largestWidth = stageContainer.clientWidth * (onTouchDevice
+  const largestWidth = dropHint.clientWidth * (onTouchDevice
     ? DROP_HINT_LARGEST_CANVAS_FRACTION_ON_TOUCH_DEVICES : DROP_HINT_LARGEST_CANVAS_WIDTH_FRACTION);
-  const largestHeight = stageContainer.clientHeight * (onTouchDevice
+  const largestHeight = dropHint.clientHeight * (onTouchDevice
     ? DROP_HINT_LARGEST_CANVAS_FRACTION_ON_TOUCH_DEVICES : DROP_HINT_LARGEST_CANVAS_HEIGHT_FRACTION);
   let fontSize = DROP_HINT_LARGEST_FONT_SIZE_PIXELS;
   for (let pass = 0; pass < DROP_HINT_FITTING_PASSES; pass++) {
@@ -1279,9 +1279,9 @@ function fitDropHintToStage() {
   }
   dropHintContent.style.fontSize = `${fontSize}px`;
 }
-new ResizeObserver(fitDropHintToStage).observe(stageContainer);
-touchDeviceQuery.addEventListener('change', fitDropHintToStage);
-document.fonts.ready.then(fitDropHintToStage);
+new ResizeObserver(fitDropHintToVisibleCanvas).observe(dropHint);
+touchDeviceQuery.addEventListener('change', fitDropHintToVisibleCanvas);
+document.fonts.ready.then(fitDropHintToVisibleCanvas);
 
 app.viewer = new Viewer(stageCanvas);
 
@@ -1529,7 +1529,7 @@ function updateDropHint() {
   const anyMediaOpen = app.mediaLayers.length > 0;
   dropHint.classList.toggle('hidden', anyMediaOpen);
   // Hidden, it could not be measured when the canvas last changed size.
-  if (!anyMediaOpen) fitDropHintToStage();
+  if (!anyMediaOpen) fitDropHintToVisibleCanvas();
   app.viewer.navigationEnabled = anyMediaOpen;
   if (!anyMediaOpen) hoveredPixelLabel.textContent = '';
 }
