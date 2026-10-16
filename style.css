@@ -23,8 +23,13 @@
 
 * { box-sizing: border-box; }
 
+/* Stop the page bouncing sideways (and swiping back a page) when scrolled
+   horizontally past its edge, while keeping the vertical bounce. Overscroll
+   behavior only governs the page's own scroll when set on the root element;
+   on body it has no effect on the viewport. */
 html {
   background: var(--background);
+  overscroll-behavior-x: none;
 }
 
 body {
@@ -34,7 +39,6 @@ body {
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
-  overscroll-behavior: none;
 }
 
 /* ---------- Toolbar ---------- */
