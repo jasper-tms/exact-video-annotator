@@ -235,11 +235,9 @@ export function initializeLayerTabs(app, containerElement) {
 
   function beginTabDrag(event, layer, tabElement) {
     if (event.button !== 0) return;
-    if (event.target.closest('.layer-tab-eye')) return;
     if (event.target instanceof HTMLInputElement) return;   // renaming
     suppressNextTabClick = false;
     tabDrag = { layer, tabElement, pointerId: event.pointerId, startX: event.clientX, isDragging: false };
-    tabElement.setPointerCapture(event.pointerId);
   }
 
   // The dragged tab glides with the pointer: a transform offsets it from its
@@ -340,6 +338,10 @@ export function initializeLayerTabs(app, containerElement) {
       tabDrag.grabOffsetX = tabDrag.startX - tabDrag.tabElement.getBoundingClientRect().left;
       tabDrag.translationX = 0;
       tabDrag.tabElement.classList.add('dragging');
+      // Captured only once dragging, not on pointer-down: a capture sends the
+      // pointer-up, and so the click, to the tab, and a plain click on the eye
+      // has to reach the eye.
+      tabDrag.tabElement.setPointerCapture(event.pointerId);
     }
     updateDraggedTabTransform(event);
     if (reSlotDraggedTab()) {
