@@ -201,9 +201,9 @@
   display: inline-block;
   width: 8px;
   height: 8px;
-  margin-right: 6px;
+  margin-right: 2px;
   border-radius: 50%;
-  vertical-align: 1px;
+  vertical-align: middle;
 }
 
 .annotations-table tbody tr {
@@ -223,23 +223,56 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* "key: value" per line, after the ✎ button that opens the editor. */
+/* The metadata, "key: value" per line, in a box that opens the editor when
+   clicked — an empty one, about five characters wide, when there is none. */
 .annotations-table .metadata-cell {
+  max-width: 220px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.annotations-table .metadata-box {
+  display: block;
+  min-width: 5ch;
+  min-height: 1.6em;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
   white-space: pre-wrap;
-  max-width: 180px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
 }
 
-.annotations-table .edit-metadata-button {
-  float: right;
-  margin-left: 4px;
-  padding: 0 4px;
-  font-size: 11px;
-  opacity: 0.5;
+.annotations-table .metadata-box:hover { border-color: var(--accent); }
+
+/* The class or event type, changed by clicking it: a picker that reads as
+   plain text until hovered. */
+.annotations-table .label-cell { padding-top: 3px; padding-bottom: 3px; }
+
+.annotations-table .label-picker {
+  max-width: 150px;
+  padding: 1px 4px;
+  font-size: 12px;
+  background: transparent;
+  border-color: transparent;
+  cursor: pointer;
 }
 
-.annotations-table tr:hover .edit-metadata-button { opacity: 1; }
+.annotations-table .label-picker:hover,
+.annotations-table .label-picker:focus {
+  border-color: var(--border);
+  background: var(--surface);
+}
 
-.metadata-dialog { width: min(420px, 90vw); }
+.annotations-table .label-color-dot.no-color { border: 1px solid var(--border); }
+
+.metadata-dialog { width: min(480px, 90vw); }
 
 .metadata-dialog .metadata-hint {
   margin: 0 0 8px;
@@ -247,17 +280,22 @@
   color: var(--text-dim);
 }
 
-.metadata-dialog .metadata-text {
-  box-sizing: border-box;
-  width: 100%;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px;
+/* One row per entry: key box, value box, remove button. */
+.metadata-dialog .metadata-grid {
+  display: grid;
+  grid-template-columns: 2fr 3fr auto;
+  gap: 6px;
+  align-items: center;
+  max-height: 50vh;
+  overflow-y: auto;
 }
+
+.metadata-dialog .metadata-column-heading {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.metadata-dialog .metadata-grid input { min-width: 0; }
 
 .metadata-dialog .metadata-error {
   margin: 6px 0 0;

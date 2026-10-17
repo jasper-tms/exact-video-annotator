@@ -260,11 +260,12 @@ pixels, `[x, y]`, and frames are counted from 0):
   vertices: [[x, y], ...],           // a point has exactly one
   classId,                           // the label, an id in layer.classes, or null
   name,                              // or null
-  metadata }                         // your own key-value pairs: { key: text, number or true/false }
+  metadata }                         // your own key-value pairs, all text: { key: 'text' }
 ```
 
 `metadata` is the place for structured labels your plugin attaches to an item
-(people can see and edit it in the annotations table). Layer-wide state that
+(people can see and edit it in the annotations table). Its values are always
+text: store a number as `'2'` and convert it back when you read it. Layer-wide state that
 should be saved with the file goes in `layer.options`.
 
 **Drawing.** `draw(context, renderState)` runs on every repaint with the canvas

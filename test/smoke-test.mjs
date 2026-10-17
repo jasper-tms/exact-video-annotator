@@ -546,9 +546,20 @@ try {
 
   // ---- Item metadata: edited in the annotations table, kept on export ----
   await selectCoordinatesLayer();
-  await page.locator('.edit-metadata-button').first().click();
-  await page.locator('.metadata-dialog .metadata-text').fill('table: 2\nkeypoint: +-\nnote: "7"');
+  await page.locator('.metadata-box').first().click();
+  // The editor opens with one empty row, and typing into the last row adds
+  // another below it.
+  const keyBoxes = page.locator('.metadata-dialog .metadata-key');
+  const valueBoxes = page.locator('.metadata-dialog .metadata-value');
+  const rowCountAtOpen = await keyBoxes.count();
+  for (const [index, [key, value]] of [['table', '2'], ['keypoint', '+-'], ['note', 'true']].entries()) {
+    await keyBoxes.nth(index).fill(key);
+    await valueBoxes.nth(index).fill(value);
+  }
+  const rowCountAfterTyping = await keyBoxes.count();
   await page.locator('.metadata-dialog .metadata-save').click();
+  check(rowCountAtOpen === 1 && rowCountAfterTyping === 4,
+        'the metadata editor starts with one row and adds one whenever the last is typed in');
   const metadataFacts = await page.evaluate(async () => {
     const documentModule = await import('./js/document.js');
     const application = window.exactVideoAnnotator;
@@ -565,12 +576,36 @@ try {
     return { edited: editedMetadata, reparsed: reparsedItem?.metadata, cellText,
              afterUndo: edited?.metadata };
   });
-  check(JSON.stringify(metadataFacts.edited) === JSON.stringify({ table: 2, keypoint: '+-', note: '7' }),
-        'the metadata editor stores numbers as numbers and quoted values as text');
+  check(JSON.stringify(metadataFacts.edited) === JSON.stringify({ table: '2', keypoint: '+-', note: 'true' }),
+        'the metadata editor stores every value as text');
   check(JSON.stringify(metadataFacts.reparsed) === JSON.stringify(metadataFacts.edited),
         'export/import round-trip preserves item metadata');
   check(metadataFacts.cellText.includes('table: 2'), 'the annotations table shows item metadata');
   check(JSON.stringify(metadataFacts.afterUndo) === '{}', 'undo restores the previous metadata');
+  const numberMetadata = await page.evaluate(async () => {
+    const documentModule = await import('./js/document.js');
+    return documentModule.parseMetadata({ court: 2, flagged: true });
+  });
+  check(JSON.stringify(numberMetadata) === JSON.stringify({ court: '2', flagged: 'true' }),
+        'numbers and true/false in a file are read as text');
+
+  // ---- Clicking an item's class changes it ----
+  await page.evaluate(() => {
+    const application = window.exactVideoAnnotator;
+    application.findAnnotationLayerForType('coordinates').classes
+      .push({ id: 'picker-class', name: 'picked', color: '#3cb44b' });
+    application.markDocumentChanged();
+  });
+  await page.locator('.label-picker').first().selectOption('picker-class');
+  const pickerFacts = await page.evaluate(() => {
+    const application = window.exactVideoAnnotator;
+    const layer = application.findAnnotationLayerForType('coordinates');
+    const relabelled = layer.items.filter((item) => item.classId === 'picker-class').length;
+    application.undoHistory.undo();
+    return { relabelled, afterUndo: layer.items.filter((item) => item.classId === 'picker-class').length };
+  });
+  check(pickerFacts.relabelled === 1 && pickerFacts.afterUndo === 0,
+        "the class picker relabels one annotation, undoably");
   // Leave focus off the panel so Space plays.
   await page.evaluate(() => document.activeElement?.blur());
 

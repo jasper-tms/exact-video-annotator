@@ -252,7 +252,9 @@ function parseItem(layerType, item) {
   };
 }
 
-/** An item's metadata: key → text, number or true/false. Missing means none. */
+/** An item's metadata: key → text. Missing means none. Every value is text;
+    a number or true/false (which files and plugins once wrote) is read as
+    its text, so `court: 2` becomes `court: "2"`. */
 export function parseMetadata(metadata) {
   if (metadata === undefined || metadata === null) return {};
   if (typeof metadata !== 'object' || Array.isArray(metadata)) {
@@ -262,9 +264,9 @@ export function parseMetadata(metadata) {
   for (const [key, value] of Object.entries(metadata)) {
     if (!(typeof value === 'string' || typeof value === 'boolean'
           || (typeof value === 'number' && Number.isFinite(value)))) {
-      throw new Error(`Metadata "${key}" must be text, a number, or true/false.`);
+      throw new Error(`Metadata "${key}" must be text.`);
     }
-    parsed[key] = value;
+    parsed[key] = String(value);
   }
   return parsed;
 }

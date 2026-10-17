@@ -351,10 +351,12 @@ type gets the whole list; with several, each gets the entries its items use,
 or the whole list if it uses none).
 
 `classId` and `name` on items are both optional (`null`). `metadata` is an
-item's own key-value pairs (`{ key: text | number | true/false }`, `{}` when
-missing): plugins keep structured labels there (the court plugin's
-`{ keypoint: '+-', court: 2 }`), and people can view and edit them in the
-annotations table (its ✎ button). Colors are CSS color
+item's own key-value pairs, all text (`{ key: text }`, `{}` when missing; a
+number or true/false in a file is read as its text): plugins keep structured
+labels there (the court plugin's `{ keypoint: '+-', court: '2' }`), and people
+can view and edit them in the annotations table (click the metadata box for an
+editor with a key box and a value box per entry; click an item's class or an
+event's type to change it). Colors are CSS color
 strings. A new document starts with one Coordinates layer and one Frames
 layer (Segmentation is opt-in from the ＋ menu, since it's not usable yet).
 
