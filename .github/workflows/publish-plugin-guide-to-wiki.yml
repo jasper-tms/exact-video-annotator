@@ -1,0 +1,56 @@
+name: Publish plugin guide to wiki
+
+# The plugin-building skill is the source of truth for the wiki's "Building
+# plugins" page. Publish it whenever main's copy changes, but only if the wiki
+# page still matches main's copy from before this push: anything else means
+# someone edited the wiki by hand, and those edits must be merged into the
+# skill rather than silently overwritten.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'agent-skills/building-video-examiner-plugins/SKILL.md'
+
+# Each run checks the wiki against the state the previous run left, so runs
+# must not overlap.
+concurrency:
+  group: publish-plugin-guide-to-wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # The whole history, so the commit before this push is available.
+          fetch-depth: 0
+
+      # A push that creates main has no previous commit to compare against.
+      # A force push's previous commit may no longer be on any branch, so fetch
+      # it by name in case the full-history checkout didn't include it.
+      - name: Fetch the commit before this push
+        env:
+          PREVIOUS_COMMIT: ${{ github.event.before }}
+        run: |
+          if [[ "$PREVIOUS_COMMIT" =~ ^0+$ ]]; then
+            echo "error: this push has no previous commit to check the wiki against;" \
+                 "run ./publish-plugin-guide-to-wiki.sh by hand" >&2
+            exit 1
+          fi
+          git cat-file -e "$PREVIOUS_COMMIT^{commit}" 2>/dev/null \
+            || git fetch --quiet origin "$PREVIOUS_COMMIT"
+
+      - name: Publish if the wiki has no manual edits
+        env:
+          PREVIOUS_COMMIT: ${{ github.event.before }}
+          WIKI_REPOSITORY: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          ./publish-plugin-guide-to-wiki.sh --only-if-wiki-matches "$PREVIOUS_COMMIT"
