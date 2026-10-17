@@ -9,7 +9,9 @@
 //
 // Formats are whatever the browser decodes natively through createImageBitmap
 // (PNG, JPEG, WebP, GIF, BMP); the bitmap is held fully in memory (images are
-// small next to the byte-range videos, so there is nothing to read lazily).
+// small next to the byte-range videos, so there is nothing to read lazily). A
+// GIF reaches this layer only when it has a single frame: an animated one opens
+// as a video (see mediaKindOf in main.js).
 
 import { MediaLayer } from './media-layer.js';
 

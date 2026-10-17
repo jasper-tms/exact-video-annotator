@@ -1560,6 +1560,17 @@ function isImageFile(file) {
   return IMAGE_EXTENSIONS.some((extension) => name.endsWith(extension));
 }
 
+/** Which kind of media layer a dropped or picked file opens as. An animated GIF
+    is a clip, not a picture: the engine indexes and decodes it frame by frame
+    like any video, so it gets a timeline and exact frame numbers. A GIF with a
+    single frame stays a still image. isAnimatedGif decides from the file's
+    bytes (reading only as far as a second frame), so a GIF with a misleading
+    name or type is still caught. */
+async function mediaKindOf(file) {
+  if (!isImageFile(file)) return 'video';
+  return await isAnimatedGif(file) ? 'video' : 'image';
+}
+
 /** Where a freshly opened media layer goes in the stack: directly above the
     topmost media already open (media sit together beneath the annotation
     layers), or index 0 when nothing is open. Combined with the reversed-media
@@ -2602,7 +2613,7 @@ mediaFileInput.addEventListener('change', () => {
   const file = mediaFileInput.files?.[0];
   if (file) {
     const meta = { name: file.name, sizeBytes: file.size };
-    loadMediaIntoWorkspace(file, meta, isImageFile(file) ? 'image' : 'video');
+    mediaKindOf(file).then((kind) => loadMediaIntoWorkspace(file, meta, kind));
   }
   mediaFileInput.value = '';
 });
@@ -2677,7 +2688,7 @@ stageContainer.addEventListener('drop', async (event) => {
   if (!file) return;
   if (file.name.toLowerCase().endsWith('.json')) await importAnnotationsFile(file);
   else loadMediaIntoWorkspace(file, { name: file.name, sizeBytes: file.size },
-    isImageFile(file) ? 'image' : 'video');
+    await mediaKindOf(file));
 });
 
 /* ---------- Buttons: no lingering focus ring after a mouse click ----------

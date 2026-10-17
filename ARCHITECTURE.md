@@ -828,7 +828,10 @@ beside a video stays on screen wherever the scrubber sits and an image opened
 alone needs no timeline. Formats are whatever the browser decodes natively via
 `createImageBitmap` — PNG, JPEG, WebP, GIF, BMP (`isImageFile` in `main.js`
 routes them; TIFF is deliberately excluded, as no browser decodes it without a
-JavaScript decoder). The bitmap is held fully in memory rather than read lazily
+JavaScript decoder). An *animated* GIF is not an image layer at all:
+`mediaKindOf` asks the engine's `isAnimatedGif` and opens a GIF with more than
+one frame as a video, which the engine indexes and decodes frame-exactly like
+any other clip. The bitmap is held fully in memory rather than read lazily
 — images are small next to the byte-range videos. Neither media kind is
 hit-tested, edited, or written into the annotation document; the user re-opens
 the file the way they re-open a video.
