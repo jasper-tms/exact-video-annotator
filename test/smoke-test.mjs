@@ -290,6 +290,34 @@ try {
   check(polygonFacts.item?.kind === 'polyline' && polygonFacts.item?.vertices.length === 4,
         'closing near the first vertex creates a 4-vertex closed polyline');
 
+  // ---- Wiggling a dragged polyline in place doesn't walk it away. With
+  // fractional coordinates off, each drag step used to floor the shape's
+  // position, so back-and-forth moves crept it toward (0, 0). ----
+  const readPolylineVertices = () => page.evaluate(() => {
+    const application = window.exactVideoAnnotator;
+    const coordinatesLayer =
+      application.annotationDocument.layers.find((layer) => layer.type === 'coordinates');
+    return coordinatesLayer.items.find((item) => item.kind === 'polyline').vertices
+      .map((vertex) => [...vertex]);
+  });
+  const fractionalCoordinatesAllowed = await page.evaluate(() =>
+    window.exactVideoAnnotator.annotationDocument.layers
+      .find((layer) => layer.type === 'coordinates').allowFractionalCoordinates);
+  check(!fractionalCoordinatesAllowed, 'the coordinates layer snaps to whole pixels by default');
+  const verticesBeforeWiggle = await readPolylineVertices();
+  const wiggleStart = { x: stageBox.x + stageBox.width * 0.45, y: stageBox.y + stageBox.height * 0.3 };
+  await page.mouse.move(wiggleStart.x, wiggleStart.y);
+  await page.mouse.down();
+  await page.waitForTimeout(400);  // past the hold that unlocks dragging a newly selected item
+  for (let wiggle = 0; wiggle < 20; wiggle++) {
+    await page.mouse.move(wiggleStart.x + 3.3, wiggleStart.y + 2.7, { steps: 3 });
+    await page.mouse.move(wiggleStart.x, wiggleStart.y, { steps: 3 });
+  }
+  await page.mouse.up();
+  const verticesAfterWiggle = await readPolylineVertices();
+  check(JSON.stringify(verticesAfterWiggle) === JSON.stringify(verticesBeforeWiggle),
+        'wiggling a dragged polyline and returning to the start leaves it where it was');
+
   // ---- s selects the vertex nearest the cursor, when it is clearly nearest ----
   const readSelection = () => page.evaluate(() => {
     const selection = window.exactVideoAnnotator.selection;

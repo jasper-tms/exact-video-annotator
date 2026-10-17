@@ -19,7 +19,7 @@ import { isClosedPolyline } from '../layers/coordinates-layer.js';
 const UNSELECTED_ITEM_DRAG_HOLD_MILLISECONDS = 300;
 
 // The in-progress drag, or null: { layer, itemId, part, vertexIndex,
-// lastLocalPoint, beforeSnapshot, moved, unlockTimeoutId, pendingWorldPoint }.
+// startLocalPoint, beforeSnapshot, moved, unlockTimeoutId, pendingWorldPoint }.
 // unlockTimeoutId is non-null while the hold that unlocks moving is still
 // running; pendingWorldPoint is the latest pointer position seen during that
 // hold, or null. Only one drag can exist at a time across all tools, so
@@ -123,7 +123,7 @@ export function beginDragOnExistingItem(app, layer, hitResult, worldPoint) {
     itemId: hitResult.itemId,
     part: hitResult.part,
     vertexIndex: hitResult.vertexIndex,
-    lastLocalPoint: app.localFromWorld(layer, worldPoint),
+    startLocalPoint: app.localFromWorld(layer, worldPoint),
     beforeSnapshot: layer.snapshotItemGeometry(hitResult.itemId),
     moved: false,
     unlockTimeoutId: null,
@@ -155,17 +155,21 @@ export function updateDragOnExistingItem(app, worldPoint) {
 /** Move the dragged vertex, or translate the dragged item, to follow the
     pointer to worldPoint. */
 function moveDraggedItemTo(app, worldPoint) {
-  const { layer, itemId, part, vertexIndex } = dragState;
+  const { layer, itemId, part, vertexIndex, startLocalPoint, beforeSnapshot } = dragState;
   const localPoint = app.localFromWorld(layer, worldPoint);
   if (part === 'vertex') {
     layer.moveVertexTo(itemId, vertexIndex, localPoint);
   } else {
+    // Translate from the geometry at the start of the drag by the pointer's
+    // total offset, never step by step from the last move: when the layer
+    // snaps coordinates to whole pixels, every step would floor away its
+    // fraction, so wiggling the pointer would walk the item toward (0, 0).
+    layer.restoreItemGeometry(itemId, beforeSnapshot);
     layer.moveItemBy(itemId, {
-      x: localPoint.x - dragState.lastLocalPoint.x,
-      y: localPoint.y - dragState.lastLocalPoint.y,
+      x: localPoint.x - startLocalPoint.x,
+      y: localPoint.y - startLocalPoint.y,
     });
   }
-  dragState.lastLocalPoint = localPoint;
   dragState.moved = true;
   app.viewer.requestRender();
 }
