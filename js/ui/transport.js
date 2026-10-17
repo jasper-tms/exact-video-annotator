@@ -122,6 +122,21 @@ export function initializeTransport(app, containerElement) {
       frameInput.blur();
     }
   });
+  // Focusing the box selects its whole number, so typing replaces it. A click
+  // would otherwise undo that selection on mouseup by placing the cursor, so
+  // the mouseup that finishes a focusing click is swallowed. Later clicks
+  // into an already-focused box still place the cursor normally.
+  let frameInputJustFocusedByClick = false;
+  frameInput.addEventListener('mousedown', () => {
+    frameInputJustFocusedByClick = document.activeElement !== frameInput;
+  });
+  frameInput.addEventListener('focus', () => {
+    frameInput.select();
+  });
+  frameInput.addEventListener('mouseup', (event) => {
+    if (frameInputJustFocusedByClick) event.preventDefault();
+    frameInputJustFocusedByClick = false;
+  });
   frameInput.addEventListener('blur', () => {
     if (!suppressNextFrameInputCommit) commitFrameInputIfChanged();
     suppressNextFrameInputCommit = false;
