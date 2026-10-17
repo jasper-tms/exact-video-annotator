@@ -196,12 +196,14 @@ try {
         && Number.isFinite(pointFacts.item.vertices[0][1]),
         'point has one finite source-pixel vertex');
 
-  // ---- The press that selects a point never drags it ----
+  // ---- A quick press that selects a point doesn't drag it ----
   const stageCenterX = stageBox.x + stageBox.width / 2;
   const stageCenterY = stageBox.y + stageBox.height / 2;
   await page.mouse.click(stageBox.x + 10, stageBox.y + 10);
   const deselected = await page.evaluate(() => window.exactVideoAnnotator.selection === null);
   check(deselected, 'clicking empty space deselects the new point');
+  const undoLabelBeforeQuickDrag =
+    await page.evaluate(() => window.exactVideoAnnotator.undoHistory.nextUndoLabel);
   await page.mouse.move(stageCenterX, stageCenterY);
   await page.mouse.down();
   await page.mouse.move(stageCenterX + 40, stageCenterY + 25, { steps: 5 });
@@ -211,13 +213,16 @@ try {
     const coordinatesLayer =
       application.annotationDocument.layers.find((layer) => layer.type === 'coordinates');
     const point = coordinatesLayer.items.find((item) => item.kind === 'point');
-    return { vertex: [...point.vertices[0]], selectedItemId: application.selection?.itemId ?? null };
+    return { vertex: [...point.vertices[0]], selectedItemId: application.selection?.itemId ?? null,
+             undoLabel: application.undoHistory.nextUndoLabel };
   });
   check(selectingPressFacts.selectedItemId === pointFacts.item.id,
         'pressing an unselected point selects it');
   check(selectingPressFacts.vertex[0] === pointFacts.item.vertices[0][0]
         && selectingPressFacts.vertex[1] === pointFacts.item.vertices[0][1],
-        'dragging on the press that selects a point does not move it');
+        'a quick drag on the press that selects a point does not move it');
+  check(selectingPressFacts.undoLabel === undoLabelBeforeQuickDrag,
+        'a quick drag that moves nothing adds no undo entry');
 
   // ---- Drag the now-selected point with the same tool (there is no
   // separate select tool) ----
@@ -240,6 +245,26 @@ try {
   const restoredVertex = await readFirstPointVertex();
   check(restoredVertex[0] === originalVertex[0] && restoredVertex[1] === originalVertex[1],
         'undo restores the dragged point');
+
+  // ---- Holding the press that selects a point long enough lets it drag ----
+  await page.mouse.click(stageBox.x + 10, stageBox.y + 10);
+  await page.mouse.move(stageCenterX, stageCenterY);
+  await page.mouse.down();
+  await page.mouse.move(stageCenterX + 40, stageCenterY + 25, { steps: 5 });
+  const vertexBeforeHoldUnlocks = await readFirstPointVertex();
+  await page.waitForTimeout(800);
+  const vertexAfterHoldUnlocks = await readFirstPointVertex();
+  await page.mouse.up();
+  check(vertexBeforeHoldUnlocks[0] === originalVertex[0]
+        && vertexBeforeHoldUnlocks[1] === originalVertex[1],
+        'a newly selected point does not move before the hold unlocks dragging');
+  check(vertexAfterHoldUnlocks[0] !== originalVertex[0]
+        || vertexAfterHoldUnlocks[1] !== originalVertex[1],
+        'a newly selected point catches up to the pointer once held long enough');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+  const restoredAfterHeldDrag = await readFirstPointVertex();
+  check(restoredAfterHeldDrag[0] === originalVertex[0] && restoredAfterHeldDrag[1] === originalVertex[1],
+        'undo restores the point dragged after a hold');
 
   // ---- Draw a closed triangle with the polyline tool (a double-click places
   // the first vertex; single clicks place the rest once the shape is

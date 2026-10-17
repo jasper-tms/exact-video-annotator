@@ -127,10 +127,11 @@ other pointer events are forwarded to the active tool by `main.js`.
 
 There is **no separate select tool**: the pan, point, line and polyline tools
 hit-test their target layer on pointer-down, so pressing an existing annotation of
-**any** kind **selects** it, and pressing it again and dragging **moves** it
-(the whole item, or the grabbed vertex) — no tool is blind to another kind's
-annotations. The press that selects an item never drags it, so a slightly
-wobbly click can't move an annotation by accident. This shared
+**any** kind **selects** it and dragging **moves** it (the whole item, or the
+grabbed vertex) — no tool is blind to another kind's annotations. A press that
+newly selects an item only starts moving it once held for 300 ms (the item
+then catches up to the pointer), so a quick, slightly wobbly click can't move
+an annotation by accident; an already-selected item moves at once. This shared
 behavior lives in `js/tools/annotation-dragging.js`. A click on empty space
 instead **deselects** (with every tool, and with no tool); if it turns into a
 drag instead, it **pans** the view regardless of which tool is active. Starting a brand-new annotation always

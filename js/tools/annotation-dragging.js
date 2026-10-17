@@ -1,10 +1,11 @@
 // Shared "grab what's already there" behavior for the pan, point, line, and
 // polyline tools — there is no separate select tool; each of them selects,
-// drags, and edits existing annotations. Pressing an existing item selects it;
-// once it is selected, a later press-and-drag moves the whole item or the
-// grabbed vertex; and hovering highlights what a press would grab. The press
-// that selects an item never drags it, so a click that wobbles slightly
-// can't nudge an annotation by accident. Drags mutate geometry live for preview (bypassing
+// drags, and edits existing annotations. Pressing an existing item selects it,
+// dragging moves the whole item or the grabbed vertex, and hovering highlights
+// what a press would grab. A press that newly selects an item only starts
+// moving it once it has been held for UNSELECTED_ITEM_DRAG_HOLD_MILLISECONDS,
+// so a quick click that wobbles slightly can't nudge an annotation by
+// accident; an already-selected item moves at once. Drags mutate geometry live for preview (bypassing
 // undo on purpose) and are committed as one undo command, built from
 // before/after snapshots, on pointer up. It is generic over every annotation
 // layer through the editing contract in ARCHITECTURE.md (hitTest +
@@ -12,9 +13,17 @@
 
 import { isClosedPolyline } from '../layers/coordinates-layer.js';
 
+// How long a press that newly selects an item must be held before dragging
+// moves it. Pointer moves before then are remembered but not applied; once the
+// hold is long enough the item catches up to wherever the pointer is.
+const UNSELECTED_ITEM_DRAG_HOLD_MILLISECONDS = 300;
+
 // The in-progress drag, or null: { layer, itemId, part, vertexIndex,
-// lastLocalPoint, beforeSnapshot, moved }. Only one drag can exist at a time
-// across all tools, so module-level state is safe.
+// lastLocalPoint, beforeSnapshot, moved, unlockTimeoutId, pendingWorldPoint }.
+// unlockTimeoutId is non-null while the hold that unlocks moving is still
+// running; pendingWorldPoint is the latest pointer position seen during that
+// hold, or null. Only one drag can exist at a time across all tools, so
+// module-level state is safe.
 let dragState = null;
 
 /** Hit-test one annotation layer at a world-space point. */
@@ -97,9 +106,10 @@ function nearestVertexAmong(app, layer, worldPoint, itemFilter) {
   return nearest;
 }
 
-/** Select the hit item and, if it was already selected before this press, arm
-    a drag on it (vertex drags move that vertex; body/segment drags translate
-    the whole item). A press that newly selects an item only selects it. */
+/** Select the hit item and arm a drag on it (vertex drags move that vertex;
+    body/segment drags translate the whole item). If this press newly selects
+    the item, the drag only starts moving it once the press has been held for
+    UNSELECTED_ITEM_DRAG_HOLD_MILLISECONDS. */
 export function beginDragOnExistingItem(app, layer, hitResult, worldPoint) {
   const wasAlreadySelected = app.selection?.layerId === layer.id
     && app.selection?.itemId === hitResult.itemId;
@@ -108,8 +118,7 @@ export function beginDragOnExistingItem(app, layer, hitResult, worldPoint) {
     itemId: hitResult.itemId,
     vertexIndex: hitResult.part === 'vertex' ? hitResult.vertexIndex : null,
   });
-  if (!wasAlreadySelected) return;
-  dragState = {
+  const newDragState = {
     layer,
     itemId: hitResult.itemId,
     part: hitResult.part,
@@ -117,12 +126,35 @@ export function beginDragOnExistingItem(app, layer, hitResult, worldPoint) {
     lastLocalPoint: app.localFromWorld(layer, worldPoint),
     beforeSnapshot: layer.snapshotItemGeometry(hitResult.itemId),
     moved: false,
+    unlockTimeoutId: null,
+    pendingWorldPoint: null,
   };
+  if (!wasAlreadySelected) {
+    newDragState.unlockTimeoutId = setTimeout(() => {
+      newDragState.unlockTimeoutId = null;
+      if (dragState !== newDragState || !newDragState.pendingWorldPoint) return;
+      moveDraggedItemTo(app, newDragState.pendingWorldPoint);
+      newDragState.pendingWorldPoint = null;
+    }, UNSELECTED_ITEM_DRAG_HOLD_MILLISECONDS);
+  }
+  dragState = newDragState;
 }
 
-/** Advance an armed drag. Returns true when a drag consumed this move. */
+/** Advance an armed drag. Returns true when a drag consumed this move (which
+    includes a move held back because the hold hasn't unlocked moving yet). */
 export function updateDragOnExistingItem(app, worldPoint) {
   if (!dragState) return false;
+  if (dragState.unlockTimeoutId !== null) {
+    dragState.pendingWorldPoint = worldPoint;
+    return true;
+  }
+  moveDraggedItemTo(app, worldPoint);
+  return true;
+}
+
+/** Move the dragged vertex, or translate the dragged item, to follow the
+    pointer to worldPoint. */
+function moveDraggedItemTo(app, worldPoint) {
   const { layer, itemId, part, vertexIndex } = dragState;
   const localPoint = app.localFromWorld(layer, worldPoint);
   if (part === 'vertex') {
@@ -136,13 +168,13 @@ export function updateDragOnExistingItem(app, worldPoint) {
   dragState.lastLocalPoint = localPoint;
   dragState.moved = true;
   app.viewer.requestRender();
-  return true;
 }
 
 /** Finish an armed drag, committing it as one undo command if it actually
     moved. Returns true when a drag consumed this pointer-up. */
 export function endDragOnExistingItem(app) {
   if (!dragState) return false;
+  clearTimeout(dragState.unlockTimeoutId);
   if (dragState.moved) {
     const { layer, itemId, beforeSnapshot } = dragState;
     // A plugin layer may adjust what was dropped (the line fitter re-snaps it
@@ -164,6 +196,7 @@ export function endDragOnExistingItem(app) {
     finger turning the gesture into a pinch), putting a moved item back where
     the drag found it. */
 export function cancelDragOnExistingItem() {
+  clearTimeout(dragState?.unlockTimeoutId);
   if (dragState?.moved) {
     dragState.layer.restoreItemGeometry(dragState.itemId, dragState.beforeSnapshot);
   }
