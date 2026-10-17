@@ -55,9 +55,11 @@ export function initializeAnnotationsTable(app, containerElement) {
   const sortRecency = ['frame', 'layer', 'kind', 'label', 'metadata'];
   const sortDirection = { layer: 1, kind: 1, label: 1, metadata: 1, frame: 1 };
 
-  // Rows currently rendered, kept so 'frame-changed' can re-highlight cheaply
-  // without rebuilding: each entry pairs a <tr> with a frame-membership test.
+  // Rows currently rendered, kept so 'frame-changed' can re-highlight and
+  // 'annotation-dragged' can refresh one Data cell cheaply, without
+  // rebuilding: each entry pairs a <tr> with its row descriptor.
   let renderedRows = [];
+  let renderedCoordinatePadWidth = 0;
 
   for (const headerCell of headerCells) {
     headerCell.addEventListener('click', () => {
@@ -116,6 +118,7 @@ export function initializeAnnotationsTable(app, containerElement) {
 
     tableBody.textContent = '';
     renderedRows = [];
+    renderedCoordinatePadWidth = coordinatePadWidth;
 
     if (rows.length === 0) {
       const emptyRow = document.createElement('tr');
@@ -136,18 +139,35 @@ export function initializeAnnotationsTable(app, containerElement) {
       if (isRowSelected(app, rowData)) tableRow.classList.add('selected');
       tableRow.classList.toggle('at-current-frame', rowData.includesFrame(currentFrame));
       tableBody.appendChild(tableRow);
-      renderedRows.push({ element: tableRow, includesFrame: rowData.includesFrame });
+      renderedRows.push({ element: tableRow, rowData });
     }
   }
 
   function updateCurrentFrameHighlight() {
     const currentFrame = app.currentFrame;
-    for (const { element, includesFrame } of renderedRows) {
-      element.classList.toggle('at-current-frame', includesFrame(currentFrame));
+    for (const { element, rowData } of renderedRows) {
+      element.classList.toggle('at-current-frame', rowData.includesFrame(currentFrame));
     }
   }
 
+  /** Follow a drag by rewriting only the dragged item's Data cell: a full
+      rebuild on every pointer move lags on long lists. The padding may only
+      widen here, to fit the dragged item; the rebuild that the drop triggers
+      settles every row's padding again. */
+  function updateDraggedItemCoordinates(event) {
+    const { layerId, itemId } = event.detail;
+    const renderedRow = renderedRows.find(({ rowData }) =>
+      rowData.layerId === layerId && rowData.itemId === itemId);
+    if (!renderedRow) return;
+    const vertices = renderedRow.rowData.item.vertices;
+    renderedCoordinatePadWidth = Math.max(renderedCoordinatePadWidth,
+      computeCoordinatePadWidth([{ vertices }]));
+    renderedRow.element.querySelector('.data-cell').textContent =
+      formatCoordinatesCell(vertices, renderedCoordinatePadWidth);
+  }
+
   app.addEventListener('document-changed', rebuild);
+  app.addEventListener('annotation-dragged', updateDraggedItemCoordinates);
   app.addEventListener('layers-changed', rebuild);
   app.addEventListener('selection-changed', rebuild);
   app.addEventListener('frame-changed', updateCurrentFrameHighlight);

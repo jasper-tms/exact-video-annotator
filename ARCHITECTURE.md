@@ -472,7 +472,9 @@ app.videoInformation;                // the PRIMARY video's facts: { name,
                                      // VideoLayer holds its own copy)
 // app extends EventTarget; events: 'document-changed', 'frame-changed',
 // 'selection-changed', 'layers-changed', 'tool-changed', 'video-loaded',
-// 'playback-changed', 'index-changed'
+// 'playback-changed', 'index-changed', 'annotation-dragged' (each live step
+// of a drag, before the drop commits it and reports 'document-changed';
+// detail: { layerId, itemId })
 ```
 
 UI modules export `initialize<Thing>(app, containerElement)` and subscribe to

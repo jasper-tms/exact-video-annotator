@@ -252,9 +252,25 @@ try {
   await page.mouse.down();
   await page.mouse.move(stageCenterX + 40, stageCenterY + 25, { steps: 5 });
   const vertexBeforeHoldUnlocks = await readFirstPointVertex();
+  // List every layer's annotations so the table shows the point's row. Ticked
+  // from script, not by mouse, since the press is still down; the stage has
+  // captured the pointer, so the panel that grows over it doesn't matter.
+  const setShowAllAnnotations = (checked) => page.evaluate((checkedValue) => {
+    const checkbox = document.querySelector('.show-all-annotations-checkbox');
+    checkbox.checked = checkedValue;
+    checkbox.dispatchEvent(new Event('change'));
+  }, checked);
+  const readSelectedRowData = () => page.evaluate(() =>
+    document.querySelector('tr.selected .data-cell')?.textContent ?? null);
+  await setShowAllAnnotations(true);
+  const rowDataBeforeHoldUnlocks = await readSelectedRowData();
   await page.waitForTimeout(800);
   const vertexAfterHoldUnlocks = await readFirstPointVertex();
+  const rowDataMidDrag = await readSelectedRowData();
   await page.mouse.up();
+  await setShowAllAnnotations(false);
+  check(rowDataBeforeHoldUnlocks !== null && rowDataMidDrag !== rowDataBeforeHoldUnlocks,
+        "the annotations table's Data cell follows a point while it is still being dragged");
   check(vertexBeforeHoldUnlocks[0] === originalVertex[0]
         && vertexBeforeHoldUnlocks[1] === originalVertex[1],
         'a newly selected point does not move before the hold unlocks dragging');

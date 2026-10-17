@@ -18,7 +18,7 @@ import { isClosedPolyline } from '../layers/coordinates-layer.js';
 // hold is long enough the item catches up to wherever the pointer is.
 const UNSELECTED_ITEM_DRAG_HOLD_MILLISECONDS = 300;
 
-// The in-progress drag, or null: { layer, itemId, part, vertexIndex,
+// The in-progress drag, or null: { app, layer, itemId, part, vertexIndex,
 // startLocalPoint, beforeSnapshot, moved, unlockTimeoutId, pendingWorldPoint }.
 // unlockTimeoutId is non-null while the hold that unlocks moving is still
 // running; pendingWorldPoint is the latest pointer position seen during that
@@ -119,6 +119,7 @@ export function beginDragOnExistingItem(app, layer, hitResult, worldPoint) {
     vertexIndex: hitResult.part === 'vertex' ? hitResult.vertexIndex : null,
   });
   const newDragState = {
+    app,
     layer,
     itemId: hitResult.itemId,
     part: hitResult.part,
@@ -172,6 +173,9 @@ function moveDraggedItemTo(app, worldPoint) {
   }
   dragState.moved = true;
   app.viewer.requestRender();
+  // Let live views (the annotations table) follow the drag; the drop itself
+  // reports 'document-changed' through the undo command.
+  app.dispatchEvent(new CustomEvent('annotation-dragged', { detail: { layerId: layer.id, itemId } }));
 }
 
 /** Finish an armed drag, committing it as one undo command if it actually
@@ -203,6 +207,8 @@ export function cancelDragOnExistingItem() {
   clearTimeout(dragState?.unlockTimeoutId);
   if (dragState?.moved) {
     dragState.layer.restoreItemGeometry(dragState.itemId, dragState.beforeSnapshot);
+    dragState.app.dispatchEvent(new CustomEvent('annotation-dragged',
+      { detail: { layerId: dragState.layer.id, itemId: dragState.itemId } }));
   }
   dragState = null;
 }
