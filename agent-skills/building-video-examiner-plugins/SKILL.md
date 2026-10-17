@@ -187,7 +187,7 @@ your annotations file without the plugin is told where to get it.
 | `name` | The name people see in menus and messages. |
 | `version` | Your plugin's version, for your own bookkeeping. |
 | `entry` | The module to run, relative to the folder. Defaults to `./index.js`. |
-| `hostApiVersion` | Always `1`: the version of the `host` object described below. A plugin written for a different version is refused rather than half-loaded. |
+| `hostApiVersion` | Always `1`: the version of the `host` object described below. A plugin written for a different version is refused. |
 | `description` | Optional, a sentence about what it does. |
 
 ### The entry module and `host`
@@ -262,6 +262,24 @@ pixels, `[x, y]`, and frames are counted from 0):
   name,                              // or null
   metadata }                         // your own key-value pairs, all text: { key: 'text' }
 ```
+
+A frames layer holds events instead: a point event marks one frame and a range
+event marks a span of frames. Its items look like this, and its labels are
+`layer.eventTypes` instead of `layer.classes`:
+
+```js
+{ id, eventTypeId,                   // an id in layer.eventTypes
+  startFrame, endFrame,              // equal for a point event; endFrame is null
+                                     // while a range is still being marked
+  metadata }
+
+layer.eventTypes;   // { id, name, kind: 'point' | 'range', color,
+                    //   addHotkey, removeHotkey }   (hotkeys are single characters, or null)
+```
+
+Events don't show on the frame and can't be clicked there, so a frames-layer
+plugin works through keys, `app` events, its own panels, and its own `draw`
+if it wants to show something.
 
 `metadata` is the place for structured labels your plugin attaches to an item
 (people can see and edit it in the annotations table). Its values are always
