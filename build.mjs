@@ -37,6 +37,27 @@ for (const folder of DIST_FOLDERS) {
   await cp(join(repositoryRoot, folder), join(dist, folder), { recursive: true });
 }
 
+// ---------- Engine tag ----------
+// index.html loads the engine through a small bootstrap so that ?engine= can
+// point a locally served page at another build. The deployed page ignores the
+// parameter anyway, so on Cloudflare (which sets CF_PAGES) swap the bootstrap
+// for a plain tag: Chrome may refuse a cross-site script written by
+// document.write on a 2G-class connection, and a plain tag never risks that.
+// Local builds keep the bootstrap, since http_server.py serves dist/ too.
+if (process.env.CF_PAGES) {
+  const indexPath = join(dist, 'index.html');
+  const page = await readFile(indexPath, 'utf8');
+  const bootstrap = /<!-- engine-bootstrap:start -->[\s\S]*?<!-- engine-bootstrap:end -->/;
+  const pinnedEngine = /'(https:\/\/cdn\.jsdelivr\.net\/[^']*exact-video-engine\.js)'/
+    .exec(bootstrap.exec(page)?.[0] ?? '');
+  if (pinnedEngine) {
+    await writeFile(indexPath, page.replace(bootstrap, `<script src="${pinnedEngine[1]}"></script>`));
+  } else {
+    // The bootstrap still loads the pin, so this is worth a warning, not a failed deploy.
+    console.warn('Could not find the engine bootstrap in index.html; deploying it unchanged.');
+  }
+}
+
 // ---------- Version stamp ----------
 // The deployed app is static, so "what is live right now" has to be baked in at
 // build time and served as a file. Cloudflare Pages exports CF_PAGES_* for the

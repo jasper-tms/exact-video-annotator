@@ -44,6 +44,12 @@ python3 -m http.server --directory .
 (The engine and mp4box load from pinned CDN URLs, so an internet connection is
 needed on first load.)
 
+To try the app against an engine build that is not released yet, serve the
+engine repository (`python3 test/serve.py 8000` there) and add
+`?engine=localhost:8000` to the app's address. `?engine=v2.9.2` loads any
+released version instead. The parameter works only when the app itself is
+served from your own machine or local network; the deployed site ignores it.
+
 ## Testing
 
 ```sh

@@ -10,8 +10,62 @@
   <link rel="stylesheet" href="css/floating-windows.css">
   <!-- mp4box.js must be loaded before the engine (provides MP4Box and DataStream). -->
   <script src="https://unpkg.com/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
-  <!-- Pinned release tag, never a branch (see the engine README's consuming notes). -->
-  <script src="https://cdn.jsdelivr.net/gh/jasper-tms/exact-video-engine.js@v2.10.0/exact-video-engine.js"></script>
+  <!-- The engine, from a pinned release tag, never a branch (see the engine
+       README's consuming notes). Written by this script rather than a plain tag
+       so that a page served from your own machine can load a different build:
+         ?engine=localhost:8000        that server's /exact-video-engine.js
+         ?engine=http://localhost:8000/some/path/exact-video-engine.js
+         ?engine=v2.9.2                any released version, from the CDN
+       A deployed page ignores the parameter and always loads the pin: on the
+       real site it would let a link run someone else's script with the
+       visitor's sign-in. document.write keeps the load ordered and
+       render-blocking, exactly like the static tag it replaces. The pin stays a
+       literal @vX.Y.Z because build.mjs reads the version stamp out of it.
+       The Cloudflare build replaces everything between the two marker comments
+       with a plain tag for the pin: the deployed page ignores ?engine= anyway,
+       and Chrome may refuse a cross-site script written by document.write on a
+       2G-class connection, which a plain tag never risks. -->
+  <!-- engine-bootstrap:start -->
+  <script>
+  (function () {
+    const PINNED_ENGINE =
+      'https://cdn.jsdelivr.net/gh/jasper-tms/exact-video-engine.js@v2.10.0/exact-video-engine.js';
+    // Your own machine, or another reaching it over the local network (a phone
+    // on the same wifi), the same rule the engine's demo.html uses.
+    const PRIVATE_HOSTS = [
+      /^(localhost|127\.0\.0\.1|\[::1\])$/,
+      /\.local$/,
+      /^192\.168\.\d+\.\d+$/,
+      /^10\.\d+\.\d+\.\d+$/,
+      /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/,
+      /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+$/,
+    ];
+    const isPrivateHost = (hostname) => PRIVATE_HOSTS.some((pattern) => pattern.test(hostname));
+    const requested = new URLSearchParams(location.search).get('engine');
+    let source = PINNED_ENGINE;
+    if (requested && !isPrivateHost(location.hostname)) {
+      console.warn('?engine= is honored only on a page served from your own machine; '
+        + 'loading the pinned engine.');
+    } else if (/^v\d+\.\d+\.\d+$/.test(requested || '')) {
+      source = PINNED_ENGINE.replace(/@v[^/]+\//, '@' + requested + '/');
+    } else if (requested) {
+      let url = null;
+      try {
+        url = new URL(/^https?:\/\//.test(requested) ? requested : 'http://' + requested);
+      } catch (error) { /* reported below */ }
+      if (url && isPrivateHost(url.hostname)) {
+        if (url.pathname === '/') url.pathname = '/exact-video-engine.js';
+        source = url.href;
+      } else {
+        console.warn(`?engine=${requested} is neither a release like v2.9.2 nor an address `
+          + 'on your own machine; loading the pinned engine.');
+      }
+    }
+    if (source !== PINNED_ENGINE) console.info(`Loading the engine from ${source} (?engine=).`);
+    document.write('<script src="' + source.replace(/"/g, '%22') + '"><\/script>');
+  })();
+  </script>
+  <!-- engine-bootstrap:end -->
 </head>
 <body>
   <!-- Three justified groups (a CSS grid keeps the center group centered
