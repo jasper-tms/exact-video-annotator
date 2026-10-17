@@ -35,10 +35,10 @@ try {
   // A point, a polygon, and a class so the canvas has content.
   await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
-    application.annotationDocument.classes.push(
-      { id: 'class-demonstration', name: 'ball', color: '#e6194b' });
+    const layer = application.findAnnotationLayerForType('coordinates');
+    layer.classes.push({ id: 'class-demonstration', name: 'ball', color: '#e6194b' });
+    layer.activeClassId = 'class-demonstration';
     application.markDocumentChanged();
-    application.activeClassId = 'class-demonstration';
   });
   const stageBox = await page.locator('#stage-canvas').boundingBox();
   // The point tool is active at startup; this click places the point.

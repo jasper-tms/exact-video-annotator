@@ -10,9 +10,11 @@
 //   - Remove key: delete the most recently added event of that type that
 //     overlaps the current frame.
 //
-// Every mutation goes through the undo history, and every item array is reached
-// through `app.targetLayerForType('frames').items` so that events land in the
-// active events layer (creating one if the document somehow has none).
+// Every frames layer has its own event types, and all of their hotkeys are
+// live at once: each records into (or removes from) the layer that defines
+// it. When two layers bind the same key, the selected layer wins, then the
+// topmost; the layer panel warns about such clashes (see hotkeyClashes).
+// Every mutation goes through the undo history.
 
 import { newId } from '../document.js';
 
@@ -20,21 +22,53 @@ export function initializeEventHotkeys(app) {
   app.addKeyHandler((event) => handleKey(app, event));
 }
 
-function handleKey(app, event) {
-  const eventTypes = app.annotationDocument.eventTypes;
+/** Frames layers in the order their hotkeys take precedence: the selected
+    one, then the rest from the top of the stack down. */
+function framesLayersByPrecedence(app) {
+  const framesLayers = app.annotationLayers.filter((layer) => layer.type === 'frames').reverse();
+  const selected = app.selectedLayer;
+  return selected?.type === 'frames'
+    ? [selected, ...framesLayers.filter((layer) => layer !== selected)]
+    : framesLayers;
+}
 
+/** The event type bound to this key, and its layer, or null. */
+function findBinding(app, key, propertyName) {
+  for (const layer of framesLayersByPrecedence(app)) {
+    const eventType = layer.eventTypes.find((type) => type[propertyName] && type[propertyName] === key);
+    if (eventType) return { layer, eventType };
+  }
+  return null;
+}
+
+/** The other event types (on any frames layer) bound to the same key as this
+    event type's add or remove key, each as { layer, eventType }. */
+export function hotkeyClashes(app, eventType, propertyName) {
+  const key = eventType[propertyName];
+  if (!key) return [];
+  const clashes = [];
+  for (const layer of app.annotationLayers.filter((candidate) => candidate.type === 'frames')) {
+    for (const other of layer.eventTypes) {
+      if (other === eventType) continue;
+      if (other.addHotkey === key || other.removeHotkey === key) clashes.push({ layer, eventType: other });
+    }
+  }
+  return clashes;
+}
+
+function handleKey(app, event) {
   // Case-sensitive matching lets an add key (for example "f") and a remove key
   // (for example "F", i.e. Shift+f) be told apart. Add keys win over remove
   // keys when, unusually, a single key is bound to both.
-  const addType = eventTypes.find((type) => type.addHotkey && type.addHotkey === event.key);
-  if (addType) {
-    handleAdd(app, addType);
+  const addBinding = findBinding(app, event.key, 'addHotkey');
+  if (addBinding) {
+    handleAdd(app, addBinding.layer, addBinding.eventType);
     return true;
   }
 
-  const removeType = eventTypes.find((type) => type.removeHotkey && type.removeHotkey === event.key);
-  if (removeType) {
-    handleRemove(app, removeType);
+  const removeBinding = findBinding(app, event.key, 'removeHotkey');
+  if (removeBinding) {
+    handleRemove(app, removeBinding.layer, removeBinding.eventType);
     return true;
   }
 
@@ -43,9 +77,9 @@ function handleKey(app, event) {
 
 /* ---------- Adding ---------- */
 
-function handleAdd(app, eventType) {
+function handleAdd(app, layer, eventType) {
   const frame = app.currentFrame;
-  const items = app.targetLayerForType('frames').items;
+  const items = layer.items;
 
   if (eventType.kind === 'point') {
     addPointEvent(app, eventType, items, frame);
@@ -106,9 +140,9 @@ function addOrCompleteRangeEvent(app, eventType, items, frame) {
 
 /* ---------- Removing ---------- */
 
-function handleRemove(app, eventType) {
+function handleRemove(app, layer, eventType) {
   const frame = app.currentFrame;
-  const items = app.targetLayerForType('frames').items;
+  const items = layer.items;
 
   const target = findLast(items, (item) => overlapsFrame(eventType, item, frame));
   if (!target) {

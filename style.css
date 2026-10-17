@@ -800,16 +800,33 @@ button:focus:not(:focus-visible) { outline: none; }
 /* ---------- Plugin settings (inside the layer detail panel) ---------- */
 
 .plugin-settings {
-  margin-top: 10px;
-  padding-top: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 
+/* Styled like the built-in sections' headings (see .settings-section h3). */
 .plugin-settings h3 {
-  margin: 0 0 4px;
-  font-size: 13px;
-  color: var(--accent);
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
 }
+
+/* A plugin's rows of controls, one setting per line. */
+.plugin-settings .layer-detail-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.plugin-settings .layer-detail-row label { display: flex; align-items: center; gap: 6px; }
+.plugin-settings input[type="number"] { width: 84px; }
 
 .plugin-settings-explanation,
 .plugin-settings-status {
@@ -820,9 +837,12 @@ button:focus:not(:focus-visible) { outline: none; }
 
 /* ---------- Details sections (bottom of the sliding panel) ---------- */
 
+/* The selected layer's settings, then its classes or event types, down the
+   left; its annotations table on the right. Panels a layer has no use for
+   hide themselves (see class-manager.js and annotations-table.js). */
 #details-section {
   display: grid;
-  grid-template-columns: minmax(280px, 380px) 1fr;
+  grid-template-columns: minmax(300px, 400px) 1fr;
   gap: 12px;
   padding: 12px;
   align-items: start;
@@ -837,38 +857,103 @@ button:focus:not(:focus-visible) { outline: none; }
   #annotations-table-container { grid-column: 1; grid-row: auto; }
 }
 
-/* ---------- Layer detail panel ---------- */
+/* ---------- Layer settings panel ---------- */
 
-.layer-detail-type {
-  color: var(--text-dim);
-  font-size: 13px;
-  margin: 0 0 10px;
+.layer-detail-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 4px;
 }
 
-.layer-detail-row {
+/* The layer's name reads as a title, and turns into a text box on hover or
+   focus to show that it can be renamed. */
+#layer-detail-container .layer-name-input {
+  width: 100%;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 3px 6px;
+  margin-left: -6px;
+  background: transparent;
+  border-color: transparent;
+}
+
+#layer-detail-container .layer-name-input:hover { border-color: var(--border); }
+#layer-detail-container .layer-name-input:focus {
+  background: var(--surface);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.layer-type-badge {
+  font-size: 11px;
+  padding: 1px 8px;
+  border: 1px solid;
+  border-radius: 999px;
+}
+
+.settings-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-section h3,
+.technical-details summary {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.technical-details summary { cursor: pointer; margin-bottom: 0; }
+.technical-details[open] summary { margin-bottom: 8px; }
+
+/* One setting per line: label on the left, control on the right. */
+.settings-grid {
+  display: grid;
+  /* The same label width in every section, so their controls line up. */
+  grid-template-columns: 160px 1fr;
+  gap: 8px 14px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.setting-label { color: var(--text-dim); }
+label.setting-label { cursor: pointer; }
+
+.setting-control {
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
+  gap: 6px;
+  min-width: 0;
 }
 
-.layer-detail-row label { display: flex; align-items: center; gap: 6px; }
-.layer-detail-transform-field input { width: 76px; }
-.layer-detail-opacity input[type="range"] { width: 120px; }
+.setting-control input[type="number"] { width: 84px; }
+.setting-control input[type="checkbox"] { margin: 0; }
+.setting-unit { color: var(--text-dim); font-size: 12px; }
 
-.layer-detail-facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 3px 12px;
-  margin: 8px 0 0;
-  font-size: 13px;
+.setting-fact {
+  display: block;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
-.layer-detail-facts dt { color: var(--text-dim); }
-.layer-detail-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.percent-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
 
-.layer-detail-empty, .layer-detail-count { color: var(--text-dim); font-size: 13px; }
+.percent-control input[type="range"] { flex: 1 1 auto; min-width: 60px; }
+.setting-control .percent-control input[type="number"] { width: 56px; }
+
+.settings-note, .layer-detail-empty { color: var(--text-dim); font-size: 13px; margin: 8px 0 0; }
 
 .panel {
   background: var(--surface-raised);

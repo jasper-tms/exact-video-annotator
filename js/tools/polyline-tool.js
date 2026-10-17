@@ -55,12 +55,14 @@ const DRAG_THRESHOLD_SCREEN_PIXELS = 4;
 // open.
 const MINIMUM_VERTICES_TO_CLOSE = 3;
 
-const DRAWING_FALLBACK_COLOR = '#4f9cf9';
 const CLOSING_CUE_COLOR = '#ffffff';
 
-function activeClassColor(app) {
-  const classEntry = app.annotationDocument.classes.find((entry) => entry.id === app.activeClassId);
-  return classEntry?.color ?? DRAWING_FALLBACK_COLOR;
+/** The class the shape being drawn will carry: the original's when extending
+    one, else its layer's active class. */
+function inProgressClassId(inProgress) {
+  return inProgress.extending
+    ? inProgress.extending.originalItem.classId
+    : (inProgress.layer.activeClass?.id ?? null);
 }
 
 /** Distance between two world points expressed in on-screen pixels (world
@@ -185,7 +187,7 @@ export function createDrawingTool({
       frame: inProgress.frame,
       kind: effectiveKind,
       vertices: inProgress.vertices.map((vertex) => [vertex[0], vertex[1]]),
-      classId: extending ? extending.originalItem.classId : (app.activeClassId ?? null),
+      classId: inProgressClassId(inProgress),
       name: extending ? extending.originalItem.name : null,
       metadata: extending ? extending.originalItem.metadata : {},
     };
@@ -419,7 +421,7 @@ export function createDrawingTool({
       const app = inProgress.app;
       const strokeWidth = OVERLAY_STROKE_SCREEN_PIXELS;
       const vertexSize = OVERLAY_VERTEX_SCREEN_PIXELS;
-      const color = activeClassColor(app);
+      const color = inProgress.layer.colorForClass(inProgressClassId(inProgress));
       const worldVertices = inProgress.vertices.map(
         (vertex) => app.worldFromLocal(inProgress.layer, { x: vertex[0], y: vertex[1] }));
       const stageVertices = worldVertices.map((vertex) => renderState.stageFromLocal(vertex));

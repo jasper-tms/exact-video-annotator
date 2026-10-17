@@ -94,7 +94,7 @@ export const pointTool = {
       frame: app.newItemFrame,
       kind: 'point',
       vertices: [[localPoint.x, localPoint.y]],
-      classId: app.activeClassId,
+      classId: layer.activeClass?.id ?? null,
       name: null,
       metadata: {},
     };

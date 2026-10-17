@@ -89,7 +89,6 @@ class Application extends EventTarget {
   hover = null;
   activeTool = null;
   activeLayerId = null;
-  activeClassId = null;
   // How newly drawn point/shape annotations are bound in time:
   //   'anchored' — the item belongs to the current frame (frame = integer)
   //   'agnostic' — the item applies across every frame (frame = null)
@@ -1001,6 +1000,10 @@ class Application extends EventTarget {
         : `${type[0].toUpperCase()}${type.slice(1)} ${this.annotationLayers.filter((layer) => layer.type === type).length + 1}`,
       visible: true, opacity: 1,
       transform: { scale: 1, offsetX: 0, offsetY: 0 },
+      // Each layer has its own label registry: classes for points and shapes,
+      // event types for frame events.
+      ...(type === 'coordinates' ? { classes: [] } : {}),
+      ...(type === 'frames' ? { eventTypes: [] } : {}),
       items: [],
     };
     if (plugin) {

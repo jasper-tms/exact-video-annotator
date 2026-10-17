@@ -252,23 +252,21 @@ try {
   await page.mouse.down();
   await page.mouse.move(stageCenterX + 40, stageCenterY + 25, { steps: 5 });
   const vertexBeforeHoldUnlocks = await readFirstPointVertex();
-  // List every layer's annotations so the table shows the point's row. Ticked
+  // Select the points layer so the table lists the point's row. Selected
   // from script, not by mouse, since the press is still down; the stage has
   // captured the pointer, so the panel that grows over it doesn't matter.
-  const setShowAllAnnotations = (checked) => page.evaluate((checkedValue) => {
-    const checkbox = document.querySelector('.show-all-annotations-checkbox');
-    checkbox.checked = checkedValue;
-    checkbox.dispatchEvent(new Event('change'));
-  }, checked);
+  const selectCoordinatesLayer = () => page.evaluate(() => {
+    const application = window.exactVideoAnnotator;
+    application.setActiveLayer(application.findAnnotationLayerForType('coordinates').id);
+  });
   const readSelectedRowData = () => page.evaluate(() =>
     document.querySelector('tr.selected .data-cell')?.textContent ?? null);
-  await setShowAllAnnotations(true);
+  await selectCoordinatesLayer();
   const rowDataBeforeHoldUnlocks = await readSelectedRowData();
   await page.waitForTimeout(800);
   const vertexAfterHoldUnlocks = await readFirstPointVertex();
   const rowDataMidDrag = await readSelectedRowData();
   await page.mouse.up();
-  await setShowAllAnnotations(false);
   check(rowDataBeforeHoldUnlocks !== null && rowDataMidDrag !== rowDataBeforeHoldUnlocks,
         "the annotations table's Data cell follows a point while it is still being dragged");
   check(vertexBeforeHoldUnlocks[0] === originalVertex[0]
@@ -445,7 +443,7 @@ try {
   // ---- Event hotkey (create an event type, press its key) ----
   await page.evaluate(() => {
     const application = window.exactVideoAnnotator;
-    application.annotationDocument.eventTypes.push({
+    application.annotationDocument.layers.find((layer) => layer.type === 'frames').eventTypes.push({
       id: 'test-event-type', name: 'test event', kind: 'point', color: '#e6194b',
       addHotkey: 'e', removeHotkey: 'E',
     });
@@ -517,8 +515,37 @@ try {
   check(roundTrip.itemCounts.reduce((total, count) => total + count, 0) === 3,
         'export/import round-trip preserves all items');
 
+  // ---- A version 1 file (one document-wide registry) opens as version 2 ----
+  const migrated = await page.evaluate(async () => {
+    const documentModule = await import('./js/document.js');
+    const layer = (id, type, items) => ({ id, type, name: id, items });
+    const parsed = documentModule.documentFromJson({
+      format: 'exact-video-annotator', version: 1,
+      classes: [{ id: 'a', name: 'a', color: '#ff0000' }, { id: 'b', name: 'b', color: '#00ff00' }],
+      eventTypes: [{ id: 'e', name: 'e', kind: 'point', color: '#0000ff' }],
+      layers: [
+        layer('uses-a', 'coordinates', [{ id: '1', frame: 0, kind: 'point', vertices: [[1, 2]], classId: 'a' }]),
+        layer('uses-none', 'coordinates', []),
+        layer('events', 'frames', []),
+      ],
+    });
+    const exported = documentModule.documentToJson(parsed);
+    return {
+      classNames: parsed.layers.slice(0, 2).map((parsedLayer) => parsedLayer.classes.map((entry) => entry.name)),
+      eventTypeNames: parsed.layers[2].eventTypes.map((entry) => entry.name),
+      exportedVersion: exported.version,
+      exportedHasTopLevelClasses: 'classes' in exported,
+    };
+  });
+  check(JSON.stringify(migrated.classNames) === JSON.stringify([['a'], ['a', 'b']]),
+        'a version 1 file gives each points layer the classes it uses (all of them if none)');
+  check(JSON.stringify(migrated.eventTypeNames) === JSON.stringify(['e']),
+        "a version 1 file gives the only events layer every event type");
+  check(migrated.exportedVersion === 2 && !migrated.exportedHasTopLevelClasses,
+        'export writes version 2, with no document-wide classes');
+
   // ---- Item metadata: edited in the annotations table, kept on export ----
-  await page.locator('.show-all-annotations-checkbox').check();
+  await selectCoordinatesLayer();
   await page.locator('.edit-metadata-button').first().click();
   await page.locator('.metadata-dialog .metadata-text').fill('table: 2\nkeypoint: +-\nnote: "7"');
   await page.locator('.metadata-dialog .metadata-save').click();
@@ -544,8 +571,7 @@ try {
         'export/import round-trip preserves item metadata');
   check(metadataFacts.cellText.includes('table: 2'), 'the annotations table shows item metadata');
   check(JSON.stringify(metadataFacts.afterUndo) === '{}', 'undo restores the previous metadata');
-  // Leave the panel as it was, with focus off the checkbox so Space plays.
-  await page.locator('.show-all-annotations-checkbox').uncheck();
+  // Leave focus off the panel so Space plays.
   await page.evaluate(() => document.activeElement?.blur());
 
   // ---- Zoom and pan leave annotations anchored to source pixels ----
@@ -629,6 +655,30 @@ try {
     window.exactVideoAnnotator.imageLayers.length === 1
     && window.exactVideoAnnotator.imageLayers[0].bitmap !== null);
   check(imageSurvivesFrameStep, 'image stays present when the frame changes');
+
+  // ---- Each events layer's hotkeys record into that layer ----
+  const secondLayerFacts = await page.evaluate(() => {
+    const application = window.exactVideoAnnotator;
+    const secondLayer = application.addAnnotationLayer('frames');
+    secondLayer.eventTypes.push({
+      id: 'second-event-type', name: 'second event', kind: 'point', color: '#3cb44b',
+      addHotkey: 'j', removeHotkey: null,
+    });
+    application.markDocumentChanged();
+    return { secondLayerId: secondLayer.id };
+  });
+  await page.locator('#stage-canvas').click({ position: { x: 10, y: 10 } });
+  await page.keyboard.press('j');
+  const perLayerFacts = await page.evaluate((secondLayerId) => {
+    const application = window.exactVideoAnnotator;
+    const framesLayers = application.annotationDocument.layers.filter((layer) => layer.type === 'frames');
+    return {
+      counts: framesLayers.map((layer) => layer.items.length),
+      secondHasIt: framesLayers.find((layer) => layer.id === secondLayerId)?.items.length === 1,
+    };
+  }, secondLayerFacts.secondLayerId);
+  check(perLayerFacts.secondHasIt && JSON.stringify(perLayerFacts.counts) === JSON.stringify([1, 1]),
+        `a second events layer's hotkey records into that layer, not the first`);
 
 } finally {
   await browser.close();

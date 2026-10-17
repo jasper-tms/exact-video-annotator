@@ -1,5 +1,5 @@
-/* Styles for the class manager (left panel) and the annotations table (right
-   panel). Both live inside a `.panel` and reuse the theme variables and the
+/* Styles for the class manager (a layer's classes or event types, left
+   column) and the annotations table (right column). Both live inside a `.panel` and reuse the theme variables and the
    shared form-control styles from style.css. */
 
 /* ---------- Class manager ---------- */
@@ -31,26 +31,54 @@
   flex: 0 0 auto;
 }
 
-/* The active-class selector: a hollow dot that fills when chosen. */
-.active-selector {
+.registry-hint {
+  margin: -2px 0 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+/* The class new annotations get: one radio button per class. */
+.active-class-radio {
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  margin: 0 2px;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
-.active-selector:hover:not(:disabled) {
-  border-color: var(--accent);
+/* An event type: name row on top, its two labelled hotkeys underneath. */
+.registry-card {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
 }
 
-.active-selector.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 2px var(--surface-raised);
+.registry-card .registry-row:hover { background: none; }
+
+.hotkey-row {
+  gap: 16px;
+  padding-left: 32px;   /* under the name, past the color swatch */
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.hotkey-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.hotkey-input.clashing {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.hotkey-warning {
+  margin: 4px 0 0 32px;
+  font-size: 12px;
+  color: var(--warning);
 }
 
 .no-class-label {
@@ -60,7 +88,7 @@
   user-select: none;
 }
 
-.event-type-row .kind-select {
+.event-type-card .kind-select {
   flex: 0 0 auto;
   padding: 4px 4px;
 }
@@ -99,30 +127,7 @@
   color: var(--text);
 }
 
-.event-types-heading {
-  margin-top: 12px;
-}
-
 /* ---------- Annotations table ---------- */
-
-/* Heading on the left, the "Show all annotations" checkbox on the right. */
-.annotations-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.show-all-annotations {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--text-dim);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
 
 .annotations-scroll {
   max-height: calc(100vh - 160px);
@@ -189,6 +194,16 @@
   overflow: visible;
   text-overflow: clip;
   max-width: none;
+}
+
+/* The class or event type's color, before its name. */
+.annotations-table .label-color-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
 }
 
 .annotations-table tbody tr {

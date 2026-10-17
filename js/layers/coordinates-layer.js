@@ -54,8 +54,15 @@ export class CoordinatesLayer extends Layer {
     this.opacity = documentLayer.opacity;
     this.transform = { ...documentLayer.transform };
     this.documentLayer = documentLayer;
-    // Same array object as the document layer: this is a view, not a copy.
+    // Same array objects as the document layer: this is a view, not a copy.
+    // A document layer made before layers had their own classes gets an empty
+    // list here, so the two stay one array.
+    documentLayer.classes ??= [];
     this.items = documentLayer.items;
+    this.classes = documentLayer.classes;
+    // The class newly drawn items on this layer are labelled with, or null.
+    // Choosing it is not an edit of the document, so it is not saved.
+    this.activeClassId = null;
     this.app = app;
     // Whether items on this layer may hold fractional (x, y) values. When
     // false, every new or moved vertex snaps to whichever grid the document's
@@ -71,6 +78,22 @@ export class CoordinatesLayer extends Layer {
   }
 
   get isEditable() { return true; }
+
+  /** The class entry with this id in this layer's classes, or null. */
+  findClass(classId) {
+    if (classId === null || classId === undefined) return null;
+    return this.classes.find((entry) => entry.id === classId) ?? null;
+  }
+
+  /** The color an item of this class is drawn in. */
+  colorForClass(classId) {
+    return this.findClass(classId)?.color ?? FALLBACK_COLOR;
+  }
+
+  /** The class for newly drawn items, forgetting one that has been deleted. */
+  get activeClass() {
+    return this.findClass(this.activeClassId);
+  }
 
   setOffFrameOpacity(opacity) {
     this.offFrameOpacity = Math.min(1, Math.max(0, opacity));
@@ -139,7 +162,7 @@ export class CoordinatesLayer extends Layer {
 
   #drawPoint(context, renderState, item, { x, y }, itemAlpha) {
     const radius = POINT_RADIUS_SCREEN_PIXELS;
-    const color = colorForItem(item, renderState);
+    const color = this.colorForClass(item.classId);
 
     context.globalAlpha = itemAlpha;
 
@@ -179,7 +202,7 @@ export class CoordinatesLayer extends Layer {
   #drawPath(context, renderState, item, stageVertices, itemAlpha) {
     const strokeWidth = STROKE_WIDTH_SCREEN_PIXELS;
     const handleSize = VERTEX_HANDLE_SCREEN_PIXELS;
-    const color = colorForItem(item, renderState);
+    const color = this.colorForClass(item.classId);
     const isSelected = matchesItem(renderState.selection, this.id, item.id);
     const isHovered = matchesItem(renderState.hover, this.id, item.id);
 
@@ -414,11 +437,6 @@ export function isClosedPolyline(item) {
   const first = item.vertices[0];
   const last = item.vertices[item.vertices.length - 1];
   return first[0] === last[0] && first[1] === last[1];
-}
-
-function colorForItem(item, renderState) {
-  const classEntry = renderState.document?.classes?.find((entry) => entry.id === item.classId);
-  return classEntry?.color ?? FALLBACK_COLOR;
 }
 
 function matchesItem(reference, layerId, itemId) {

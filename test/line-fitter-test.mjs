@@ -290,7 +290,7 @@ try {
   check(layerFacts.documentPlugin?.id === 'line-fitter',
         'the document layer records which plugin it belongs to');
 
-  check(await page.locator('.plugin-settings h3').innerText() === 'Line fitter',
+  check(await page.locator('.plugin-settings h3').textContent() === 'Line fitter',
         "the layer panel shows the plugin's settings");
 
   // A double-click starts the line at its first vertex; the second (single)

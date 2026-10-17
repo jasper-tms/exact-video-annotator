@@ -1,165 +1,165 @@
-// The class manager edits the two label registries the document carries: the
-// spatial `classes` (labels for points and shapes) and the `eventTypes`
-// (temporal events, each with a kind and add/remove hotkeys). It also lets the
-// user pick which class newly created spatial items are labelled with
-// (`app.activeClassId`, with "no class" as a valid choice).
+// The class manager edits the label registry of the layer selected in the tab
+// bar: a coordinates layer's `classes` (labels for its points and shapes, one
+// of which may be chosen for newly drawn items as `layer.activeClassId`, with
+// "no class" a valid choice) or a frames layer's `eventTypes` (temporal events,
+// each with a kind and add/remove hotkeys). Other layers have no labels, so the
+// panel hides itself for them.
 //
 // Structural changes (adding or deleting a class or event type) are undoable
 // commands. In-place edits (typing a name, picking a color/kind/hotkey) mutate
 // the document directly and call `app.markDocumentChanged()`; fine-grained undo
 // for individual keystrokes is intentionally out of scope.
 //
-// Rebuilding a list wipes and recreates its rows, so — per ARCHITECTURE.md — we
-// must never rebuild while the user is focused inside this panel typing into an
-// input. The document-changed listener therefore rebuilds only when focus is
-// elsewhere; structural handlers rebuild the affected list directly (their
-// button keeps focus, but the buttons live outside the rebuilt lists).
+// Rebuilding the panel wipes and recreates its rows, so — per ARCHITECTURE.md
+// — we must never rebuild while the user is typing into one of its text boxes.
+// Rebuilds triggered from elsewhere wait until focus leaves them; structural
+// handlers rebuild directly (their buttons are never typed into).
 
 import { newId, nextUnusedColor } from '../document.js';
+import { hotkeyClashes } from '../tools/event-hotkeys.js';
 
 export function initializeClassManager(app, containerElement) {
-  containerElement.innerHTML = `
-    <h2>Classes</h2>
-    <div class="registry-list class-list"></div>
-    <button type="button" class="add-registry-entry add-class-button">+ Add class</button>
-    <h2 class="event-types-heading">Event types</h2>
-    <div class="registry-list event-type-list"></div>
-    <button type="button" class="add-registry-entry add-event-type-button">+ Add event type</button>
-  `;
-
-  const classList = containerElement.querySelector('.class-list');
-  const eventTypeList = containerElement.querySelector('.event-type-list');
-
-  containerElement.querySelector('.add-class-button')
-    .addEventListener('click', () => addClass(app, rebuildClasses));
-  containerElement.querySelector('.add-event-type-button')
-    .addEventListener('click', () => addEventType(app, rebuildEventTypes));
-
-  function rebuildClasses() {
-    buildClassList(app, classList);
+  function isUserTypingHere() {
+    const activeElement = document.activeElement;
+    return Boolean(activeElement) && containerElement.contains(activeElement)
+      && activeElement.tagName === 'INPUT' && activeElement.type === 'text';
   }
-  function rebuildEventTypes() {
-    buildEventTypeList(app, eventTypeList);
+
+  function rebuild() {
+    const layer = app.selectedLayer;
+    containerElement.replaceChildren();
+    const hasRegistry = layer?.type === 'coordinates' || layer?.type === 'frames';
+    containerElement.hidden = !hasRegistry;
+    if (!hasRegistry) return;
+    if (layer.type === 'coordinates') buildClassesPanel(app, layer, containerElement, rebuild);
+    else buildEventTypesPanel(app, layer, containerElement, rebuild);
   }
-  function rebuildAll() {
-    rebuildClasses();
-    rebuildEventTypes();
+
+  function rebuildIfIdle() {
+    if (!isUserTypingHere()) rebuild();
   }
 
   // Rebuild when the change came from elsewhere (import, undo/redo, another
-  // panel), but not while the user is typing into one of our own inputs.
-  app.addEventListener('document-changed', () => {
-    if (!containerElement.contains(document.activeElement)) rebuildAll();
-  });
+  // panel, selecting another layer), but not while the user is typing here.
+  app.addEventListener('document-changed', rebuildIfIdle);
+  app.addEventListener('layers-changed', rebuildIfIdle);
+  app.viewer.addEventListener('layers-changed', rebuildIfIdle);
 
-  rebuildAll();
+  rebuild();
+}
+
+/* ---------- Shared pieces ---------- */
+
+function buildPanelHeading(title, explanation) {
+  const heading = document.createElement('h2');
+  heading.textContent = title;
+  const hint = document.createElement('p');
+  hint.className = 'registry-hint';
+  hint.textContent = explanation;
+  return [heading, hint];
+}
+
+function buildSwatch(entry, title, app) {
+  const swatch = document.createElement('input');
+  swatch.type = 'color';
+  swatch.className = 'swatch';
+  swatch.value = normalizeColor(entry.color);
+  swatch.title = title;
+  swatch.addEventListener('input', () => {
+    entry.color = swatch.value;
+    app.markDocumentChanged();
+  });
+  return swatch;
+}
+
+function buildNameInput(entry, title, app) {
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'name-input';
+  nameInput.value = entry.name;
+  nameInput.title = title;
+  nameInput.setAttribute('aria-label', title);
+  nameInput.addEventListener('input', () => {
+    entry.name = nameInput.value;
+    app.markDocumentChanged();
+  });
+  return nameInput;
+}
+
+function buildDeleteButton(title, onClick) {
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'delete-button';
+  deleteButton.title = title;
+  deleteButton.textContent = '✕';
+  deleteButton.addEventListener('click', onClick);
+  return deleteButton;
+}
+
+function buildAddButton(text, onClick) {
+  const addButton = document.createElement('button');
+  addButton.type = 'button';
+  addButton.className = 'add-registry-entry';
+  addButton.textContent = text;
+  addButton.addEventListener('click', onClick);
+  return addButton;
 }
 
 /* ---------- Classes ---------- */
 
-function buildClassList(app, listElement) {
-  listElement.textContent = '';
-  const classes = app.annotationDocument.classes;
+function buildClassesPanel(app, layer, containerElement, rebuild) {
+  containerElement.append(...buildPanelHeading('Classes',
+    'Labels for this layer\'s annotations. New annotations get the chosen class.'));
 
-  listElement.appendChild(buildNoClassRow(app, listElement));
+  const list = document.createElement('div');
+  list.className = 'registry-list';
+  list.setAttribute('role', 'radiogroup');
+  list.setAttribute('aria-label', 'Class for new annotations');
+  const radioName = `active-class-${layer.id}`;
+  const activeId = layer.activeClass?.id ?? null;
 
-  for (const classEntry of classes) {
-    listElement.appendChild(buildClassRow(app, listElement, classEntry));
+  list.appendChild(buildClassRow(app, layer, null, radioName, activeId === null, rebuild));
+  for (const classEntry of layer.classes) {
+    list.appendChild(buildClassRow(app, layer, classEntry, radioName, activeId === classEntry.id, rebuild));
   }
+  containerElement.appendChild(list);
+  containerElement.appendChild(buildAddButton('+ Add class', () => addClass(app, layer, rebuild)));
 }
 
-function buildNoClassRow(app, listElement) {
+/** A class's row, or with classEntry null the "No class" row. */
+function buildClassRow(app, layer, classEntry, radioName, isActive, rebuild) {
   const row = document.createElement('div');
-  row.className = 'registry-row no-class-row';
+  row.className = classEntry ? 'registry-row class-row' : 'registry-row no-class-row';
 
-  const selector = document.createElement('button');
-  selector.type = 'button';
-  selector.className = 'active-selector';
-  selector.title = 'Create new items without a class';
-  selector.classList.toggle('active', app.activeClassId === null || app.activeClassId === undefined);
-  selector.addEventListener('click', () => setActiveClass(app, listElement, null));
-  row.appendChild(selector);
+  const radio = document.createElement('input');
+  radio.type = 'radio';
+  radio.name = radioName;
+  radio.className = 'active-class-radio';
+  radio.checked = isActive;
+  radio.title = classEntry ? 'Use this class for new annotations' : 'Create new annotations without a class';
+  radio.addEventListener('change', () => {
+    // The active class is UI state, not part of the document: no rebuild.
+    if (radio.checked) layer.activeClassId = classEntry?.id ?? null;
+  });
+  row.appendChild(radio);
 
-  const label = document.createElement('span');
-  label.className = 'no-class-label';
-  label.textContent = 'No class';
-  label.addEventListener('click', () => setActiveClass(app, listElement, null));
-  row.appendChild(label);
+  if (!classEntry) {
+    const label = document.createElement('span');
+    label.className = 'no-class-label';
+    label.textContent = 'No class';
+    label.addEventListener('click', () => radio.click());
+    row.appendChild(label);
+    return row;
+  }
 
+  row.appendChild(buildSwatch(classEntry, 'Class color', app));
+  row.appendChild(buildNameInput(classEntry, 'Class name', app));
+  row.appendChild(buildDeleteButton('Delete class', () => deleteClass(app, layer, classEntry, rebuild)));
   return row;
 }
 
-function buildClassRow(app, listElement, classEntry) {
-  const row = document.createElement('div');
-  row.className = 'registry-row class-row';
-
-  const selector = document.createElement('button');
-  selector.type = 'button';
-  selector.className = 'active-selector';
-  selector.title = 'Use this class for newly created items';
-  selector.classList.toggle('active', app.activeClassId === classEntry.id);
-  selector.addEventListener('click', () => setActiveClass(app, listElement, classEntry.id));
-  row.appendChild(selector);
-
-  const swatch = document.createElement('input');
-  swatch.type = 'color';
-  swatch.className = 'swatch';
-  swatch.value = normalizeColor(classEntry.color);
-  swatch.title = 'Class color';
-  swatch.addEventListener('input', () => {
-    classEntry.color = swatch.value;
-    app.markDocumentChanged();
-  });
-  row.appendChild(swatch);
-
-  const nameInput = document.createElement('input');
-  nameInput.type = 'text';
-  nameInput.className = 'name-input';
-  nameInput.value = classEntry.name;
-  nameInput.title = 'Class name';
-  nameInput.addEventListener('input', () => {
-    classEntry.name = nameInput.value;
-    app.markDocumentChanged();
-  });
-  row.appendChild(nameInput);
-
-  const deleteButton = document.createElement('button');
-  deleteButton.type = 'button';
-  deleteButton.className = 'delete-button';
-  deleteButton.title = 'Delete class';
-  deleteButton.textContent = '✕';
-  deleteButton.addEventListener('click', () =>
-    deleteClass(app, classEntry, () => buildClassList(app, listElement)));
-  row.appendChild(deleteButton);
-
-  return row;
-}
-
-function setActiveClass(app, listElement, classId) {
-  app.activeClassId = classId;
-  // Reflect the choice immediately without a rebuild (the active class is UI
-  // state, not part of the document).
-  markActiveClass(app, listElement);
-}
-
-function markActiveClass(app, listElement) {
-  const rows = listElement.querySelectorAll('.registry-row');
-  const classes = app.annotationDocument.classes;
-  rows.forEach((row, index) => {
-    const selector = row.querySelector('.active-selector');
-    if (!selector) return;
-    if (row.classList.contains('no-class-row')) {
-      selector.classList.toggle('active', app.activeClassId === null || app.activeClassId === undefined);
-    } else {
-      // Row index 0 is the "no class" row, so class rows start at index 1.
-      const classEntry = classes[index - 1];
-      selector.classList.toggle('active', !!classEntry && app.activeClassId === classEntry.id);
-    }
-  });
-}
-
-function addClass(app, rebuild) {
-  const classes = app.annotationDocument.classes;
+function addClass(app, layer, rebuild) {
+  const classes = layer.classes;
   const classEntry = {
     id: newId(),
     name: `class ${classes.length + 1}`,
@@ -173,12 +173,12 @@ function addClass(app, rebuild) {
   rebuild();
 }
 
-function deleteClass(app, classEntry, rebuild) {
-  if (isClassReferenced(app, classEntry.id)
-      && !window.confirm(`Delete class "${classEntry.name}"? Items already labelled with it keep the label but will render in a fallback color.`)) {
+function deleteClass(app, layer, classEntry, rebuild) {
+  if (layer.items.some((item) => item.classId === classEntry.id)
+      && !window.confirm(`Delete class "${classEntry.name}"? Annotations already labelled with it keep the label but will render in a fallback color.`)) {
     return;
   }
-  const classes = app.annotationDocument.classes;
+  const classes = layer.classes;
   const originalIndex = classes.indexOf(classEntry);
   if (originalIndex === -1) return;
   app.undoHistory.execute({
@@ -189,54 +189,43 @@ function deleteClass(app, classEntry, rebuild) {
   rebuild();
 }
 
-function isClassReferenced(app, classId) {
-  return app.annotationDocument.layers.some((layer) =>
-    layer.type === 'coordinates'
-    && layer.items.some((item) => item.classId === classId));
-}
-
 /* ---------- Event types ---------- */
 
-function buildEventTypeList(app, listElement) {
-  listElement.textContent = '';
-  for (const eventType of app.annotationDocument.eventTypes) {
-    listElement.appendChild(buildEventTypeRow(app, listElement, eventType));
+function buildEventTypesPanel(app, layer, containerElement, rebuild) {
+  containerElement.append(...buildPanelHeading('Event types',
+    'Press an event type\'s add key to record it on the current frame (a range takes '
+    + 'two presses: start and end), and its remove key to delete it there. Keys are case-sensitive.'));
+
+  const list = document.createElement('div');
+  list.className = 'registry-list';
+  const warningUpdaters = [];
+  const refreshWarnings = () => warningUpdaters.forEach((update) => update());
+  for (const eventType of layer.eventTypes) {
+    const { card, updateWarnings } = buildEventTypeCard(app, layer, eventType, rebuild, refreshWarnings);
+    warningUpdaters.push(updateWarnings);
+    list.appendChild(card);
   }
+  refreshWarnings();
+  containerElement.appendChild(list);
+  containerElement.appendChild(buildAddButton('+ Add event type', () => addEventType(app, layer, rebuild)));
 }
 
-function buildEventTypeRow(app, listElement, eventType) {
-  const row = document.createElement('div');
-  row.className = 'registry-row event-type-row';
+function buildEventTypeCard(app, layer, eventType, rebuild, refreshWarnings) {
+  const card = document.createElement('div');
+  card.className = 'registry-card event-type-card';
 
-  const swatch = document.createElement('input');
-  swatch.type = 'color';
-  swatch.className = 'swatch';
-  swatch.value = normalizeColor(eventType.color);
-  swatch.title = 'Event color';
-  swatch.addEventListener('input', () => {
-    eventType.color = swatch.value;
-    app.markDocumentChanged();
-  });
-  row.appendChild(swatch);
-
-  const nameInput = document.createElement('input');
-  nameInput.type = 'text';
-  nameInput.className = 'name-input';
-  nameInput.value = eventType.name;
-  nameInput.title = 'Event type name';
-  nameInput.addEventListener('input', () => {
-    eventType.name = nameInput.value;
-    app.markDocumentChanged();
-  });
-  row.appendChild(nameInput);
+  const topRow = document.createElement('div');
+  topRow.className = 'registry-row';
+  topRow.appendChild(buildSwatch(eventType, 'Event color', app));
+  topRow.appendChild(buildNameInput(eventType, 'Event type name', app));
 
   const kindSelect = document.createElement('select');
   kindSelect.className = 'kind-select';
-  kindSelect.title = 'Point (single frame) or range (a span of frames)';
-  for (const kind of ['point', 'range']) {
+  kindSelect.title = 'Point (a single frame) or range (a span of frames)';
+  for (const [value, text] of [['point', 'Point'], ['range', 'Range']]) {
     const option = document.createElement('option');
-    option.value = kind;
-    option.textContent = kind;
+    option.value = value;
+    option.textContent = text;
     kindSelect.appendChild(option);
   }
   kindSelect.value = eventType.kind;
@@ -244,40 +233,65 @@ function buildEventTypeRow(app, listElement, eventType) {
     eventType.kind = kindSelect.value;
     app.markDocumentChanged();
   });
-  row.appendChild(kindSelect);
+  topRow.appendChild(kindSelect);
+  topRow.appendChild(buildDeleteButton('Delete event type',
+    () => deleteEventType(app, layer, eventType, rebuild)));
 
-  row.appendChild(buildHotkeyInput(app, eventType, 'addHotkey', 'Add hotkey (case-sensitive)'));
-  row.appendChild(buildHotkeyInput(app, eventType, 'removeHotkey', 'Remove hotkey (case-sensitive)'));
+  const hotkeyRow = document.createElement('div');
+  hotkeyRow.className = 'registry-row hotkey-row';
+  const addKey = buildHotkeyField(app, eventType, 'addHotkey', 'Add key', refreshWarnings);
+  const removeKey = buildHotkeyField(app, eventType, 'removeHotkey', 'Remove key', refreshWarnings);
+  hotkeyRow.append(addKey.field, removeKey.field);
 
-  const deleteButton = document.createElement('button');
-  deleteButton.type = 'button';
-  deleteButton.className = 'delete-button';
-  deleteButton.title = 'Delete event type';
-  deleteButton.textContent = '✕';
-  deleteButton.addEventListener('click', () =>
-    deleteEventType(app, eventType, () => buildEventTypeList(app, listElement)));
-  row.appendChild(deleteButton);
+  const warning = document.createElement('p');
+  warning.className = 'hotkey-warning';
 
-  return row;
+  card.append(topRow, hotkeyRow, warning);
+
+  /** Flag a key also bound by another event type, on this layer or another. */
+  function updateWarnings() {
+    const messages = [];
+    let sharedWithOtherLayers = false;
+    for (const { propertyName, input } of [addKey, removeKey]) {
+      const clashes = hotkeyClashes(app, eventType, propertyName);
+      input.classList.toggle('clashing', clashes.length > 0);
+      if (clashes.length === 0) continue;
+      const others = clashes.map(({ layer: otherLayer, eventType: other }) =>
+        otherLayer === layer ? `"${other.name}"` : `"${other.name}" on ${otherLayer.name}`);
+      messages.push(`"${eventType[propertyName]}" is also used by ${others.join(', ')}.`);
+      if (clashes.some(({ layer: otherLayer }) => otherLayer !== layer)) sharedWithOtherLayers = true;
+    }
+    if (sharedWithOtherLayers) {
+      messages.push("When layers share a key, the selected layer's wins, then the topmost's.");
+    }
+    warning.textContent = messages.join(' ');
+    warning.hidden = messages.length === 0;
+  }
+
+  return { card, updateWarnings };
 }
 
-function buildHotkeyInput(app, eventType, propertyName, title) {
+function buildHotkeyField(app, eventType, propertyName, labelText, onChange) {
+  const field = document.createElement('label');
+  field.className = 'hotkey-field';
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'hotkey-input';
   input.maxLength = 1;
-  input.title = title;
+  input.placeholder = '–';
   input.value = eventType[propertyName] ?? '';
   input.addEventListener('input', () => {
     // A single character, matched case-sensitively; empty clears the binding.
     eventType[propertyName] = input.value.length > 0 ? input.value : null;
     app.markDocumentChanged();
+    onChange();
   });
-  return input;
+  field.append(`${labelText} `, input);
+  return { field, input, propertyName };
 }
 
-function addEventType(app, rebuild) {
-  const eventTypes = app.annotationDocument.eventTypes;
+function addEventType(app, layer, rebuild) {
+  const eventTypes = layer.eventTypes;
   const eventType = {
     id: newId(),
     name: `event ${eventTypes.length + 1}`,
@@ -294,12 +308,12 @@ function addEventType(app, rebuild) {
   rebuild();
 }
 
-function deleteEventType(app, eventType, rebuild) {
-  if (isEventTypeReferenced(app, eventType.id)
+function deleteEventType(app, layer, eventType, rebuild) {
+  if (layer.items.some((item) => item.eventTypeId === eventType.id)
       && !window.confirm(`Delete event type "${eventType.name}"? Existing events of this type will remain in the annotations table.`)) {
     return;
   }
-  const eventTypes = app.annotationDocument.eventTypes;
+  const eventTypes = layer.eventTypes;
   const originalIndex = eventTypes.indexOf(eventType);
   if (originalIndex === -1) return;
   app.undoHistory.execute({
@@ -308,12 +322,6 @@ function deleteEventType(app, eventType, rebuild) {
     revert: () => eventTypes.splice(originalIndex, 0, eventType),
   });
   rebuild();
-}
-
-function isEventTypeReferenced(app, eventTypeId) {
-  return app.annotationDocument.layers.some((layer) =>
-    layer.type === 'frames'
-    && layer.items.some((item) => item.eventTypeId === eventTypeId));
 }
 
 /* ---------- Helpers ---------- */

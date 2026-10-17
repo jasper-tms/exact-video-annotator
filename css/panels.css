@@ -2,6 +2,7 @@
    (Layer tab and detail styles live in style.css.) */
 
 .layer-type-video        { color: var(--accent);  border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.layer-type-image        { color: var(--accent);  border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .layer-type-coordinates  { color: #6fcf97;        border-color: color-mix(in srgb, #6fcf97 55%, var(--border)); }
 .layer-type-segmentation { color: #c58af9;        border-color: color-mix(in srgb, #c58af9 55%, var(--border)); }
 .layer-type-frames       { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }

@@ -1,133 +1,136 @@
-// The annotations table — points, shapes, and temporal events — with sortable
-// columns, click-to-select / jump-to-frame, and a per-row delete button. By
-// default it lists only the layer selected in the tab bar; the "Show all
-// annotations" checkbox in the panel's top right corner widens it to every
-// annotation layer. Each row shows the item's metadata (key-value pairs that
-// plugins or people attach to it), edited through a dialog opened from the
-// row's ✎ button. The rebuilt region holds no text inputs (the checkbox
-// lives in the static header and the metadata editor in its own dialog), so
-// it is safe to rebuild wholesale on document/layer/selection changes; only
-// the per-frame highlight is updated cheaply (toggling a class) as playback
-// moves, never a full rebuild.
+// The annotations table: the annotations of the layer selected in the tab bar,
+// with columns that suit its type — kind, class, coordinates and frame for a
+// coordinates layer; event type and frames for a frames layer — sortable,
+// with click-to-select / jump-to-frame and a per-row delete button. It hides
+// itself for layers that hold no annotations (video, image, segmentation).
+// Each row shows the item's metadata (key-value pairs that plugins or people
+// attach to it), edited through a dialog opened from the row's ✎ button. The
+// table holds no text inputs (the metadata editor is its own dialog), so it is
+// safe to rebuild wholesale on document/layer/selection changes; only the
+// per-frame highlight is updated cheaply (toggling a class) as playback moves,
+// never a full rebuild.
 
-const COLUMNS = [
-  { key: 'layer', label: 'Layer', sortable: true },
-  { key: 'kind', label: 'Kind', sortable: true },
-  { key: 'data', label: 'Data (x,y)', sortable: false },
-  { key: 'label', label: 'Label', sortable: true },
-  { key: 'metadata', label: 'Metadata', sortable: true },
-  { key: 'frame', label: 'Frame(s)', sortable: true },
-];
+const COLUMNS_BY_LAYER_TYPE = {
+  coordinates: [
+    { key: 'kind', label: 'Kind', sortable: true },
+    { key: 'label', label: 'Class', sortable: true },
+    { key: 'data', label: 'Coordinates (x, y)', sortable: false },
+    { key: 'frame', label: 'Frame', sortable: true },
+    { key: 'metadata', label: 'Metadata', sortable: true },
+  ],
+  frames: [
+    { key: 'label', label: 'Event type', sortable: true },
+    { key: 'frame', label: 'Frames', sortable: true },
+    { key: 'metadata', label: 'Metadata', sortable: true },
+  ],
+};
 
 export function initializeAnnotationsTable(app, containerElement) {
   containerElement.innerHTML = `
-    <div class="annotations-header">
-      <h2 class="annotations-heading">0 annotations</h2>
-      <label class="show-all-annotations">
-        <input type="checkbox" class="show-all-annotations-checkbox"> Show all annotations
-      </label>
-    </div>
+    <h2 class="annotations-heading">Annotations</h2>
     <div class="annotations-scroll">
       <table class="annotations-table">
-        <thead>
-          <tr>
-            ${COLUMNS.map((column) => column.sortable
-              ? `<th data-column="${column.key}" class="sortable">${column.label}</th>`
-              : `<th>${column.label}</th>`).join('')}
-            <th class="delete-column"></th>
-          </tr>
-        </thead>
+        <thead><tr></tr></thead>
         <tbody></tbody>
       </table>
     </div>
   `;
 
   const heading = containerElement.querySelector('.annotations-heading');
-  const showAllCheckbox = containerElement.querySelector('.show-all-annotations-checkbox');
-  const headerCells = [...containerElement.querySelectorAll('th[data-column]')];
+  const headerRow = containerElement.querySelector('.annotations-table thead tr');
   const tableBody = containerElement.querySelector('.annotations-table tbody');
-
-  showAllCheckbox.addEventListener('change', () => rebuild());
 
   // Multi-key sort with recency, in the spirit of the reference tool: the most
   // recently clicked column is primary, earlier clicks act as tiebreakers.
-  // Default: frame ascending.
-  const sortRecency = ['frame', 'layer', 'kind', 'label', 'metadata'];
-  const sortDirection = { layer: 1, kind: 1, label: 1, metadata: 1, frame: 1 };
+  // Default: frame ascending. Kept per layer type, since their columns differ.
+  const sortStateByLayerType = {};
+  for (const [layerType, columns] of Object.entries(COLUMNS_BY_LAYER_TYPE)) {
+    const sortableKeys = columns.filter((column) => column.sortable).map((column) => column.key);
+    sortStateByLayerType[layerType] = {
+      recency: ['frame', ...sortableKeys.filter((key) => key !== 'frame')],
+      direction: Object.fromEntries(sortableKeys.map((key) => [key, 1])),
+    };
+  }
 
   // Rows currently rendered, kept so 'frame-changed' can re-highlight and
   // 'annotation-dragged' can refresh one Data cell cheaply, without
   // rebuilding: each entry pairs a <tr> with its row descriptor.
   let renderedRows = [];
   let renderedCoordinatePadWidth = 0;
+  let renderedLayerType = null;
 
-  for (const headerCell of headerCells) {
-    headerCell.addEventListener('click', () => {
-      const column = headerCell.dataset.column;
-      if (sortRecency[0] === column) {
-        sortDirection[column] *= -1;   // re-click the primary column: flip it
-      } else {
-        sortRecency.splice(sortRecency.indexOf(column), 1);
-        sortRecency.unshift(column);
+  /** Rebuild the header cells when the selected layer's type changes. */
+  function buildHeader(layerType) {
+    if (renderedLayerType === layerType) return;
+    renderedLayerType = layerType;
+    headerRow.replaceChildren();
+    for (const column of COLUMNS_BY_LAYER_TYPE[layerType]) {
+      const headerCell = document.createElement('th');
+      headerCell.textContent = column.label;
+      if (column.sortable) {
+        headerCell.dataset.column = column.key;
+        headerCell.className = 'sortable';
+        headerCell.addEventListener('click', () => {
+          const { recency, direction } = sortStateByLayerType[layerType];
+          if (recency[0] === column.key) {
+            direction[column.key] *= -1;   // re-click the primary column: flip it
+          } else {
+            recency.splice(recency.indexOf(column.key), 1);
+            recency.unshift(column.key);
+          }
+          rebuild();
+        });
       }
-      rebuild();
-    });
-  }
-
-  function collectRows() {
-    const selectedLayerId = app.selectedLayer?.id ?? null;
-    const rows = [];
-    for (const layer of app.annotationLayers) {
-      // Unless "Show all annotations" is checked, list only the layer
-      // selected in the tab bar (nothing when the video layer is selected).
-      if (!showAllCheckbox.checked && layer.id !== selectedLayerId) continue;
-      for (const item of layer.items) {
-        rows.push(describeItem(app, layer, item));
-      }
+      headerRow.appendChild(headerCell);
     }
-    return rows;
-  }
-
-  function compareRows(a, b) {
-    for (const column of sortRecency) {
-      const result = compareByColumn(column, a, b) * sortDirection[column];
-      if (result !== 0) return result;
-    }
-    return 0;
+    const deleteHeader = document.createElement('th');
+    deleteHeader.className = 'delete-column';
+    headerRow.appendChild(deleteHeader);
   }
 
   function rebuild() {
-    const rows = collectRows();
-    rows.sort(compareRows);
+    const layer = app.selectedLayer;
+    const hasTable = Boolean(layer) && layer.type in COLUMNS_BY_LAYER_TYPE;
+    containerElement.hidden = !hasTable;
+    renderedRows = [];
+    if (!hasTable) return;
+
+    buildHeader(layer.type);
+    const { recency, direction } = sortStateByLayerType[layer.type];
+    const rows = layer.items.map((item) => describeItem(layer, item));
+    rows.sort((a, b) => {
+      for (const column of recency) {
+        const result = compareByColumn(column, a, b) * direction[column];
+        if (result !== 0) return result;
+      }
+      return 0;
+    });
     const coordinatePadWidth = computeCoordinatePadWidth(rows);
 
-    const countText = `${rows.length} annotation${rows.length === 1 ? '' : 's'}`;
-    const selectedLayer = app.selectedLayer;
-    heading.textContent = showAllCheckbox.checked || !selectedLayer
-      ? countText
-      : `${countText} on ${selectedLayer.name}`;
+    const noun = layer.type === 'frames' ? 'event' : 'annotation';
+    heading.textContent = `${rows.length} ${noun}${rows.length === 1 ? '' : 's'}`;
 
-    for (const headerCell of headerCells) {
+    for (const headerCell of headerRow.querySelectorAll('th[data-column]')) {
       const column = headerCell.dataset.column;
-      const isPrimary = sortRecency[0] === column;
+      const isPrimary = recency[0] === column;
       headerCell.classList.toggle('sorted', isPrimary);
       headerCell.dataset.direction = isPrimary
-        ? (sortDirection[column] > 0 ? 'ascending' : 'descending')
+        ? (direction[column] > 0 ? 'ascending' : 'descending')
         : '';
     }
 
     tableBody.textContent = '';
-    renderedRows = [];
     renderedCoordinatePadWidth = coordinatePadWidth;
 
+    const columns = COLUMNS_BY_LAYER_TYPE[layer.type];
     if (rows.length === 0) {
       const emptyRow = document.createElement('tr');
       const cell = document.createElement('td');
       cell.className = 'empty-message';
-      cell.colSpan = COLUMNS.length + 1;
-      cell.textContent = showAllCheckbox.checked
-        ? 'No annotations yet.'
-        : 'No annotations on this layer.';
+      cell.colSpan = columns.length + 1;
+      cell.textContent = layer.type === 'frames'
+        ? 'No events on this layer yet. Press an event type\'s add key to record one.'
+        : 'No annotations on this layer yet.';
       emptyRow.appendChild(cell);
       tableBody.appendChild(emptyRow);
       return;
@@ -135,7 +138,7 @@ export function initializeAnnotationsTable(app, containerElement) {
 
     const currentFrame = app.currentFrame;
     for (const rowData of rows) {
-      const tableRow = buildTableRow(app, rowData, coordinatePadWidth);
+      const tableRow = buildTableRow(app, columns, rowData, coordinatePadWidth);
       if (isRowSelected(app, rowData)) tableRow.classList.add('selected');
       tableRow.classList.toggle('at-current-frame', rowData.includesFrame(currentFrame));
       tableBody.appendChild(tableRow);
@@ -181,13 +184,13 @@ export function initializeAnnotationsTable(app, containerElement) {
  * Flatten a single item into a table-row descriptor, resolving its human-facing
  * text and a predicate for whether it occupies a given frame.
  */
-function describeItem(app, layer, item) {
-  if (layer.type === 'frames') return describeEvent(app, layer, item);
-  return describeSpatialItem(app, layer, item);
+function describeItem(layer, item) {
+  if (layer.type === 'frames') return describeEvent(layer, item);
+  return describeSpatialItem(layer, item);
 }
 
-function describeSpatialItem(app, layer, item) {
-  const className = findName(app.annotationDocument.classes, item.classId);
+function describeSpatialItem(layer, item) {
+  const classEntry = layer.findClass(item.classId);
   // A frame-agnostic item (frame === null) applies to every frame.
   const isFrameAgnostic = item.frame === null;
   return {
@@ -195,10 +198,10 @@ function describeSpatialItem(app, layer, item) {
     itemId: item.id,
     isEvent: false,
     frame: item.frame,
-    layerName: layer.name,
     kindText: item.kind,
     vertices: item.vertices,
-    labelText: className ?? item.name ?? '',
+    labelText: classEntry?.name ?? item.name ?? '',
+    labelColor: classEntry?.color ?? null,
     item,
     metadataText: formatMetadata(item.metadata),
     framesText: isFrameAgnostic ? 'all' : String(item.frame),
@@ -207,19 +210,18 @@ function describeSpatialItem(app, layer, item) {
   };
 }
 
-function describeEvent(app, layer, item) {
-  const eventType = app.annotationDocument.eventTypes.find((type) => type.id === item.eventTypeId);
-  const eventTypeName = eventType?.name ?? '(unknown event type)';
+function describeEvent(layer, item) {
+  const eventType = layer.findEventType(item.eventTypeId);
   const inProgress = item.endFrame === null;
   return {
     layerId: layer.id,
     itemId: item.id,
     isEvent: true,
     frame: item.startFrame,
-    layerName: layer.name,
-    kindText: eventTypeName,
+    kindText: '',
     vertices: [],
-    labelText: '',
+    labelText: eventType?.name ?? '(unknown event type)',
+    labelColor: eventType?.color ?? null,
     item,
     metadataText: formatMetadata(item.metadata),
     framesText: formatEventFrames(item),
@@ -269,26 +271,48 @@ function formatEventFrames(item) {
 
 /* ---------- Row rendering ---------- */
 
-function buildTableRow(app, rowData, coordinatePadWidth) {
+function buildTableRow(app, columns, rowData, coordinatePadWidth) {
   const tableRow = document.createElement('tr');
 
-  tableRow.appendChild(textCell(rowData.layerName, 'layer-cell'));
-  tableRow.appendChild(textCell(rowData.kindText, 'kind-cell'));
-  tableRow.appendChild(textCell(formatCoordinatesCell(rowData.vertices, coordinatePadWidth), 'data-cell'));
-  tableRow.appendChild(textCell(rowData.labelText, 'label-cell'));
-  const metadataCell = textCell(rowData.metadataText, 'metadata-cell');
-  const editButton = document.createElement('button');
-  editButton.type = 'button';
-  editButton.className = 'edit-metadata-button';
-  editButton.title = 'Edit metadata';
-  editButton.textContent = '✎';
-  editButton.addEventListener('click', (event) => {
-    event.stopPropagation();   // editing must not also select / jump
-    openMetadataEditor(app, rowData.item);
-  });
-  metadataCell.prepend(editButton);
-  tableRow.appendChild(metadataCell);
-  tableRow.appendChild(textCell(rowData.framesText, 'frame-cell'));
+  for (const column of columns) {
+    switch (column.key) {
+      case 'kind':
+        tableRow.appendChild(textCell(rowData.kindText, 'kind-cell'));
+        break;
+      case 'label': {
+        const labelCell = textCell(rowData.labelText, 'label-cell');
+        if (rowData.labelColor) {
+          const dot = document.createElement('span');
+          dot.className = 'label-color-dot';
+          dot.style.background = rowData.labelColor;
+          labelCell.prepend(dot);
+        }
+        tableRow.appendChild(labelCell);
+        break;
+      }
+      case 'data':
+        tableRow.appendChild(textCell(formatCoordinatesCell(rowData.vertices, coordinatePadWidth), 'data-cell'));
+        break;
+      case 'frame':
+        tableRow.appendChild(textCell(rowData.framesText, 'frame-cell'));
+        break;
+      case 'metadata': {
+        const metadataCell = textCell(rowData.metadataText, 'metadata-cell');
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'edit-metadata-button';
+        editButton.title = 'Edit metadata';
+        editButton.textContent = '✎';
+        editButton.addEventListener('click', (event) => {
+          event.stopPropagation();   // editing must not also select / jump
+          openMetadataEditor(app, rowData.item);
+        });
+        metadataCell.prepend(editButton);
+        tableRow.appendChild(metadataCell);
+        break;
+      }
+    }
+  }
 
   const deleteCell = document.createElement('td');
   deleteCell.className = 'delete-cell';
@@ -344,7 +368,6 @@ function compareByColumn(column, a, b) {
   switch (column) {
     // Frame-agnostic items (frame === null) sort before frame 0.
     case 'frame': return (a.frame ?? -Infinity) - (b.frame ?? -Infinity);
-    case 'layer': return compareText(a.layerName, b.layerName);
     case 'kind': return compareText(a.kindText, b.kindText);
     case 'label': return compareText(a.labelText, b.labelText);
     case 'metadata': return compareText(a.metadataText, b.metadataText);
@@ -354,13 +377,6 @@ function compareByColumn(column, a, b) {
 
 function compareText(a, b) {
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
-}
-
-/* ---------- Helpers ---------- */
-
-function findName(entries, id) {
-  if (id === null || id === undefined) return null;
-  return entries.find((entry) => entry.id === id)?.name ?? null;
 }
 
 /* ---------- Metadata ---------- */

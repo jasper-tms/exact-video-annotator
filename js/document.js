@@ -1,10 +1,15 @@
 // The annotation document: the single source of truth for every annotation,
-// class, and event type. Annotation layers hold references INTO this
-// structure (their `items` arrays are the same objects), so serializing the
-// document captures everything. See ARCHITECTURE.md for the full shape.
+// class, and event type. Each annotation layer carries its own label registry
+// (a coordinates layer its `classes`, a frames layer its `eventTypes`), and
+// view layers hold references INTO this structure (their `items` and registry
+// arrays are the same objects), so serializing the document captures
+// everything. See ARCHITECTURE.md for the full shape.
 
 export const DOCUMENT_FORMAT = 'exact-video-annotator';
-export const DOCUMENT_VERSION = 1;
+export const DOCUMENT_VERSION = 2;
+// Version 1 kept one document-wide `classes` and `eventTypes` list; it is
+// still read, by copying those lists into the layers (see migrateVersion1).
+const READABLE_VERSIONS = [1, 2];
 
 // A short prose note, written into every export, telling a reader who has only
 // the file (and no knowledge of this format) the conventions they cannot
@@ -36,8 +41,6 @@ export function nextUnusedColor(existingEntries) {
 export function createEmptyDocument() {
   return {
     video: null,   // provenance, filled at export time
-    classes: [],
-    eventTypes: [],
     // Whether an integer (x, y) names a pixel's top-left corner (0, the
     // default) or its center (0.5) — see the video layer's draw(), the only
     // place this is consulted. Locked in the UI once any coordinates
@@ -46,9 +49,10 @@ export function createEmptyDocument() {
     integerCoordinateOffset: 0,
     layers: [
       { id: newId(), type: 'coordinates', name: 'Coordinates', visible: true, opacity: 1,
-        transform: { scale: 1, offsetX: 0, offsetY: 0 }, allowFractionalCoordinates: false, items: [] },
+        transform: { scale: 1, offsetX: 0, offsetY: 0 }, allowFractionalCoordinates: false,
+        classes: [], items: [] },
       { id: newId(), type: 'frames', name: 'Frames', visible: true, opacity: 1,
-        transform: { scale: 1, offsetX: 0, offsetY: 0 }, items: [] },
+        transform: { scale: 1, offsetX: 0, offsetY: 0 }, eventTypes: [], items: [] },
     ],
   };
 }
@@ -61,15 +65,14 @@ export function documentToJson(annotationDocument, videoInformation = null) {
     version: DOCUMENT_VERSION,
     conventions: DOCUMENT_CONVENTIONS,
     video: videoInformation ?? annotationDocument.video ?? null,
-    classes: annotationDocument.classes,
-    eventTypes: annotationDocument.eventTypes,
     integerCoordinateOffset: annotationDocument.integerCoordinateOffset ?? 0,
-    layers: annotationDocument.layers.map((layer) => ({
-      ...layer,
+    layers: annotationDocument.layers.map(({ items, ...settings }) => ({
+      // The layer's settings and label registry first, its items last.
+      ...settings,
       // Never export an in-progress range event (endFrame === null).
-      items: layer.type === 'frames'
-        ? layer.items.filter((item) => item.endFrame !== null)
-        : layer.items,
+      items: settings.type === 'frames'
+        ? items.filter((item) => item.endFrame !== null)
+        : items,
     })),
   };
 }
@@ -82,9 +85,11 @@ export function documentFromJson(jsonObject) {
   if (jsonObject.format !== DOCUMENT_FORMAT) {
     throw new Error(`Not an ${DOCUMENT_FORMAT} file (format: ${jsonObject.format ?? 'missing'}).`);
   }
-  if (jsonObject.version !== DOCUMENT_VERSION) {
-    throw new Error(`Unsupported document version ${jsonObject.version} (this app reads version ${DOCUMENT_VERSION}).`);
+  if (!READABLE_VERSIONS.includes(jsonObject.version)) {
+    throw new Error(`Unsupported document version ${jsonObject.version} `
+      + `(this app reads versions ${READABLE_VERSIONS.join(' and ')}).`);
   }
+  if (jsonObject.version === 1) jsonObject = migrateVersion1(jsonObject);
 
   const integerCoordinateOffset = jsonObject.integerCoordinateOffset ?? 0;
   if (integerCoordinateOffset !== 0 && integerCoordinateOffset !== 0.5) {
@@ -93,33 +98,9 @@ export function documentFromJson(jsonObject) {
 
   const annotationDocument = {
     video: jsonObject.video ?? null,
-    classes: [],
-    eventTypes: [],
     integerCoordinateOffset,
     layers: [],
   };
-
-  for (const entry of asArray(jsonObject.classes, 'classes')) {
-    annotationDocument.classes.push({
-      id: asString(entry.id, 'class id'),
-      name: asString(entry.name, 'class name'),
-      color: asString(entry.color, 'class color'),
-    });
-  }
-
-  for (const entry of asArray(jsonObject.eventTypes, 'eventTypes')) {
-    if (entry.kind !== 'point' && entry.kind !== 'range') {
-      throw new Error(`Event type "${entry.name}" has kind "${entry.kind}"; expected "point" or "range".`);
-    }
-    annotationDocument.eventTypes.push({
-      id: asString(entry.id, 'event type id'),
-      name: asString(entry.name, 'event type name'),
-      kind: entry.kind,
-      color: asString(entry.color, 'event type color'),
-      addHotkey: entry.addHotkey ?? null,
-      removeHotkey: entry.removeHotkey ?? null,
-    });
-  }
 
   for (const layer of asArray(jsonObject.layers, 'layers')) {
     if (!['coordinates', 'segmentation', 'frames'].includes(layer.type)) {
@@ -139,12 +120,18 @@ export function documentFromJson(jsonObject) {
       items: [],
     };
     if (layer.type === 'coordinates') {
+      parsedLayer.classes = asArray(layer.classes ?? [], `classes of layer "${parsedLayer.name}"`)
+        .map(parseClass);
       parsedLayer.allowFractionalCoordinates = layer.allowFractionalCoordinates === true;
       // Left out when the file doesn't say, so the layer (or its plugin) picks
       // the default rather than this parser.
       if (layer.offFrameOpacity !== undefined) {
         parsedLayer.offFrameOpacity = clampNumber(layer.offFrameOpacity, 0, 1);
       }
+    }
+    if (layer.type === 'frames') {
+      parsedLayer.eventTypes = asArray(layer.eventTypes ?? [], `event types of layer "${parsedLayer.name}"`)
+        .map(parseEventType);
     }
     // A plugin layer stores its annotations as the plain type above and names
     // its plugin here, so a build without that plugin can still read the file.
@@ -166,6 +153,59 @@ export function documentFromJson(jsonObject) {
   }
 
   return annotationDocument;
+}
+
+function parseClass(entry) {
+  return {
+    id: asString(entry.id, 'class id'),
+    name: asString(entry.name, 'class name'),
+    color: asString(entry.color, 'class color'),
+  };
+}
+
+function parseEventType(entry) {
+  if (entry.kind !== 'point' && entry.kind !== 'range') {
+    throw new Error(`Event type "${entry.name}" has kind "${entry.kind}"; expected "point" or "range".`);
+  }
+  return {
+    id: asString(entry.id, 'event type id'),
+    name: asString(entry.name, 'event type name'),
+    kind: entry.kind,
+    color: asString(entry.color, 'event type color'),
+    addHotkey: entry.addHotkey ?? null,
+    removeHotkey: entry.removeHotkey ?? null,
+  };
+}
+
+/** A version 1 file as version 2, with the document-wide classes copied into
+    the coordinates layers and the event types into the frames layers. The
+    only layer of its type gets the whole list. When there are several, each
+    gets the entries its own items use, or the whole list if it uses none, so
+    an empty layer keeps the labels it was set up with. */
+function migrateVersion1(jsonObject) {
+  const { classes = [], eventTypes = [], ...rest } = jsonObject;
+  const layers = asArray(jsonObject.layers, 'layers');
+  const registryFor = (layer, entries, referenceKey) => {
+    const isOnlyLayerOfItsType = layers.filter((other) => other.type === layer.type).length === 1;
+    const usedIds = new Set((Array.isArray(layer.items) ? layer.items : [])
+      .map((item) => item[referenceKey]));
+    const used = asArray(entries, `version 1 ${referenceKey} registry`)
+      .filter((entry) => usedIds.has(entry.id));
+    return (isOnlyLayerOfItsType || used.length === 0 ? entries : used).map((entry) => ({ ...entry }));
+  };
+  return {
+    ...rest,
+    version: 2,
+    layers: layers.map((layer) => {
+      if (layer.type === 'coordinates') {
+        return { ...layer, classes: registryFor(layer, classes, 'classId') };
+      }
+      if (layer.type === 'frames') {
+        return { ...layer, eventTypes: registryFor(layer, eventTypes, 'eventTypeId') };
+      }
+      return layer;
+    }),
+  };
 }
 
 function parseItem(layerType, item) {

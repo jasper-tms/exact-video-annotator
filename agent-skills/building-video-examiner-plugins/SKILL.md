@@ -237,6 +237,8 @@ and polylines. Its properties you will use most:
 
 ```js
 layer.items;          // the layer's annotations, the same array as in the file
+layer.classes;        // the layer's classes ({ id, name, color }), likewise;
+                      // push to it to add one, then app.markDocumentChanged()
 layer.options;        // your settings; replace the object, then dispatch
                       // 'layer-changed' to save them into the file
 layer.getItem(itemId);
@@ -256,7 +258,7 @@ pixels, `[x, y]`, and frames are counted from 0):
 { id, frame,                         // the frame it belongs to, or null for every frame
   kind: 'point' | 'line' | 'polyline',
   vertices: [[x, y], ...],           // a point has exactly one
-  classId,                           // the label, an id in app.annotationDocument.classes, or null
+  classId,                           // the label, an id in layer.classes, or null
   name,                              // or null
   metadata }                         // your own key-value pairs: { key: text, number or true/false }
 ```
@@ -296,7 +298,7 @@ moved or scaled the two are the same.
 The most useful parts of `app` (it is also an event target):
 
 ```js
-app.annotationDocument;            // the whole annotations file: classes, layers, items
+app.annotationDocument;            // the whole annotations file: layers, their classes, items
 app.currentFrame;                  // the frame on screen
 app.seekToFrame(frame);
 app.selection;                     // { layerId, itemId, vertexIndex } or null

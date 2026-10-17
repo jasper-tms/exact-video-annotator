@@ -15,7 +15,8 @@ export class FramesLayer extends Layer {
   /**
    * @param {object} documentLayer  The frames layer from the annotation
    *   document ({ id, type: 'frames', name, visible, opacity, transform,
-   *   items }). Its `items` array is adopted by reference.
+   *   eventTypes, items }). Its `items` and `eventTypes` arrays are adopted
+   *   by reference.
    */
   constructor(documentLayer) {
     super({ id: documentLayer.id, type: 'frames', name: documentLayer.name });
@@ -23,7 +24,16 @@ export class FramesLayer extends Layer {
     this.opacity = documentLayer.opacity;
     this.transform = { ...documentLayer.transform };
     this.documentLayer = documentLayer;
+    // The layer's own event types, the same array as the document layer's
+    // (created empty for a document layer made before layers had their own).
+    documentLayer.eventTypes ??= [];
+    this.eventTypes = documentLayer.eventTypes;
     this.items = documentLayer.items;
+  }
+
+  /** The event type entry with this id in this layer's event types, or null. */
+  findEventType(eventTypeId) {
+    return this.eventTypes.find((entry) => entry.id === eventTypeId) ?? null;
   }
 
   /* Events have no spatial presence. */

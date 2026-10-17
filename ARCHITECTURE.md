@@ -278,9 +278,10 @@ and Frames layers have no spatial drawing (their `draw` is a no-op).
 ```js
 createEmptyDocument() → AnnotationDocument
 documentToJson(annotationDocument) → plain object (stable, versioned)
-documentFromJson(jsonObject) → AnnotationDocument (validates; no migration —
-                                                    an old-schema file is
-                                                    rejected outright)
+documentFromJson(jsonObject) → AnnotationDocument (validates; reads version 1
+                                                    by copying its document-wide
+                                                    classes and event types into
+                                                    the layers — see below)
 newId() → unique string id
 autosaveKey(videoInformation) → string      // keyed by video name + size
 saveAutosave(key, annotationDocument) → whether it saved; loadAutosave(key); clearAutosave(key)
@@ -289,7 +290,7 @@ saveAutosave(key, annotationDocument) → whether it saved; loadAutosave(key); c
 ```
 
 Document shape (also the export JSON, `format: "exact-video-annotator"`,
-`version: 1`):
+`version: 2`):
 
 ```js
 {
@@ -300,10 +301,6 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
   conventions: "Vertices are [x, y] pixels …",
   video: { name, numberOfFrames, frameRate, frameIndexIsExact,
            durationSeconds, width, height },      // provenance, written on export
-  classes: [ { id, name, color } ],               // label registry for spatial items
-  eventTypes: [ { id, name, kind: 'point' | 'range', color,
-                  addHotkey, removeHotkey } ],    // hotkeys are single characters,
-                                                  // case-sensitive (may be null)
   // Whether an integer (x, y) names a pixel's top-left corner (0, the
   // default) or its center (0.5); consulted by the media layers' draw()
   // (video and image).
@@ -312,6 +309,8 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
     { id, type: 'coordinates', name, visible, opacity, transform,
       allowFractionalCoordinates, offFrameOpacity,
       plugin: { id: 'line-fitter', options: { … } },   // optional, see "Plugins"
+      classes: [ { id, name, color } ],          // this layer's labels; items'
+                                                 // classId refers to these
       items: [ { id, frame, kind: 'point' | 'line' | 'polyline',
                  vertices: [[x, y], ...], classId, name, metadata } ] },
       // frame: integer (anchored to that frame) or null (frame-agnostic —
@@ -332,12 +331,24 @@ Document shape (also the export JSON, `format: "exact-video-annotator"`,
       // stub: pixel-wise segmentation is not implemented yet, so items is
       // always empty — nothing produces or parses items for this type
     { id, type: 'frames', name,
+      eventTypes: [ { id, name, kind: 'point' | 'range', color,
+                      addHotkey, removeHotkey } ],   // this layer's event types;
+                                                     // hotkeys are single
+                                                     // characters, case-sensitive
+                                                     // (may be null)
       items: [ { id, eventTypeId, startFrame, endFrame, metadata } ] },
       // point events: endFrame === startFrame
       // an in-progress range has endFrame === null (never exported)
   ],
 }
 ```
+
+Each layer has its own label registry, so a class or event type id only needs
+to be unique within its layer, and the same name may mean different things on
+two layers. Version 1 files had one document-wide `classes` and `eventTypes`
+list instead; reading one copies them into the layers (the only layer of its
+type gets the whole list; with several, each gets the entries its items use,
+or the whole list if it uses none).
 
 `classId` and `name` on items are both optional (`null`). `metadata` is an
 item's own key-value pairs (`{ key: text | number | true/false }`, `{}` when
@@ -413,7 +424,6 @@ app.closeImageLayer(layerId);        // remove an image layer, free its bitmap
 app.closeMediaLayer(layerId);        // close media of either kind (dispatches)
 app.annotationDocument; app.undoHistory;
 app.activeLayer;                     // the annotation layer new items go into
-app.activeClassId;                   // class assigned to newly created items
 app.selection;                       // { layerId, itemId, vertexIndex } | null
 app.setSelection(selectionOrNull);
 app.setActiveTool(toolId);           // toolId null clears the tool (drag pans);
@@ -499,25 +509,36 @@ app events; they never poll.
   confirmation — an image holds no annotations). When several videos are open,
   the primary's tab carries a small clock icon. A plugin layer's badge
   names its plugin rather than its storage type.
-- `js/ui/layer-detail.js` — settings for the selected layer (visibility,
-  opacity, scale/offset transform; playback facts for a video layer — its own
-  engine's, not necessarily the primary's; dimensions for an image layer; a
-  plugin's own settings, built by the plugin). With several videos open, a follower video's panel adds the
-  link controls ("follow the primary by" frame index or timestamp, plus the
-  offset in frames or seconds), and the primary's says it is the primary.
-- `js/ui/annotations-table.js` — items of the selected layer by default, or of
-  every annotation layer when "Show all annotations" (top right of the panel)
-  is checked; sortable; click a row to select + jump to its frame; per-row
+- `js/ui/layer-detail.js` — settings for the selected layer, in titled
+  sections with one setting per line (label left, control right): its name
+  (editable in place) and type badge; Display (opacity — on a coordinates
+  layer, this frame's and other frames') and Position (scale/offset), both
+  omitted for a frames layer, whose events never draw; Drawing (fractional
+  coordinates) on a coordinates layer; Playback sync on a follower video
+  ("follow the primary by" frame index or timestamp, plus the offset in frames
+  or seconds; the primary's says it is the primary); File facts for a video
+  (its own engine's, not necessarily the primary's) or image, with the
+  engine tier and codec folded under "Technical details"; and a plugin's own
+  settings, built by the plugin.
+- `js/ui/annotations-table.js` — the selected layer's items, with columns for
+  its type (kind, class, coordinates, frame for a coordinates layer; event
+  type and frames for a frames layer); hidden for layers that hold no
+  annotations; sortable; click a row to select + jump to its frame; per-row
   delete.
-- `js/ui/class-manager.js` — edit `classes` and `eventTypes` (name, color,
-  hotkeys); pick `app.activeClassId`.
+- `js/ui/class-manager.js` — edit the selected layer's label registry: a
+  coordinates layer's `classes` (and pick `layer.activeClassId`, the class
+  newly drawn items on that layer get — UI state, not saved) or a frames
+  layer's `eventTypes` (name, color, kind, hotkeys, warning when a key is
+  bound twice); hidden for other layers.
 - `js/ui/toasts.js` — transient notifications; `initializeToasts` wires
   `app.showToast`.
 - `js/tools/event-hotkeys.js` — global key handling for event types
   (add/remove keys, range start/stop semantics from
   simple-html-tools/video-annotator: first press starts a range at the current
   frame, second press ends it; point events are single-press; remove key
-  deletes the event overlapping the current frame).
+  deletes the event overlapping the current frame). Every frames layer's keys
+  are live at once, each recording into its own layer; when layers bind the
+  same key, the selected layer wins, then the topmost.
 
 ## Plugins
 
@@ -1150,5 +1171,5 @@ reaches the outside world only through the stamp `build.mjs` writes and the
 [Releasing](README.md#releasing) and [What is live right
 now](README.md#what-is-live-right-now).
 
-This is unrelated to the annotation document's `version: 1`, which numbers the
+This is unrelated to the annotation document's `version: 2`, which numbers the
 JSON format rather than the app.
