@@ -2596,8 +2596,9 @@ window.addEventListener('resize', reflectScrollToggle);
 window.visualViewport?.addEventListener('resize', reflectScrollToggle);
 reflectScrollToggle();
 
-// The drop hint stays centered on whatever part of the canvas the panel has
-// not slid up over (see #drop-hint in style.css).
+// The drop hint stays centered on, and the drag-over box and bottom readouts
+// stay within, whatever part of the canvas the panel has not slid up over
+// (see #drop-hint in style.css).
 function reflectStageCoveredByPanel() {
   const coveredHeight = Math.max(0,
     stageContainer.getBoundingClientRect().bottom - slidingPanel.getBoundingClientRect().top);

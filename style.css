@@ -126,11 +126,13 @@ button:focus:not(:focus-visible) { outline: none; }
 /* The hovered-pixel readout, overlaid on the bottom-right of the stage (the
    mirror of the bottom-left indexing status), sitting just above the
    transport's Frame/Time readout below the canvas. Empty until the cursor is
-   over the canvas; the empty box stays invisible via :empty. */
+   over the canvas; the empty box stays invisible via :empty. Kept clear of
+   whatever the sliding panel has been raised over (see #drop-hint), so it
+   rides up with the panel's top edge. */
 #hovered-pixel-label {
   position: absolute;
   right: 10px;
-  bottom: 10px;
+  bottom: calc(10px + var(--stage-covered-by-panel-height, 0px));
   padding: 4px 10px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface) 85%, transparent);
@@ -1112,11 +1114,12 @@ label.setting-label { cursor: pointer; }
 }
 
 /* Indexing progress, bottom-left of the stage. Stays up while a clip plays
-   whose index is still growing underneath it. */
+   whose index is still growing underneath it. Rides up with the sliding
+   panel's top edge, like the hovered-pixel readout. */
 #indexing-status {
   position: absolute;
   left: 10px;
-  bottom: 10px;
+  bottom: calc(10px + var(--stage-covered-by-panel-height, 0px));
   padding: 4px 10px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface) 85%, transparent);
