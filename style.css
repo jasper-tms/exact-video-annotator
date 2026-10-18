@@ -180,6 +180,69 @@ button:focus:not(:focus-visible) { outline: none; }
 
 /* ---------- Settings modal ---------- */
 
+/* ---------- Pill slider (js/ui/pill-slider.js) ---------- */
+
+/* Equal columns, each as wide as the longest option, so the thumb (one
+   column wide) lines up with every option. */
+.pill-slider {
+  --pill-slider-padding: 3px;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(var(--pill-slider-option-count), 1fr);
+  padding: var(--pill-slider-padding);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+/* The sliding highlight: one column wide, moved over the chosen option by
+   its index. */
+.pill-slider-thumb {
+  --pill-slider-column-width:
+    calc((100% - 2 * var(--pill-slider-padding)) / var(--pill-slider-option-count));
+  position: absolute;
+  top: var(--pill-slider-padding);
+  bottom: var(--pill-slider-padding);
+  left: calc(var(--pill-slider-padding)
+    + var(--pill-slider-selected-index, 0) * var(--pill-slider-column-width));
+  width: var(--pill-slider-column-width);
+  border-radius: 999px;
+  background: #4a4c57;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  transition: left 0.18s ease;
+}
+
+.pill-slider-option {
+  position: relative;
+  z-index: 1;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.pill-slider-option:hover {
+  background: none;
+  color: var(--text);
+}
+
+.pill-slider-option.selected,
+.pill-slider-option.selected:hover {
+  color: #fff;
+}
+
+/* Locked: dimmed, and clicks explain why instead of changing the value. */
+.pill-slider.locked { opacity: 0.45; }
+.pill-slider.locked .pill-slider-option { cursor: not-allowed; }
+.pill-slider.locked .pill-slider-option:not(.selected):hover { color: var(--text-dim); }
+
 .settings-dialog {
   min-width: 280px;
   padding: 16px;
@@ -189,6 +252,9 @@ button:focus:not(:focus-visible) { outline: none; }
   border-radius: 8px;
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
 }
+
+/* Focusing the panel itself on open (see openSettings) draws no ring. */
+.settings-dialog:focus { outline: none; }
 
 .settings-dialog::backdrop {
   background: rgba(0, 0, 0, 0.5);
@@ -220,16 +286,11 @@ button:focus:not(:focus-visible) { outline: none; }
   font-size: 12px;
 }
 
-.coordinate-select-wrapper {
-  position: relative;
-  display: inline-block;
-}
-
-.coordinate-select-lock-overlay {
-  display: none;
-  position: absolute;
-  inset: 0;
-  cursor: not-allowed;
+/* A setting's name with its pill slider beneath it. */
+.settings-pill-slider-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 .settings-dialog-close {
@@ -469,28 +530,18 @@ button:focus:not(:focus-visible) { outline: none; }
 /* ---------- Second-media prompt ---------- */
 
 .second-media-question {
-  margin: 0 0 12px;
-  font-size: 13px;
+  margin: 0 0 14px;
+  font-size: 16px;
 }
 
 .second-media-choices {
-  display: flex;
-  gap: 10px;
+  display: grid;
   margin-bottom: 14px;
 }
 
-/* Two side-by-side toggle buttons; the highlighted one gets an accent outline. */
-.second-media-choice {
-  flex: 1 1 0;
-  padding: 12px 10px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.second-media-choice.selected {
-  border-color: var(--accent);
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
+.second-media-choices .pill-slider-option {
+  padding: 9px 12px;
+  font-size: 18px;
 }
 
 .second-media-save {
@@ -498,7 +549,7 @@ button:focus:not(:focus-visible) { outline: none; }
   align-items: center;
   gap: 8px;
   margin-bottom: 16px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-dim);
 }
 
@@ -506,6 +557,11 @@ button:focus:not(:focus-visible) { outline: none; }
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.second-media-buttons button {
+  padding: 6px 14px;
+  font-size: 15px;
 }
 
 /* ---------- Tool rail + canvas, with the sliding panel below the canvas ---------- */

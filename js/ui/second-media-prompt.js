@@ -1,8 +1,8 @@
 // The little question box shown when a second piece of media — a video or an
-// image — is dropped (or opened) while one is already open and the "Second
-// media" setting is "Prompt". It asks whether to add the new media as a layer
-// or replace the current one, and offers to remember the answer. Built once on
-// first use and reused. The question names the kind already open ("A video is
+// image — is dropped (or opened) while one is already open and the "How to
+// load a second image/video" setting is "Ask". It asks whether to add the new
+// media as a layer or replace the current one, and offers to remember the
+// answer. Built once on first use and reused. The question names the kind already open ("A video is
 // already loaded" / "An image is already loaded"), but the two choices behave
 // identically for video and image.
 //
@@ -17,25 +17,17 @@
 // clicks the backdrop), so we key off explicit handlers rather than the native
 // form-submission focus dance.
 
+import { createPillSlider } from './pill-slider.js';
+
 let dialogElement = null;
 let questionElement = null;
-let addLayerButton = null;
-let replaceButton = null;
+// The pill slider holding the choice: 'new-layer' (default) or 'replace'.
+let choiceSlider = null;
 let saveCheckbox = null;
 let resolveCurrent = null;
-// The currently highlighted choice: 'new-layer' (default) or 'replace'.
-let currentChoice = 'new-layer';
-
-function selectChoice(choice) {
-  currentChoice = choice;
-  addLayerButton.classList.toggle('selected', choice === 'new-layer');
-  addLayerButton.setAttribute('aria-pressed', String(choice === 'new-layer'));
-  replaceButton.classList.toggle('selected', choice === 'replace');
-  replaceButton.setAttribute('aria-pressed', String(choice === 'replace'));
-}
 
 function confirmChoice() {
-  settle({ choice: currentChoice, save: saveCheckbox.checked });
+  settle({ choice: choiceSlider.getValue(), save: saveCheckbox.checked });
 }
 
 function buildDialog() {
@@ -46,23 +38,16 @@ function buildDialog() {
   questionElement.className = 'second-media-question';
   dialogElement.appendChild(questionElement);
 
-  // The two mutually exclusive choices, presented as a side-by-side pair of
-  // toggle buttons that only set the choice. Add layer sits on the left because
-  // it is the default.
-  const choices = document.createElement('div');
-  choices.className = 'second-media-choices';
-  const makeChoice = (value, text) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'second-media-choice';
-    button.textContent = text;
-    button.addEventListener('click', () => selectChoice(value));
-    choices.appendChild(button);
-    return button;
-  };
-  addLayerButton = makeChoice('new-layer', 'Add layer');
-  replaceButton = makeChoice('replace', 'Replace');
-  dialogElement.appendChild(choices);
+  // The two mutually exclusive choices, as a pill slider that only sets the
+  // choice. New layer sits on the left because it is the default, in the same
+  // order as in the Settings row.
+  choiceSlider = createPillSlider({
+    options: [['new-layer', 'New layer'], ['replace', 'Replace layer']],
+    value: 'new-layer',
+    label: 'What the new media should do',
+  });
+  choiceSlider.element.classList.add('second-media-choices');
+  dialogElement.appendChild(choiceSlider.element);
 
   const saveLabel = document.createElement('label');
   saveLabel.className = 'second-media-save';
@@ -124,7 +109,7 @@ export function promptForSecondMediaChoice(openKind) {
   questionElement.textContent = `${article} is already loaded. What should this one do?`;
 
   // Reset to the standard defaults each time it opens.
-  selectChoice('new-layer');
+  choiceSlider.setValue('new-layer');
   saveCheckbox.checked = false;
 
   return new Promise((resolve) => {

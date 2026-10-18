@@ -18,117 +18,84 @@ import {
 } from '../plugins/private-github-loader.js';
 import { rememberedPluginName } from '../plugins/plugin-loader.js';
 import { pluginRegistryEvents } from '../plugins/registry.js';
+import { createPillSlider } from './pill-slider.js';
 
 export function initializeSettingsModal(app, triggerButtonElement) {
   const dialogElement = document.createElement('dialog');
   dialogElement.className = 'settings-dialog';
+  // Focusable (but not by Tab) so openSettings() can focus the panel itself.
+  dialogElement.tabIndex = -1;
 
   const headingElement = document.createElement('h2');
   headingElement.textContent = 'Settings';
   dialogElement.appendChild(headingElement);
 
-  /* ---- Integer coordinate convention ---- */
-
-  const coordinateRow = document.createElement('div');
-  coordinateRow.className = 'settings-row';
-  const coordinateLabel = document.createElement('label');
-  coordinateLabel.htmlFor = 'integer-coordinate-select';
-  coordinateLabel.textContent = 'Integer coordinates are:';
-  const coordinateSelect = document.createElement('select');
-  coordinateSelect.id = 'integer-coordinate-select';
-  for (const [value, text] of [['0', 'Pixel top-left corner'], ['0.5', 'Pixel center']]) {
-    const optionElement = document.createElement('option');
-    optionElement.value = value;
-    optionElement.textContent = text;
-    coordinateSelect.appendChild(optionElement);
+  // A setting whose few choices sit in a pill slider beneath its name.
+  function appendPillSliderSetting(name, tooltip, sliderOptions) {
+    const row = document.createElement('div');
+    row.className = 'settings-row settings-pill-slider-row';
+    row.title = tooltip;
+    const nameElement = document.createElement('div');
+    nameElement.textContent = `${name}:`;
+    const slider = createPillSlider({ ...sliderOptions, label: name });
+    row.append(nameElement, slider.element);
+    dialogElement.appendChild(row);
+    return slider;
   }
-  coordinateSelect.addEventListener('change', () => {
-    app.annotationDocument.integerCoordinateOffset = Number(coordinateSelect.value);
-    app.markDocumentChanged();
-  });
-
-  // A disabled <select> doesn't reliably dispatch pointer events across
-  // browsers, so it can't explain itself when clicked — this transparent
-  // overlay sits on top of it (only while locked) purely to catch that click
-  // and show why nothing happened.
-  const coordinateSelectWrapper = document.createElement('span');
-  coordinateSelectWrapper.className = 'coordinate-select-wrapper';
-  const coordinateSelectLockOverlay = document.createElement('div');
-  coordinateSelectLockOverlay.className = 'coordinate-select-lock-overlay';
-  coordinateSelectLockOverlay.addEventListener('click', () => {
-    app.showToast("Can't change when coordinate annotations have already been made", { kind: 'warning' });
-  });
-  coordinateSelectWrapper.append(coordinateSelect, coordinateSelectLockOverlay);
-
-  coordinateRow.append(coordinateLabel, coordinateSelectWrapper);
-  dialogElement.appendChild(coordinateRow);
-
-  function reflectIntegerCoordinateSelect() {
-    const hasCoordinateAnnotations = app.annotationDocument.layers.some((layer) =>
-      layer.type === 'coordinates' && layer.items.length > 0);
-    coordinateSelect.value = String(app.annotationDocument.integerCoordinateOffset ?? 0);
-    coordinateSelect.disabled = hasCoordinateAnnotations;
-    coordinateSelect.title = hasCoordinateAnnotations
-      ? 'Locked: delete every coordinates annotation to change this.'
-      : 'Whether an integer (x, y) names a pixel\'s top-left corner or its center';
-    coordinateSelectLockOverlay.style.display = hasCoordinateAnnotations ? 'block' : 'none';
-  }
-  app.addEventListener('document-changed', reflectIntegerCoordinateSelect);
-  app.addEventListener('layers-changed', reflectIntegerCoordinateSelect);
-  reflectIntegerCoordinateSelect();
 
   /* ---- Second media behavior ---- */
 
-  const secondMediaRow = document.createElement('div');
-  secondMediaRow.className = 'settings-row';
-  const secondMediaLabel = document.createElement('label');
-  secondMediaLabel.htmlFor = 'second-media-select';
-  secondMediaLabel.textContent = 'Second media:';
-  const secondMediaSelect = document.createElement('select');
-  secondMediaSelect.id = 'second-media-select';
-  secondMediaSelect.title =
-    'What to do when a second video or image is loaded while one is already open';
-  for (const [value, text] of [['prompt', 'Prompt'], ['replace', 'Replace'], ['new-layer', 'New layer']]) {
-    const optionElement = document.createElement('option');
-    optionElement.value = value;
-    optionElement.textContent = text;
-    secondMediaSelect.appendChild(optionElement);
-  }
-  secondMediaSelect.value = getSecondMediaBehavior();
-  secondMediaSelect.addEventListener('change', () => {
-    setSecondMediaBehavior(secondMediaSelect.value);
-  });
-  secondMediaRow.append(secondMediaLabel, secondMediaSelect);
-  dialogElement.appendChild(secondMediaRow);
+  const secondMediaSlider = appendPillSliderSetting('How to load a second image/video',
+    'What to do when a second video or image is loaded while one is already open', {
+      options: [['new-layer', 'New layer'], ['replace', 'Replace layer'], ['prompt', 'Ask']],
+      value: getSecondMediaBehavior(),
+      onChange: setSecondMediaBehavior,
+    });
   // The second-media prompt dialog can persist a fresh choice while this modal
-  // is closed, so openSettings() below re-reads this select every time Settings
+  // is closed, so openSettings() below re-reads this slider every time Settings
   // opens (from the toolbar button or the ＋ menu) — it is never left stale.
 
   /* ---- Synchronized playback pacing ---- */
 
-  const syncedPlaybackRow = document.createElement('div');
-  syncedPlaybackRow.className = 'settings-row';
-  const syncedPlaybackLabel = document.createElement('label');
-  syncedPlaybackLabel.htmlFor = 'synced-playback-select';
-  syncedPlaybackLabel.textContent = 'Multi-video playback:';
-  const syncedPlaybackSelect = document.createElement('select');
-  syncedPlaybackSelect.id = 'synced-playback-select';
-  syncedPlaybackSelect.title =
+  appendPillSliderSetting('Prioritize during multi-video playback',
     'When several videos play in sync and the decoders cannot quite keep up, '
-    + 'whether to skip frames to hold real-time speed or slow down to show every frame';
-  for (const [value, text] of [
-    ['realtime', 'Keep real-time speed'], ['every-frame', 'Show every frame']]) {
-    const optionElement = document.createElement('option');
-    optionElement.value = value;
-    optionElement.textContent = text;
-    syncedPlaybackSelect.appendChild(optionElement);
+    + 'whether to skip frames to hold real-time speed or slow down to show every frame', {
+      options: [['realtime', 'Real-time playback'], ['every-frame', 'Show every frame']],
+      value: getSyncedPlaybackPacing(),
+      onChange: setSyncedPlaybackPacing,
+    });
+
+  /* ---- Integer coordinate convention ---- */
+
+  const coordinateSlider = appendPillSliderSetting('Integer coordinates indicate',
+    'Whether an integer (x, y) names a pixel\'s top-left corner or its center', {
+      options: [['0', 'Pixel top-left corner'], ['0.5', 'Pixel center']],
+      value: String(app.annotationDocument.integerCoordinateOffset ?? 0),
+      onChange: (value) => {
+        app.annotationDocument.integerCoordinateOffset = Number(value);
+        app.markDocumentChanged();
+      },
+    });
+
+  // Locked while any coordinates annotation exists, since changing the
+  // convention would silently move them all; a click then explains why.
+  function reflectIntegerCoordinateSetting() {
+    const hasCoordinateAnnotations = app.annotationDocument.layers.some((layer) =>
+      layer.type === 'coordinates' && layer.items.length > 0);
+    coordinateSlider.setValue(String(app.annotationDocument.integerCoordinateOffset ?? 0));
+    coordinateSlider.setLocked(hasCoordinateAnnotations, () => {
+      app.showToast("Can't change when coordinate annotations have already been made", { kind: 'warning' });
+    });
+    // Without its own title, the slider shows the row's explanation instead.
+    if (hasCoordinateAnnotations) {
+      coordinateSlider.element.title = 'Locked: delete every coordinates annotation to change this.';
+    } else {
+      coordinateSlider.element.removeAttribute('title');
+    }
   }
-  syncedPlaybackSelect.value = getSyncedPlaybackPacing();
-  syncedPlaybackSelect.addEventListener('change', () => {
-    setSyncedPlaybackPacing(syncedPlaybackSelect.value);
-  });
-  syncedPlaybackRow.append(syncedPlaybackLabel, syncedPlaybackSelect);
-  dialogElement.appendChild(syncedPlaybackRow);
+  app.addEventListener('document-changed', reflectIntegerCoordinateSetting);
+  app.addEventListener('layers-changed', reflectIntegerCoordinateSetting);
+  reflectIntegerCoordinateSetting();
 
   /* ---- Pixel grid visibility ---- */
 
@@ -596,10 +563,16 @@ export function initializeSettingsModal(app, triggerButtonElement) {
   // surfaces (the ＋ menu's Plugins page "New…" entry) can open it and draw the
   // eye to a section with a brief flash.
   function openSettings({ flashPlugins } = {}) {
-    secondMediaSelect.value = getSecondMediaBehavior();
+    secondMediaSlider.setValue(getSecondMediaBehavior());
     renderPluginsList();
     showConnectedRepositories();
-    if (!dialogElement.open) dialogElement.showModal();
+    if (!dialogElement.open) {
+      dialogElement.showModal();
+      // showModal focuses the first control, which shows its focus ring at
+      // once. Focus the panel itself instead, so nothing is highlighted until
+      // the user presses Tab, which then moves to the first control as usual.
+      dialogElement.focus();
+    }
     if (flashPlugins) {
       pluginsSection.classList.remove('settings-flash');
       void pluginsSection.offsetWidth; // reflow so the animation restarts

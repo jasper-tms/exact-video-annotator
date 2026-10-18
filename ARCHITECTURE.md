@@ -534,6 +534,11 @@ app events; they never poll.
   bound twice); hidden for other layers.
 - `js/ui/toasts.js` — transient notifications; `initializeToasts` wires
   `app.showToast`.
+- `js/ui/pill-slider.js` — `createPillSlider`, the shared control for
+  choosing one of a few short options: a rounded track with a thumb that
+  slides under the chosen one. Used by Settings' multiple-choice rows and the
+  second-media question box; can be locked, so a click explains why instead
+  of changing the value.
 - `js/tools/event-hotkeys.js` — global key handling for event types
   (add/remove keys, range start/stop semantics from
   simple-html-tools/video-annotator: first press starts a range at the current
@@ -891,7 +896,8 @@ together beneath the annotation layers). Re-dropping an already-open clip opens
 another layer of it — two copies at different temporal offsets is a legitimate
 way to compare moments of one clip.
 
-The exception is the **"Second media" setting** (Settings modal, a global
+The exception is the **"How to load a second image/video" setting** (Settings
+modal, where its choices are New layer, Replace layer and Ask; a global
 `localStorage` preference — `js/second-media-preference.js`), which governs the
 one case where a single piece of media is already open and another is loaded:
 `'prompt'` (default) asks each time via a small dialog
@@ -1001,8 +1007,8 @@ the rest are followers seeked to match it; images take no part in this.
   - Both pacings track the same real-time master clock, so neither ever runs
     faster than real time — the setting only decides what gives **when the
     decoders cannot keep up**, a global preference
-    (`js/synced-playback-preference.js`, Settings ▸ "Multi-video playback"),
-    both keeping every painted composite exact. `'realtime'` (the default) picks
+    (`js/synced-playback-preference.js`, Settings ▸ "Prioritize during
+    multi-video playback"), both keeping every painted composite exact. `'realtime'` (the default) picks
     the next target as *wherever the clock has now reached*, dropping every frame
     between the last painted and now — so a long stall is followed by a skip
     forward that keeps the run at 1× on average (it can never exceed 1×, being

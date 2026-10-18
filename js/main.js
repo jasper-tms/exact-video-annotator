@@ -1760,9 +1760,9 @@ function loadMediaSource(source, meta, kind) {
     should join the workspace, then load it. With nothing open it is simply the
     first media. With two or more media already open, a new one always makes a
     new layer — there is no single one to replace. With exactly one open, the
-    "Second media" setting decides: 'new-layer' (stack it), 'replace' (swap out
-    that one, of either kind), or 'prompt' (ask each time, offering to remember
-    the answer). A canceled prompt loads nothing. Videos and images are treated
+    "How to load a second image/video" setting decides: 'new-layer' (stack
+    it), 'replace' (swap out that one, of either kind), or 'prompt' (ask each
+    time, offering to remember the answer). A canceled prompt loads nothing. Videos and images are treated
     identically here — the prompt just names the kind already open. */
 async function loadMediaIntoWorkspace(source, meta, kind) {
   const openMedia = app.mediaLayers;
