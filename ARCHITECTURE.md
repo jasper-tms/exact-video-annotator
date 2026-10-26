@@ -645,7 +645,11 @@ Where plugins load from:
   is added. Typing a URL there is the user's consent to run it.
 - **`?plugin=<folder URL>`** (repeatable) loads one for this visit only, after a
   confirmation (a link must not run code unasked); confirmed URLs are
-  remembered in `localStorage` so the question is asked once per URL.
+  remembered in `localStorage` so the question is asked once per URL. A
+  plugin from a link wins over one with the same id from the installed list,
+  whichever finishes loading first (`registerPlugin`'s `fromLink`), and a
+  message names both folders, so a link can try out a local copy of an
+  installed plugin.
 - **Private GitHub repositories**: canonical
   `https://plugins.examine.video/gh/…` folder URLs (added through Settings →
   "Add from private GitHub repository…", which connects; while connected,

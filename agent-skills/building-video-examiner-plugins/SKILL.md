@@ -141,8 +141,10 @@ place points, and select the layer's tab to see its "Number size" setting.
    ```
 
 2. Open examine.video with a `plugin` parameter naming your plugin's folder:
-   `https://examine.video/?plugin=http://localhost:8001/numbered-points/`
-   The app asks once whether to run the plugin's code; say yes.
+   `https://examine.video/?plugin=http://localhost:8001/numbered-points/` The
+   app asks once whether to run the plugin's code; say yes. If you have also
+   installed the plugin (next section), the copy from the link is the one used
+   for that visit.
 3. After each edit, reload the page.
 
 Problems show up as a message at the bottom of the app (for example a

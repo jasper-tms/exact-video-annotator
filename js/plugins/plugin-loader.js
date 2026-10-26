@@ -109,10 +109,12 @@ function makeHostApi(app, baseUrl) {
 }
 
 /**
- * Fetch, run and register the plugin in a folder. Resolves to its descriptor;
- * rejects with a readable message when the folder, manifest or entry is wrong.
+ * Fetch, run and register the plugin in a folder, `fromLink` when it comes
+ * from the page's ?plugin= parameter (see registerPlugin). Resolves to its
+ * descriptor and registerPlugin's result; rejects with a readable message
+ * when the folder, manifest or entry is wrong.
  */
-export async function loadPluginFromUrl(app, url) {
+export async function loadPluginFromUrl(app, url, { fromLink = false } = {}) {
   const folderUrl = normalizePluginFolderUrl(url);
   const baseUrl = fetchableFolderUrl(folderUrl);
 
@@ -143,6 +145,5 @@ export async function loadPluginFromUrl(app, url) {
     throw new Error(`the descriptor's id "${descriptor?.id}" differs from plugin.json's "${manifest.id}"`);
   }
   rememberPluginName(folderUrl, manifest.id, descriptor.name ?? manifest.name);
-  registerPlugin(descriptor, { url: folderUrl });
-  return descriptor;
+  return { descriptor, ...registerPlugin(descriptor, { url: folderUrl, fromLink }) };
 }

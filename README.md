@@ -74,6 +74,13 @@ end to end — added from the ＋ menu, two clicks committing one fitted line
 against the fixture's real pixels, re-fitting, and the JSON round trip.
 
 ```sh
+node test/plugin-priority-test.mjs
+```
+
+A plugin from a `?plugin=` link wins over an installed plugin with the same id,
+whichever of the two finishes loading first.
+
+```sh
 node test/growing-index-test.mjs
 ```
 

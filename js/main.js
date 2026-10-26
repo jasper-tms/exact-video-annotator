@@ -1422,20 +1422,31 @@ app.addKeyHandler((event) => {
 // Plugins in the user's installed list (Settings → Plugins) load at startup and
 // whenever the list gains one. A `?plugin=<folder URL>` parameter (repeatable)
 // loads one for this visit only, after the user agrees to run its code — a
-// link should not be able to run code here unasked. See plugin-loader.js.
-const pluginLoads = new Map();        // url -> the promise of its load, while loading or loaded
+// link should not be able to run code here unasked. A plugin from a link wins
+// over an installed one with the same id, so a link can try out another copy
+// of it. See plugin-loader.js.
+const pluginLoads = new Map();        // url (and whether from a link) -> the promise of its load
 const pluginLoadErrors = new Map();   // url -> the message of its last failed load
 const APPROVED_PLUGIN_URLS_KEY = 'exact-video-annotator.approvedPluginUrls';
 let offeredGitHubReconnect = false;
 
-function loadPluginAndReport(url) {
-  if (pluginLoads.has(url)) return pluginLoads.get(url);
+function loadPluginAndReport(url, { fromLink = false } = {}) {
+  const loadKey = `${fromLink ? 'link' : 'installed'} ${url}`;
+  if (pluginLoads.has(loadKey)) return pluginLoads.get(loadKey);
   const load = (async () => {
     try {
-      await loadPluginFromUrl(app, url);
+      const { descriptor, replaced, kept } = await loadPluginFromUrl(app, url, { fromLink });
       pluginLoadErrors.delete(url);
+      // Say which copy is in use when a link's plugin and another share an id.
+      const linkFolder = fromLink ? (replaced && url) : kept;
+      const otherFolder = fromLink ? replaced : url;
+      if (linkFolder) {
+        app.showToast(`Using the "${descriptor.name ?? descriptor.id}" plugin from `
+          + `${displayPluginAddress(linkFolder)} (this page's link) instead of the one from `
+          + `${displayPluginAddress(otherFolder)}.`);
+      }
     } catch (error) {
-      pluginLoads.delete(url);   // so it is retried, e.g. after connecting GitHub
+      pluginLoads.delete(loadKey);   // so it is retried, e.g. after connecting GitHub
       if (error instanceof GitHubConnectionNeededError) {
         // Not an error to report: ask once per visit to reconnect instead.
         pluginLoadErrors.set(url, 'the GitHub connection has expired');
@@ -1449,7 +1460,7 @@ function loadPluginAndReport(url) {
         + `${displayPluginAddress(url)}: ${message}`, { kind: 'error' });
     }
   })();
-  pluginLoads.set(url, load);
+  pluginLoads.set(loadKey, load);
   return load;
 }
 
@@ -1517,7 +1528,7 @@ for (const url of new URLSearchParams(window.location.search).getAll('plugin')) 
       localStorage.setItem(APPROVED_PLUGIN_URLS_KEY, JSON.stringify([...approved, url]));
     } catch { /* not remembered; asked again next time */ }
   }
-  loadPluginAndReport(url);
+  loadPluginAndReport(url, { fromLink: true });
 }
 
 app.rebuildAnnotationLayersFromDocument();

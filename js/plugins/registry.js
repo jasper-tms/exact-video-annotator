@@ -30,19 +30,32 @@ import { lineFitterPlugin } from './line-fitter/plugin.js';
 // Plugins that ship with the app.
 const BUILT_IN_PLUGINS = [lineFitterPlugin];
 
-// id → { descriptor, url }, in registration order. `url` is the folder a
-// plugin was loaded from, or null for a built-in.
+// id → { descriptor, url, fromLink }, in registration order. `url` is the
+// folder a plugin was loaded from, or null for a built-in; `fromLink` marks
+// one loaded from the page's ?plugin= parameter.
 const registeredPlugins = new Map(
-  BUILT_IN_PLUGINS.map((plugin) => [plugin.id, { descriptor: plugin, url: null }]));
+  BUILT_IN_PLUGINS.map((plugin) => [plugin.id, { descriptor: plugin, url: null, fromLink: false }]));
 
 /** Fires 'plugin-registered' (detail: { descriptor, url }) when a plugin joins. */
 export const pluginRegistryEvents = new EventTarget();
 
-/** Add (or replace, when reloaded) a plugin. */
-export function registerPlugin(descriptor, { url = null } = {}) {
-  registeredPlugins.set(descriptor.id, { descriptor, url });
+/**
+ * Add (or replace, when reloaded) a plugin. A plugin from a ?plugin= link
+ * (`fromLink`) wins over one with the same id from anywhere else, whichever
+ * finishes loading first, so a link can try out another copy of an installed
+ * plugin.
+ * @returns {{ registered: boolean, replaced: string | null, kept: string | null }}
+ *   whether this plugin is now the one with its id, the folder of the plugin
+ *   it replaced (when loaded from another folder), and the folder of the link
+ *   plugin kept instead of it.
+ */
+export function registerPlugin(descriptor, { url = null, fromLink = false } = {}) {
+  const existing = registeredPlugins.get(descriptor.id);
+  if (existing?.fromLink && !fromLink) return { registered: false, replaced: null, kept: existing.url };
+  registeredPlugins.set(descriptor.id, { descriptor, url, fromLink });
   pluginRegistryEvents.dispatchEvent(
     new CustomEvent('plugin-registered', { detail: { descriptor, url } }));
+  return { registered: true, replaced: existing && existing.url !== url ? existing.url : null, kept: null };
 }
 
 /** Every plugin available in the ＋ menu, in listing order. */
